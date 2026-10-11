@@ -252,136 +252,140 @@ export const App: React.FC = () => {
       />
 
       {/* 視圖切換列 (可直接切換「完整表格」與「兩行卡片」) */}
-      <div className="view-mode-bar">
-        <div className="view-mode-info">
-          本組合共 <strong>{activeGroup?.items.length || 0}</strong> 檔商品
-          {wealthSummary && (
-            <div className="wealth-pnl-summary">
-              <span className="pnl-summary-item">
-                總損益{' '}
-                <strong
-                  className={
-                    wealthSummary.totalPnl > 0
-                      ? 'color-up'
-                      : wealthSummary.totalPnl < 0
-                      ? 'color-down'
-                      : 'color-neutral'
-                  }
-                >
-                  {wealthSummary.totalPnl > 0 ? '+' : ''}
-                  {Math.round(wealthSummary.totalPnl).toLocaleString()}元
-                </strong>
-              </span>
-              <span className="pnl-summary-divider">•</span>
-              <span className="pnl-summary-item">
-                報酬率{' '}
-                <strong
-                  className={
-                    wealthSummary.returnPercent > 0
-                      ? 'color-up'
-                      : wealthSummary.returnPercent < 0
-                      ? 'color-down'
-                      : 'color-neutral'
-                  }
-                >
-                  {wealthSummary.returnPercent > 0 ? '+' : ''}
-                  {wealthSummary.returnPercent.toFixed(2)}%
-                </strong>
-              </span>
+      <div className={`view-mode-bar ${viewMode === 'card' ? 'view-mode-card' : 'view-mode-table'}`}>
+        <div className="view-mode-header-row">
+          <div className="view-mode-count">
+            本組合共 <strong>{activeGroup?.items.length || 0}</strong> 檔商品
+          </div>
+          <div className="view-mode-toggle">
+            <span className="view-toggle-label">檢視模式：</span>
+            <div className="toggle-pill-group">
+              <button
+                className={`toggle-pill ${viewMode === 'table' ? 'active' : ''}`}
+                onClick={() => handleToggleViewMode('table')}
+                title="橫向滑動完整表格 (固定商品欄位)"
+              >
+                ⊞ 完整表格
+              </button>
+              <button
+                className={`toggle-pill ${viewMode === 'card' ? 'active' : ''}`}
+                onClick={() => handleToggleViewMode('card')}
+                title="手機兩行式精簡卡片 (無需左右滑動)"
+              >
+                ▤ 兩行卡片
+              </button>
             </div>
-          )}
-          {marketIndices && (
-            <div className="market-indices-summary">
-              {marketIndices.TSE && (
-                <div className="index-pill">
-                  <span className="index-label">加權</span>
-                  <span
-                    className={`index-val ${
-                      marketIndices.TSE.change > 0
-                        ? 'color-up'
-                        : marketIndices.TSE.change < 0
-                        ? 'color-down'
-                        : 'color-neutral'
-                    }`}
-                  >
-                    {marketIndices.TSE.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                  <span
-                    className={`index-chg ${
-                      marketIndices.TSE.change > 0
-                        ? 'color-up'
-                        : marketIndices.TSE.change < 0
-                        ? 'color-down'
-                        : 'color-neutral'
-                    }`}
-                  >
-                    {marketIndices.TSE.change > 0
-                      ? `▲${marketIndices.TSE.change.toFixed(2)}`
-                      : marketIndices.TSE.change < 0
-                      ? `▼${Math.abs(marketIndices.TSE.change).toFixed(2)}`
-                      : '0.00'}
-                    {' '}
-                    ({marketIndices.TSE.changePercent > 0 ? '+' : ''}
-                    {marketIndices.TSE.changePercent.toFixed(2)}%)
-                  </span>
-                </div>
-              )}
-              {marketIndices.OTC && (
-                <div className="index-pill">
-                  <span className="index-label">櫃買</span>
-                  <span
-                    className={`index-val ${
-                      marketIndices.OTC.change > 0
-                        ? 'color-up'
-                        : marketIndices.OTC.change < 0
-                        ? 'color-down'
-                        : 'color-neutral'
-                    }`}
-                  >
-                    {marketIndices.OTC.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                  <span
-                    className={`index-chg ${
-                      marketIndices.OTC.change > 0
-                        ? 'color-up'
-                        : marketIndices.OTC.change < 0
-                        ? 'color-down'
-                        : 'color-neutral'
-                    }`}
-                  >
-                    {marketIndices.OTC.change > 0
-                      ? `▲${marketIndices.OTC.change.toFixed(2)}`
-                      : marketIndices.OTC.change < 0
-                      ? `▼${Math.abs(marketIndices.OTC.change).toFixed(2)}`
-                      : '0.00'}
-                    {' '}
-                    ({marketIndices.OTC.changePercent > 0 ? '+' : ''}
-                    {marketIndices.OTC.changePercent.toFixed(2)}%)
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        <div className="view-mode-toggle">
-          <span className="view-toggle-label">檢視模式：</span>
-          <div className="toggle-pill-group">
-            <button
-              className={`toggle-pill ${viewMode === 'table' ? 'active' : ''}`}
-              onClick={() => handleToggleViewMode('table')}
-              title="橫向滑動完整表格 (固定商品欄位)"
-            >
-              ⊞ 完整表格
-            </button>
-            <button
-              className={`toggle-pill ${viewMode === 'card' ? 'active' : ''}`}
-              onClick={() => handleToggleViewMode('card')}
-              title="手機兩行式精簡卡片 (無需左右滑動)"
-            >
-              ▤ 兩行卡片
-            </button>
           </div>
         </div>
+
+        {wealthSummary && (
+          <div className="wealth-pnl-summary">
+            <span className="pnl-summary-item">
+              總損益{' '}
+              <strong
+                className={
+                  wealthSummary.totalPnl > 0
+                    ? 'color-up'
+                    : wealthSummary.totalPnl < 0
+                    ? 'color-down'
+                    : 'color-neutral'
+                }
+              >
+                {wealthSummary.totalPnl > 0 ? '+' : ''}
+                {Math.round(wealthSummary.totalPnl).toLocaleString()}元
+              </strong>
+            </span>
+            <span className="pnl-summary-divider">•</span>
+            <span className="pnl-summary-item">
+              報酬率{' '}
+              <strong
+                className={
+                  wealthSummary.returnPercent > 0
+                    ? 'color-up'
+                    : wealthSummary.returnPercent < 0
+                    ? 'color-down'
+                    : 'color-neutral'
+                }
+              >
+                {wealthSummary.returnPercent > 0 ? '+' : ''}
+                {wealthSummary.returnPercent.toFixed(2)}%
+              </strong>
+            </span>
+          </div>
+        )}
+
+        {marketIndices && (
+          <div className="market-indices-summary">
+            {marketIndices.TSE && (
+              <div className="index-pill">
+                <span className="index-label">加權</span>
+                <span
+                  className={`index-val ${
+                    marketIndices.TSE.change > 0
+                      ? 'color-up'
+                      : marketIndices.TSE.change < 0
+                      ? 'color-down'
+                      : 'color-neutral'
+                  }`}
+                >
+                  {marketIndices.TSE.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span
+                  className={`index-chg ${
+                    marketIndices.TSE.change > 0
+                      ? 'color-up'
+                      : marketIndices.TSE.change < 0
+                      ? 'color-down'
+                      : 'color-neutral'
+                  }`}
+                >
+                  {marketIndices.TSE.change > 0
+                    ? `▲${marketIndices.TSE.change.toFixed(2)}`
+                    : marketIndices.TSE.change < 0
+                    ? `▼${Math.abs(marketIndices.TSE.change).toFixed(2)}`
+                    : '0.00'}
+                  {' '}
+                  ({marketIndices.TSE.changePercent > 0 ? '+' : ''}
+                  {marketIndices.TSE.changePercent.toFixed(2)}%)
+                </span>
+              </div>
+            )}
+            {marketIndices.OTC && (
+              <div className="index-pill">
+                <span className="index-label">櫃買</span>
+                <span
+                  className={`index-val ${
+                    marketIndices.OTC.change > 0
+                      ? 'color-up'
+                      : marketIndices.OTC.change < 0
+                      ? 'color-down'
+                      : 'color-neutral'
+                  }`}
+                >
+                  {marketIndices.OTC.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span
+                  className={`index-chg ${
+                    marketIndices.OTC.change > 0
+                      ? 'color-up'
+                      : marketIndices.OTC.change < 0
+                      ? 'color-down'
+                      : 'color-neutral'
+                  }`}
+                >
+                  {marketIndices.OTC.change > 0
+                    ? `▲${marketIndices.OTC.change.toFixed(2)}`
+                    : marketIndices.OTC.change < 0
+                    ? `▼${Math.abs(marketIndices.OTC.change).toFixed(2)}`
+                    : '0.00'}
+                  {' '}
+                  ({marketIndices.OTC.changePercent > 0 ? '+' : ''}
+                  {marketIndices.OTC.changePercent.toFixed(2)}%)
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <main className="main-content">

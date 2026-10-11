@@ -356,36 +356,79 @@ body {
 }
 
 .view-mode-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 24px;
   background-color: var(--bg-main);
   border-bottom: 1px solid var(--border-color);
   font-size: 13px;
-  gap: 16px;
-  overflow-x: auto;
-  scrollbar-width: none;
   transition: background-color 0.2s ease;
 }
 
-.view-mode-bar::-webkit-scrollbar {
+/* 完整表格模式 (桌面寬螢幕保持單行橫向展示) */
+.view-mode-bar.view-mode-table {
+  display: flex;
+  align-items: center;
+  padding: 8px 24px;
+  gap: 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.view-mode-bar.view-mode-table::-webkit-scrollbar {
   display: none;
 }
 
-.view-mode-info {
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  white-space: nowrap;
-  gap: 10px;
-  color: var(--text-muted);
+.view-mode-bar.view-mode-table .view-mode-header-row {
+  display: contents;
 }
 
-.wealth-sync-tag {
-  font-size: 12px;
-  color: var(--color-orange);
+.view-mode-bar.view-mode-table .view-mode-count {
+  color: var(--text-muted);
   white-space: nowrap;
+}
+
+.view-mode-bar.view-mode-table .view-mode-count strong {
+  color: var(--text-main);
+}
+
+.view-mode-bar.view-mode-table .view-mode-toggle {
+  margin-left: auto;
+  flex-shrink: 0;
+  order: 99;
+}
+
+/* 兩行卡片模式 (分三行：第1行商品數與檢視模式、第2行總損益與報酬率、第3行加權與櫃買指數) */
+.view-mode-bar.view-mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 10px 16px;
+  gap: 8px;
+}
+
+.view-mode-bar.view-mode-card .view-mode-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.view-mode-bar.view-mode-card .view-mode-count {
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.view-mode-bar.view-mode-card .view-mode-count strong {
+  color: var(--text-main);
+}
+
+.view-mode-bar.view-mode-card .wealth-pnl-summary {
+  align-self: flex-start;
+}
+
+.view-mode-bar.view-mode-card .market-indices-summary {
+  align-self: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .wealth-pnl-summary {
@@ -1207,7 +1250,36 @@ body {
     width: 140px;
   }
   .view-mode-bar {
-    padding: 8px 16px;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    padding: 10px 16px !important;
+    gap: 8px !important;
+  }
+  .view-mode-bar .view-mode-header-row {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    width: 100% !important;
+  }
+  .view-mode-bar .view-mode-toggle {
+    margin-left: 0 !important;
+    order: unset !important;
+  }
+  .view-mode-bar .wealth-pnl-summary {
+    align-self: flex-start !important;
+  }
+  .view-mode-bar .market-indices-summary {
+    align-self: flex-start !important;
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+  }
+  .index-pill {
+    padding: 2.5px 8px !important;
+    font-size: 12.5px !important;
+  }
+  .index-chg {
+    font-size: 11px !important;
   }
   .main-content {
     padding: 10px 12px;
@@ -1220,5 +1292,11 @@ body {
   }
   .metric-cell {
     min-width: 60px;
+  }
+}
+
+@media (max-width: 420px) {
+  .view-toggle-label {
+    display: none;
   }
 }
