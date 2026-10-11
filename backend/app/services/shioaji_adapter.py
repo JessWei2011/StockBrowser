@@ -559,7 +559,7 @@ class ShioajiAdapter:
                         bid=round(new_last - tick, 2),
                         ask=round(new_last + tick, 2),
                         total_volume=new_vol,
-                        is_simulated=(code == "2330"),  # 盤後測試若包含 2330 則展示試撮星號 * 效果
+                        is_simulated=is_taiwan_trial_matching(),
                         source_ts=datetime.now(timezone.utc).isoformat(),
                         data_status="live"
                     )
