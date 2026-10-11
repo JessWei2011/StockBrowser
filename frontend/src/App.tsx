@@ -246,46 +246,44 @@ export const App: React.FC = () => {
         <div className="view-mode-info">
           本組合共 <strong>{activeGroup?.items.length || 0}</strong> 檔商品
           {(activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿' || activeGroup?.isSystemGroup) && (
-            <>
-              <span className="wealth-sync-tag">
-                (永豐 API 持股自動同步)
+            <span className="wealth-sync-tag">
+              (永豐 API 持股自動同步)
+            </span>
+          )}
+          {wealthSummary && (
+            <div className="wealth-pnl-summary">
+              <span className="pnl-summary-item">
+                總損益{' '}
+                <strong
+                  className={
+                    wealthSummary.totalPnl > 0
+                      ? 'color-up'
+                      : wealthSummary.totalPnl < 0
+                      ? 'color-down'
+                      : 'color-neutral'
+                  }
+                >
+                  {wealthSummary.totalPnl > 0 ? '+' : ''}
+                  {Math.round(wealthSummary.totalPnl).toLocaleString()}元
+                </strong>
               </span>
-              {wealthSummary && (
-                <div className="wealth-pnl-summary">
-                  <span className="pnl-summary-item">
-                    總損益{' '}
-                    <strong
-                      className={
-                        wealthSummary.totalPnl > 0
-                          ? 'color-up'
-                          : wealthSummary.totalPnl < 0
-                          ? 'color-down'
-                          : 'color-neutral'
-                      }
-                    >
-                      {wealthSummary.totalPnl > 0 ? '+' : ''}
-                      {Math.round(wealthSummary.totalPnl).toLocaleString()}元
-                    </strong>
-                  </span>
-                  <span className="pnl-summary-divider">•</span>
-                  <span className="pnl-summary-item">
-                    報酬率{' '}
-                    <strong
-                      className={
-                        wealthSummary.returnPercent > 0
-                          ? 'color-up'
-                          : wealthSummary.returnPercent < 0
-                          ? 'color-down'
-                          : 'color-neutral'
-                      }
-                    >
-                      {wealthSummary.returnPercent > 0 ? '+' : ''}
-                      {wealthSummary.returnPercent.toFixed(2)}%
-                    </strong>
-                  </span>
-                </div>
-              )}
-            </>
+              <span className="pnl-summary-divider">•</span>
+              <span className="pnl-summary-item">
+                報酬率{' '}
+                <strong
+                  className={
+                    wealthSummary.returnPercent > 0
+                      ? 'color-up'
+                      : wealthSummary.returnPercent < 0
+                      ? 'color-down'
+                      : 'color-neutral'
+                  }
+                >
+                  {wealthSummary.returnPercent > 0 ? '+' : ''}
+                  {wealthSummary.returnPercent.toFixed(2)}%
+                </strong>
+              </span>
+            </div>
           )}
         </div>
         <div className="view-mode-toggle">
