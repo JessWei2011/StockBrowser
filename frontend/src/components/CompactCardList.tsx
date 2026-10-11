@@ -15,9 +15,18 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
   onRemoveItem,
   onMoveItem,
 }) => {
-  const formatPrice = (val: number | null | undefined): string => {
+  const formatPrice = (val: number | null | undefined, isSim?: boolean): React.ReactNode => {
     if (val === null || val === undefined || isNaN(val)) return '—';
-    return val.toFixed(2);
+    const text = val.toFixed(2);
+    if (isSim) {
+      return (
+        <>
+          <span className="sim-asterisk" title="試撮階段">*</span>
+          {text}
+        </>
+      );
+    }
+    return text;
   };
 
   const formatVolume = (val: number | null | undefined): string => {
@@ -48,6 +57,10 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
         const last = q?.last ?? null;
         const chg = q?.change ?? null;
         const pct = q?.changePercent ?? null;
+        const isSimulated = q?.isSimulated ?? false;
+        const isAttention = q?.isAttention ?? false;
+        const dispositionLevel = q?.dispositionLevel ?? 0;
+        const dispositionPeriod = q?.dispositionPeriod ?? null;
 
         // 1. 核心漲跌顏色判定 (紅漲、綠跌、平盤中性灰)
         let changeClass = 'color-neutral';
@@ -72,6 +85,9 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
           changeClass = 'color-down'; // 跌停必定為綠
         }
 
+        // 4. 處置與注意標籤文字
+        const dispText = dispositionPeriod ? `處置 ${dispositionPeriod}` : '處置';
+
         return (
           <div key={item.id} className="flat-stock-item">
             {/* 上半行：商品識別 (左) + 核心即時現價與漲跌 (右) */}
@@ -79,17 +95,27 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
               <div className="flat-stock-id">
                 <span className="flat-code">{item.code}</span>
                 <span className="flat-name">{item.name || q?.name || ''}</span>
+                {dispositionLevel > 0 && (
+                  <span className="stock-badge badge-disposition" title={dispositionPeriod ? `處置股票 (期間: ${dispositionPeriod})` : '處置股票'}>
+                    [{dispText}]
+                  </span>
+                )}
+                {dispositionLevel === 0 && isAttention && (
+                  <span className="stock-badge badge-attention" title="注意股票">
+                    [注意]
+                  </span>
+                )}
                 <span className="flat-tag">{item.exchange}</span>
               </div>
 
               <div className="flat-price-display">
                 {badgeClass ? (
                   <span className={`flat-price-pill ${badgeClass}`}>
-                    {formatPrice(last)}
+                    {formatPrice(last, isSimulated)}
                   </span>
                 ) : (
                   <span className={`flat-price-val ${getPriceClass(last, prev)}`}>
-                    {formatPrice(last)}
+                    {formatPrice(last, isSimulated)}
                   </span>
                 )}
 

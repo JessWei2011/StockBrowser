@@ -13,7 +13,17 @@ class QuoteStore:
         self._dirty_codes: set[str] = set()
         self._server_version: int = 0
 
-    def init_or_get_quote(self, code: str, name: str = "", exchange: str = "TSE", security_type: str = "STOCK") -> QuoteState:
+    def init_or_get_quote(
+        self,
+        code: str,
+        name: str = "",
+        exchange: str = "TSE",
+        security_type: str = "STOCK",
+        is_simulated: bool = False,
+        is_attention: bool = False,
+        disposition_level: int = 0,
+        disposition_period: Optional[str] = None
+    ) -> QuoteState:
         with self._lock:
             if code not in self._quotes:
                 self._quotes[code] = QuoteState(
@@ -23,7 +33,11 @@ class QuoteStore:
                     securityType=security_type,
                     receivedAt=now_iso(),
                     dataStatus="initializing",
-                    revision=0
+                    revision=0,
+                    isSimulated=is_simulated,
+                    isAttention=is_attention,
+                    dispositionLevel=disposition_level,
+                    dispositionPeriod=disposition_period
                 )
             return self._quotes[code]
 
@@ -50,6 +64,10 @@ class QuoteStore:
         previous_close: Optional[float] = None,
         source_ts: Optional[str] = None,
         data_status: Optional[DataStatus] = None,
+        is_simulated: Optional[bool] = None,
+        is_attention: Optional[bool] = None,
+        disposition_level: Optional[int] = None,
+        disposition_period: Optional[str] = None,
     ) -> bool:
         """
         更新特定個股報價，若有變動則標記 dirty，增加 revision。
@@ -133,6 +151,22 @@ class QuoteStore:
 
             if source_ts is not None and source_ts != current.sourceTs:
                 current.sourceTs = source_ts
+                changed = True
+
+            if is_simulated is not None and is_simulated != current.isSimulated:
+                current.isSimulated = is_simulated
+                changed = True
+
+            if is_attention is not None and is_attention != current.isAttention:
+                current.isAttention = is_attention
+                changed = True
+
+            if disposition_level is not None and disposition_level != current.dispositionLevel:
+                current.dispositionLevel = disposition_level
+                changed = True
+
+            if disposition_period is not None and disposition_period != current.dispositionPeriod:
+                current.dispositionPeriod = disposition_period
                 changed = True
 
             if changed:

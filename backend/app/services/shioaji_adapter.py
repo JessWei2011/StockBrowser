@@ -1,7 +1,10 @@
 import asyncio
 import logging
 import random
-from datetime import datetime, timezone, timedelta
+import re
+import urllib.request
+import json
+from datetime import datetime, timezone, timedelta, time
 from typing import Optional
 import shioaji as sj
 from backend.app.settings import settings
@@ -18,6 +21,77 @@ def is_taiwan_market_open() -> bool:
         return False
     current_minutes = now_tw.hour * 60 + now_tw.minute
     return (9 * 60) <= current_minutes <= (13 * 60 + 30)
+
+def is_taiwan_trial_matching() -> bool:
+    """判斷目前是否處於台股試撮時段 (盤中營業日 08:30~09:00 開盤前試撮 或 13:25~13:30 收盤前試撮)"""
+    tz_tw = timezone(timedelta(hours=8))
+    now_tw = datetime.now(tz_tw)
+    if now_tw.weekday() >= 5:
+        return False
+    t = now_tw.time()
+    # 08:30 ~ 09:00 開盤前試撮
+    if time(8, 30) <= t < time(9, 0):
+        return True
+    # 13:25 ~ 13:30 收盤前試撮
+    if time(13, 25) <= t < time(13, 30):
+        return True
+    return False
+
+def parse_roc_date(d_str: str) -> str:
+    m = re.search(r'(\d{2,3})[/\-.]?(\d{2})[/\-.]?(\d{2})', d_str)
+    if m:
+        _, mm, dd = m.groups()
+        return f"{mm}/{dd}"
+    return d_str
+
+def fetch_disposition_periods() -> dict[str, str]:
+    """向 TWSE (上市) 與 TPEx (上櫃) 官方公開 Open API 撈取公告之處置起訖日期表"""
+    results: dict[str, str] = {}
+    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'}
+
+    # 1. TWSE 上市處置資訊
+    try:
+        url = 'https://openapi.twse.com.tw/v1/announcement/punish'
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            for item in data:
+                code = str(item.get('Code', '')).strip()
+                period = str(item.get('DispositionPeriod', '')).strip()
+                parts = re.split(r'[～~～至\-]+', period)
+                if len(parts) >= 2:
+                    start_d = parse_roc_date(parts[0])
+                    end_d = parse_roc_date(parts[1])
+                    fmt = f"{start_d}~{end_d}"
+                else:
+                    fmt = period
+                if code:
+                    results[code] = fmt
+    except Exception as e:
+        logger.warning(f"Failed to fetch TWSE disposition info: {e}")
+
+    # 2. TPEx 上櫃處置資訊
+    try:
+        url = 'https://www.tpex.org.tw/openapi/v1/tpex_disposal_information'
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            for item in data:
+                code = str(item.get('SecuritiesCompanyCode', '')).strip()
+                period = str(item.get('DispositionPeriod', '')).strip()
+                parts = re.split(r'[～~～至\-]+', period)
+                if len(parts) >= 2:
+                    start_d = parse_roc_date(parts[0])
+                    end_d = parse_roc_date(parts[1])
+                    fmt = f"{start_d}~{end_d}"
+                else:
+                    fmt = period
+                if code:
+                    results[code] = fmt
+    except Exception as e:
+        logger.warning(f"Failed to fetch TPEx disposition info: {e}")
+
+    return results
 
 def safe_float(val) -> Optional[float]:
     if val is None or val == "" or val == "-":
@@ -43,6 +117,7 @@ class ShioajiAdapter:
         self.last_quote_time: Optional[str] = None
         self.subscribed_codes: set[str] = set()
         self.contracts_cache: dict[str, dict] = {}
+        self.disposition_dates_cache: dict[str, str] = {}
         self._mock_task: Optional[asyncio.Task] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -91,20 +166,33 @@ class ShioajiAdapter:
         self.is_logged_in = False
 
     def _build_contracts_cache(self):
-        """讀取 TSE 與 OTC 合約並快取"""
+        """讀取 TSE 與 OTC 合約並快取，同時更新證交所/櫃買處置公告快取"""
         if not self.api:
             return
+        
+        # 抓取官方處置公告區間快取
+        self.disposition_dates_cache = fetch_disposition_periods()
+        logger.info(f"Loaded disposition periods cache for {len(self.disposition_dates_cache)} stocks.")
+
         count = 0
         try:
             for exchange_key, view in [("TSE", self.api.Contracts.Stocks.TSE), ("OTC", self.api.Contracts.Stocks.OTC)]:
                 for contract in view:
                     sec_type = "ETF" if (contract.category == "00" or contract.code.startswith("00")) else "STOCK"
+                    
+                    is_att = bool(getattr(contract, "attention_flag", False))
+                    disp_level = int(getattr(contract, "disposition_level", 0) or 0)
+                    disp_period = self.disposition_dates_cache.get(contract.code)
+
                     self.contracts_cache[contract.code] = {
                         "code": contract.code,
                         "name": contract.name,
                         "exchange": contract.exchange,
                         "securityType": sec_type,
                         "reference": float(contract.reference) if contract.reference else None,
+                        "isAttention": is_att,
+                        "dispositionLevel": disp_level,
+                        "dispositionPeriod": disp_period,
                         "contract": contract
                     }
                     count += 1
@@ -126,7 +214,10 @@ class ShioajiAdapter:
                         name=info["name"],
                         exchange=info["exchange"],
                         securityType=info["securityType"],
-                        reference=info["reference"]
+                        reference=info["reference"],
+                        isAttention=info.get("isAttention", False),
+                        dispositionLevel=info.get("dispositionLevel", 0),
+                        dispositionPeriod=info.get("dispositionPeriod")
                     )
                 )
                 if len(matches) >= limit:
@@ -151,6 +242,10 @@ class ShioajiAdapter:
             bid = safe_float(bids[0]) if bids and len(bids) > 0 else None
             ask = safe_float(asks[0]) if asks and len(asks) > 0 else None
 
+            # 試撮判定：Shioaji simtrade 旗標 (1: 試撮) 或當前台股試撮時段
+            simtrade_flag = getattr(quote, "simtrade", 0)
+            is_sim = bool(simtrade_flag == 1 or is_taiwan_trial_matching())
+
             dt = getattr(quote, "datetime", None)
             source_ts = dt.isoformat() if isinstance(dt, datetime) else None
             self.last_quote_time = source_ts or datetime.now(timezone.utc).isoformat()
@@ -164,6 +259,7 @@ class ShioajiAdapter:
                 high=high_price,
                 low=low_price,
                 total_volume=tot_vol,
+                is_simulated=is_sim,
                 source_ts=source_ts,
                 data_status="live"
             )
@@ -185,9 +281,20 @@ class ShioajiAdapter:
             exchange = info["exchange"] if info else "TSE"
             sec_type = info["securityType"] if info else "STOCK"
             ref = info["reference"] if info else None
+            is_att = info.get("isAttention", False) if info else False
+            disp_lvl = info.get("dispositionLevel", 0) if info else 0
+            disp_period = info.get("dispositionPeriod") if info else None
             
             # 初始化 quote store 記錄
-            quote_store.init_or_get_quote(code, name=name, exchange=exchange, security_type=sec_type)
+            quote_store.init_or_get_quote(
+                code,
+                name=name,
+                exchange=exchange,
+                security_type=sec_type,
+                is_attention=is_att,
+                disposition_level=disp_lvl,
+                disposition_period=disp_period
+            )
             if ref is not None:
                 quote_store.update_quote(code=code, previous_close=ref)
 
@@ -315,6 +422,7 @@ class ShioajiAdapter:
                         bid=round(new_last - tick, 2),
                         ask=round(new_last + tick, 2),
                         total_volume=new_vol,
+                        is_simulated=(code == "2330"),  # 盤後測試若包含 2330 則展示試撮星號 * 效果
                         source_ts=datetime.now(timezone.utc).isoformat(),
                         data_status="live"
                     )

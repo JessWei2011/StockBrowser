@@ -15,6 +15,10 @@ export interface QuoteState {
   previousClose: number | null;
   change: number | null;
   changePercent: number | null;
+  isSimulated?: boolean;
+  isAttention?: boolean;
+  dispositionLevel?: number;
+  dispositionPeriod?: string | null;
   sourceTs: string | null;
   receivedAt: string;
   dataStatus: DataStatus;
@@ -63,6 +67,9 @@ export interface InstrumentSearchResult {
   exchange: string;
   securityType: string;
   reference: number | null;
+  isAttention?: boolean;
+  dispositionLevel?: number;
+  dispositionPeriod?: string | null;
 }
 
 export type WebSocketMessage =

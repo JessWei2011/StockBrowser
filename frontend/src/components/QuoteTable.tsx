@@ -20,9 +20,18 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
-  const formatPrice = (val: number | null | undefined): string => {
+  const formatPrice = (val: number | null | undefined, isSim?: boolean): React.ReactNode => {
     if (val === null || val === undefined || isNaN(val)) return '—';
-    return val.toFixed(2);
+    const text = val.toFixed(2);
+    if (isSim) {
+      return (
+        <>
+          <span className="sim-asterisk" title="試撮階段">*</span>
+          {text}
+        </>
+      );
+    }
+    return text;
   };
 
   const formatVolume = (val: number | null | undefined): string => {
@@ -126,6 +135,12 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
               const isDragging = draggedIdx === idx;
               const isDropTarget = dragOverIdx === idx;
 
+              const isSimulated = q?.isSimulated ?? false;
+              const isAttention = q?.isAttention ?? false;
+              const dispositionLevel = q?.dispositionLevel ?? 0;
+              const dispositionPeriod = q?.dispositionPeriod ?? null;
+              const dispText = dispositionPeriod ? `處置 ${dispositionPeriod}` : '處置';
+
               return (
                 <tr
                   key={item.id}
@@ -171,14 +186,24 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                   <td className="td-sticky-stock">
                     <span className="stock-code">{item.code}</span>
                     <span className="stock-name">{item.name || q?.name || ''}</span>
+                    {dispositionLevel > 0 && (
+                      <span className="stock-badge badge-disposition" title={dispositionPeriod ? `處置股票 (期間: ${dispositionPeriod})` : '處置股票'}>
+                        [{dispText}]
+                      </span>
+                    )}
+                    {dispositionLevel === 0 && isAttention && (
+                      <span className="stock-badge badge-attention" title="注意股票">
+                        [注意]
+                      </span>
+                    )}
                   </td>
 
                   {/* 成交價 */}
                   <td className="td-num">
                     {badgeClass ? (
-                      <span className={`cell-badge ${badgeClass}`}>{formatPrice(last)}</span>
+                      <span className={`cell-badge ${badgeClass}`}>{formatPrice(last, isSimulated)}</span>
                     ) : (
-                      <span className={getPriceClass(last, prev)}>{formatPrice(last)}</span>
+                      <span className={getPriceClass(last, prev)}>{formatPrice(last, isSimulated)}</span>
                     )}
                   </td>
 

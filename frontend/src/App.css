@@ -555,6 +555,47 @@ body {
   color: var(--text-muted) !important;
 }
 
+/* 注意股與處置股警示標籤 */
+.stock-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 1.5px 5px;
+  border-radius: 3px;
+  margin-left: 5px;
+  vertical-align: middle;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}
+
+.badge-attention {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+}
+
+.badge-disposition {
+  background-color: rgba(168, 85, 247, 0.16);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.5);
+}
+
+[data-theme='light'] .badge-disposition {
+  background-color: rgba(147, 51, 234, 0.12);
+  color: #7e22ce;
+  border: 1px solid rgba(147, 51, 234, 0.35);
+}
+
+/* 試撮階段星號標記 */
+.sim-asterisk {
+  font-weight: 800;
+  color: #f59e0b;
+  margin-right: 2px;
+  display: inline-block;
+}
+
 .cell-badge {
   display: inline-block;
   padding: 2px 6px;

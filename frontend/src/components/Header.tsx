@@ -110,18 +110,30 @@ export const Header: React.FC<HeaderProps> = ({
 
           {showDropdown && results.length > 0 && (
             <div className="search-dropdown">
-              {results.map((item) => (
-                <div
-                  key={item.code}
-                  className="dropdown-item"
-                  onClick={() => handleAdd(item.code)}
-                >
-                  <span className="dropdown-code">{item.code}</span>
-                  <span className="dropdown-name">{item.name}</span>
-                  <span className="dropdown-type">{item.securityType}</span>
-                  <span className="dropdown-exchange">{item.exchange}</span>
-                </div>
-              ))}
+              {results.map((item) => {
+                const dispText = item.dispositionPeriod ? `處置 ${item.dispositionPeriod}` : '處置';
+                return (
+                  <div
+                    key={item.code}
+                    className="dropdown-item"
+                    onClick={() => handleAdd(item.code)}
+                  >
+                    <span className="dropdown-code">{item.code}</span>
+                    <span className="dropdown-name">{item.name}</span>
+                    {item.dispositionLevel && item.dispositionLevel > 0 ? (
+                      <span className="stock-badge badge-disposition">
+                        [{dispText}]
+                      </span>
+                    ) : item.isAttention ? (
+                      <span className="stock-badge badge-attention">
+                        [注意]
+                      </span>
+                    ) : null}
+                    <span className="dropdown-type">{item.securityType}</span>
+                    <span className="dropdown-exchange">{item.exchange}</span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

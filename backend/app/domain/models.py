@@ -22,6 +22,10 @@ class QuoteState(BaseModel):
     receivedAt: str = ""
     dataStatus: DataStatus = "initializing"
     revision: int = 0
+    isSimulated: bool = False
+    isAttention: bool = False
+    dispositionLevel: int = 0
+    dispositionPeriod: Optional[str] = None
 
 class WatchlistItem(BaseModel):
     id: str
@@ -59,3 +63,6 @@ class InstrumentSearchResult(BaseModel):
     exchange: str
     securityType: str
     reference: Optional[float] = None
+    isAttention: bool = False
+    dispositionLevel: int = 0
+    dispositionPeriod: Optional[str] = None
