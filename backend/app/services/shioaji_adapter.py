@@ -243,10 +243,10 @@ class ShioajiAdapter:
                     break
         return matches
 
-    def fetch_stock_positions(self) -> list[str]:
-        """從永豐證券 API 取得真實帳戶持股代號清單"""
+    def fetch_stock_positions(self) -> tuple[list[str], dict[str, Any]]:
+        """從永豐證券 API 取得真實帳戶持股代號清單與持股損益匯總"""
         if not settings.SJ_API_KEY or not settings.SJ_SECRET_KEY:
-            return []
+            return [], {}
         
         try:
             # 建立真實連線實例讀取庫存 (持股資料隸屬真實環境帳號)
@@ -258,19 +258,39 @@ class ShioajiAdapter:
             )
             positions = real_api.list_positions(real_api.stock_account, unit=sj.Unit.Share)
             codes = []
+            total_cost = 0.0
+            total_pnl = 0.0
+            total_market_val = 0.0
+
             for p in positions:
                 code_str = str(getattr(p, 'code', '')).strip()
                 if code_str:
                     codes.append(code_str)
+                qty = float(getattr(p, 'quantity', 0) or 0)
+                price = float(getattr(p, 'price', 0) or 0)
+                pnl = float(getattr(p, 'pnl', 0) or 0)
+                last_p = float(getattr(p, 'last_price', 0) or 0)
+                total_cost += price * qty
+                total_pnl += pnl
+                total_market_val += last_p * qty
+
+            roi = round((total_pnl / total_cost * 100), 2) if total_cost > 0 else 0.0
+            summary = {
+                "totalPnl": round(total_pnl, 2),
+                "totalCost": round(total_cost, 2),
+                "totalMarketValue": round(total_market_val, 2),
+                "returnPercent": roi,
+            }
+
             try:
                 real_api.logout()
             except Exception:
                 pass
-            logger.info(f"Fetched {len(codes)} stock positions from Shioaji: {codes}")
-            return codes
+            logger.info(f"Fetched {len(codes)} stock positions from Shioaji. PnL: {summary['totalPnl']}, ROI: {summary['returnPercent']}%")
+            return codes, summary
         except Exception as e:
             logger.error(f"Failed to fetch stock positions from Shioaji: {e}", exc_info=True)
-            return []
+            return [], {}
 
     def _on_quote_callback(self, quote):
         """由 Solace 執行緒回呼，需輕量無鎖快速合併"""

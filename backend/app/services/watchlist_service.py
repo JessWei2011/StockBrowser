@@ -7,10 +7,20 @@ from backend.app.services.publisher import publisher
 logger = logging.getLogger("watchlist_service")
 
 class WatchlistService:
+    def __init__(self):
+        self.wealth_summary: dict = {
+            "totalPnl": 0.0,
+            "totalCost": 0.0,
+            "totalMarketValue": 0.0,
+            "returnPercent": 0.0,
+        }
+
     async def sync_wealth_book(self):
         """從永豐 API 索取真實持股清單，並自動同步至固定第一個分頁『財神簿』"""
         g_id = await db.ensure_wealth_book_group()
-        position_codes = shioaji_adapter.fetch_stock_positions()
+        position_codes, summary = shioaji_adapter.fetch_stock_positions()
+        if summary:
+            self.wealth_summary = summary
         if not position_codes:
             logger.info("No stock positions fetched or Shioaji not connected.")
             return
@@ -48,6 +58,7 @@ class WatchlistService:
         return {
             "groups": [g.model_dump() for g in groups],
             "quotes": {k: v.model_dump() for k, v in all_quotes.items()},
+            "wealthSummary": self.wealth_summary,
             "serverVersion": server_ver,
             "upstream": {
                 "connected": shioaji_adapter.is_connected,

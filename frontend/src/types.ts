@@ -55,9 +55,17 @@ export interface UpstreamStatus {
   marketMode?: string;
 }
 
+export interface WealthSummary {
+  totalPnl: number;
+  totalCost: number;
+  totalMarketValue: number;
+  returnPercent: number;
+}
+
 export interface BootstrapResponse {
   groups: WatchlistGroup[];
   quotes: Record<string, QuoteState>;
+  wealthSummary?: WealthSummary;
   serverVersion: number;
   upstream: UpstreamStatus;
 }

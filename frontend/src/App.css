@@ -294,26 +294,33 @@ body {
 .tabs-container {
   background-color: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
-  padding: 0 24px;
+  padding: 0 12px;
   overflow-x: auto;
+  scrollbar-width: none; /* Firefox 隱藏捲軸 */
+  -ms-overflow-style: none; /* IE/Edge 隱藏捲軸 */
   white-space: nowrap;
   transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
+.tabs-container::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Edge 隱藏捲軸 */
+}
+
 .tabs-list {
   display: flex;
-  gap: 8px;
+  gap: 3px; /* 將間距微調縮減，讓左右顯示容量大幅提升 >20% */
 }
 
 .tab-item {
   border: none;
   background: transparent;
-  padding: 12px 16px;
-  font-size: 14px;
+  padding: 10px 10px; /* 將水平內邊距由 16px 縮為 10px，全部分頁可完整容納不出現橫向捲軸 */
+  font-size: 13.5px;
   color: var(--text-muted);
   cursor: pointer;
   position: relative;
   font-weight: 500;
+  flex-shrink: 0;
   transition: color 0.15s;
 }
 
@@ -361,7 +368,43 @@ body {
 }
 
 .view-mode-info {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   color: var(--text-muted);
+}
+
+.wealth-sync-tag {
+  font-size: 12px;
+  color: var(--color-orange);
+}
+
+.wealth-pnl-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: 12px;
+  padding: 3px 12px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+}
+
+.pnl-summary-item {
+  font-size: 13px;
+  color: var(--text-sub);
+}
+
+.pnl-summary-item strong {
+  font-size: 14px;
+  font-weight: 700;
+  margin-left: 4px;
+}
+
+.pnl-summary-divider {
+  color: var(--border-color);
+  font-size: 12px;
 }
 
 .view-mode-info strong {
