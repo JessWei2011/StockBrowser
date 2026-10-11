@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 from fastapi import WebSocket
 from backend.app.services.quote_store import quote_store, now_iso
+from backend.app.services.shioaji_adapter import shioaji_adapter
 
 logger = logging.getLogger("publisher")
 
@@ -72,12 +73,18 @@ class BatchPublisher:
                     continue
 
                 server_ver, dirty_quotes = quote_store.get_dirty_quotes()
-                if dirty_quotes:
+                has_dirty_quotes = bool(dirty_quotes)
+                has_dirty_indices = getattr(shioaji_adapter, "indices_dirty", False)
+
+                if has_dirty_quotes or has_dirty_indices:
+                    shioaji_adapter.indices_dirty = False
                     delta_msg = {
                         "type": "quote_delta",
                         "serverVersion": server_ver,
                         "generatedAt": now_iso(),
-                        "quotes": [q.model_dump() for q in dirty_quotes]
+                        "quotes": [q.model_dump() for q in dirty_quotes] if dirty_quotes else [],
+                        "marketIndices": shioaji_adapter.market_indices,
+                        "wealthSummary": shioaji_adapter.get_live_wealth_summary(),
                     }
                     await self.broadcast(delta_msg)
             except asyncio.CancelledError:

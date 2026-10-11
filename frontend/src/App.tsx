@@ -118,23 +118,30 @@ export const App: React.FC = () => {
           nextQuotes[q.code] = q;
         }
         setQuotes((prev) => ({ ...prev, ...nextQuotes }));
+        if (msg.wealthSummary) setWealthSummary(msg.wealthSummary);
+        if (msg.marketIndices) setMarketIndices(msg.marketIndices);
       } else if (msg.type === 'quote_delta') {
-        const changedCodes = new Set<string>();
-        setQuotes((prev) => {
-          const next = { ...prev };
-          for (const q of msg.quotes) {
-            next[q.code] = q;
-            changedCodes.add(q.code);
-          }
-          return next;
-        });
+        if (msg.wealthSummary) setWealthSummary(msg.wealthSummary);
+        if (msg.marketIndices) setMarketIndices(msg.marketIndices);
 
-        // 觸發閃爍效果
-        setDirtyCodes(changedCodes);
-        if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
-        flashTimerRef.current = window.setTimeout(() => {
-          setDirtyCodes(new Set());
-        }, 700);
+        if (msg.quotes && msg.quotes.length > 0) {
+          const changedCodes = new Set<string>();
+          setQuotes((prev) => {
+            const next = { ...prev };
+            for (const q of msg.quotes) {
+              next[q.code] = q;
+              changedCodes.add(q.code);
+            }
+            return next;
+          });
+
+          // 觸發閃爍效果
+          setDirtyCodes(changedCodes);
+          if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+          flashTimerRef.current = window.setTimeout(() => {
+            setDirtyCodes(new Set());
+          }, 700);
+        }
       } else if (msg.type === 'watchlist_changed') {
         // 自選清單異動，重新抓取 bootstrap
         loadBootstrap();

@@ -58,7 +58,7 @@ class WatchlistService:
         return {
             "groups": [g.model_dump() for g in groups],
             "quotes": {k: v.model_dump() for k, v in all_quotes.items()},
-            "wealthSummary": self.wealth_summary,
+            "wealthSummary": shioaji_adapter.get_live_wealth_summary(),
             "marketIndices": shioaji_adapter.market_indices,
             "serverVersion": server_ver,
             "upstream": {

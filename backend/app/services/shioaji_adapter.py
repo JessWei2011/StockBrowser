@@ -37,6 +37,15 @@ def is_taiwan_trial_matching() -> bool:
         return True
     return False
 
+def is_taiwan_trading_or_trial_day_hours() -> bool:
+    """判斷是否處於台股營業日之交易或試撮時段 (週一至週五 08:30 ~ 13:35，此期間嚴禁執行任何盤後模擬)"""
+    tz_tw = timezone(timedelta(hours=8))
+    now_tw = datetime.now(tz_tw)
+    if now_tw.weekday() >= 5:
+        return False
+    current_minutes = now_tw.hour * 60 + now_tw.minute
+    return (8 * 60 + 30) <= current_minutes <= (13 * 60 + 35)
+
 def parse_roc_date(d_str: str) -> str:
     m = re.search(r'(\d{2,3})[/\-.]?(\d{2})[/\-.]?(\d{2})', d_str)
     if m:
@@ -136,6 +145,14 @@ class ShioajiAdapter:
         self.market_indices: dict[str, dict[str, Any]] = {
             "TSE": {"code": "IX0001", "name": "加權指數", "price": 0.0, "change": 0.0, "changePercent": 0.0},
             "OTC": {"code": "IX0043", "name": "櫃買指數", "price": 0.0, "change": 0.0, "changePercent": 0.0},
+        }
+        self.indices_dirty = False
+        self.stock_positions_detail: list[dict[str, Any]] = []
+        self.cached_wealth_summary: dict[str, Any] = {
+            "totalPnl": 0.0,
+            "totalCost": 0.0,
+            "totalMarketValue": 0.0,
+            "returnPercent": 0.0,
         }
         self._mock_task: Optional[asyncio.Task] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -270,6 +287,7 @@ class ShioajiAdapter:
             total_pnl = 0.0
             total_market_val = 0.0
 
+            self.stock_positions_detail = []
             for p in positions:
                 code_str = str(getattr(p, 'code', '')).strip()
                 if code_str:
@@ -281,6 +299,13 @@ class ShioajiAdapter:
                 total_cost += price * qty
                 total_pnl += pnl
                 total_market_val += last_p * qty
+                if code_str:
+                    self.stock_positions_detail.append({
+                        "code": code_str,
+                        "quantity": qty,
+                        "cost_price": price,
+                        "initial_last": last_p if last_p > 0 else price
+                    })
 
             roi = round((total_pnl / total_cost * 100), 2) if total_cost > 0 else 0.0
             summary = {
@@ -289,6 +314,7 @@ class ShioajiAdapter:
                 "totalMarketValue": round(total_market_val, 2),
                 "returnPercent": roi,
             }
+            self.cached_wealth_summary = summary
 
             try:
                 real_api.logout()
@@ -299,6 +325,36 @@ class ShioajiAdapter:
         except Exception as e:
             logger.error(f"Failed to fetch stock positions from Shioaji: {e}", exc_info=True)
             return [], {}
+
+    def get_live_wealth_summary(self) -> dict[str, Any]:
+        """根據當前即時行情動態計算最新總損益與報酬率"""
+        if not self.stock_positions_detail:
+            return self.cached_wealth_summary
+
+        total_cost = 0.0
+        total_market_val = 0.0
+        _, quotes = quote_store.get_all_quotes()
+
+        for p in self.stock_positions_detail:
+            code = p["code"]
+            qty = p["quantity"]
+            cost_p = p["cost_price"]
+            total_cost += cost_p * qty
+
+            curr_q = quotes.get(code)
+            curr_price = curr_q.last if (curr_q and curr_q.last is not None) else p.get("initial_last", cost_p)
+            total_market_val += curr_price * qty
+
+        total_pnl = total_market_val - total_cost
+        roi = round((total_pnl / total_cost * 100), 2) if total_cost > 0 else 0.0
+        live_summary = {
+            "totalPnl": round(total_pnl, 2),
+            "totalCost": round(total_cost, 2),
+            "totalMarketValue": round(total_market_val, 2),
+            "returnPercent": roi,
+        }
+        self.cached_wealth_summary = live_summary
+        return live_summary
 
     def _init_and_subscribe_indices(self):
         """初始化並訂閱大盤加權指數 (TSE IX0001) 與 櫃買指數 (OTC IX0043)"""
@@ -350,6 +406,8 @@ class ShioajiAdapter:
             code = getattr(quote, "code", None)
             close_p = safe_float(getattr(quote, "close", None))
             chg_p = safe_float(getattr(quote, "change_price", None))
+            if chg_p is None:
+                chg_p = safe_float(getattr(quote, "change", None))
             target_key = "TSE" if code == "IX0001" else ("OTC" if code == "IX0043" else None)
             if target_key and close_p is not None:
                 self.market_indices[target_key]["price"] = round(close_p, 2)
@@ -358,6 +416,7 @@ class ShioajiAdapter:
                     ref = close_p - chg_p
                     if ref > 0:
                         self.market_indices[target_key]["changePercent"] = round((chg_p / ref) * 100, 2)
+                self.indices_dirty = True
         except Exception as e:
             logger.debug(f"Error parsing index quote callback: {e}")
 
@@ -530,13 +589,16 @@ class ShioajiAdapter:
             logger.error(f"Error fetching snapshots: {e}")
 
     async def _mock_ticks_loop(self):
-        """自動模式：僅在週末或盤後產生輔助跳動供測試推播，盤中交易時段自動停止，完全採用永豐即時回呼"""
+        """自動模式：僅在週末或非營業時段產生輔助跳動，營業日盤中與試撮時段嚴格自動停止"""
         logger.info("Mock ticks loop started in AUTO mode.")
         while True:
             try:
                 await asyncio.sleep(2.0)
-                # 自動判斷：盤中時段不進行任何模擬
-                if is_taiwan_market_open():
+                # 營業日時段 (08:30~13:35) 絕對不進行任何模擬
+                if is_taiwan_trading_or_trial_day_hours():
+                    continue
+                # 非模擬模式且未明確強制開啟盤後跳動時不模擬
+                if not settings.SJ_SIMULATION and not settings.ENABLE_OFFHOURS_MOCK_TICKS:
                     continue
                 if not self.subscribed_codes:
                     continue

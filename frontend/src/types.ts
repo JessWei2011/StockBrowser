@@ -96,12 +96,16 @@ export type WebSocketMessage =
       serverVersion: number;
       generatedAt: string;
       quotes: QuoteState[];
+      wealthSummary?: WealthSummary;
+      marketIndices?: Record<string, MarketIndexState>;
     }
   | {
       type: 'quote_delta';
       serverVersion: number;
       generatedAt: string;
       quotes: QuoteState[];
+      wealthSummary?: WealthSummary;
+      marketIndices?: Record<string, MarketIndexState>;
     }
   | {
       type: 'watchlist_changed';
