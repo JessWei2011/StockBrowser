@@ -186,12 +186,12 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                   <td className="td-sticky-stock">
                     <span className="stock-code">{item.code}</span>
                     <span className="stock-name">{item.name || q?.name || ''}</span>
-                    {dispositionLevel > 0 && (
+                    {(dispositionLevel > 0 || dispositionPeriod) && (
                       <span className="stock-badge badge-disposition" title={dispositionPeriod ? `處置股票 (期間: ${dispositionPeriod})` : '處置股票'}>
                         [{dispText}]
                       </span>
                     )}
-                    {dispositionLevel === 0 && isAttention && (
+                    {dispositionLevel === 0 && !dispositionPeriod && isAttention && (
                       <span className="stock-badge badge-attention" title="注意股票">
                         [注意]
                       </span>

@@ -120,7 +120,7 @@ export const Header: React.FC<HeaderProps> = ({
                   >
                     <span className="dropdown-code">{item.code}</span>
                     <span className="dropdown-name">{item.name}</span>
-                    {item.dispositionLevel && item.dispositionLevel > 0 ? (
+                    {(item.dispositionLevel && item.dispositionLevel > 0) || item.dispositionPeriod ? (
                       <span className="stock-badge badge-disposition">
                         [{dispText}]
                       </span>
