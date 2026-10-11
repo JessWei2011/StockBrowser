@@ -139,7 +139,9 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
               const isAttention = q?.isAttention ?? false;
               const dispositionLevel = q?.dispositionLevel ?? 0;
               const dispositionPeriod = q?.dispositionPeriod ?? null;
-              const dispText = dispositionPeriod ? `處置 ${dispositionPeriod}` : '處置';
+              const lvlStr = dispositionLevel === 2 ? '二' : (dispositionLevel === 3 ? '三' : (dispositionLevel === 1 ? '一' : ''));
+              const dispPrefix = lvlStr ? `處置${lvlStr}` : '處置';
+              const dispText = dispositionPeriod ? `${dispPrefix} ${dispositionPeriod}` : dispPrefix;
 
               return (
                 <tr

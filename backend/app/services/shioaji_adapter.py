@@ -5,7 +5,7 @@ import re
 import urllib.request
 import json
 from datetime import datetime, timezone, timedelta, time
-from typing import Optional
+from typing import Optional, Any
 import shioaji as sj
 from backend.app.settings import settings
 from backend.app.services.quote_store import quote_store
@@ -44,9 +44,9 @@ def parse_roc_date(d_str: str) -> str:
         return f"{mm}/{dd}"
     return d_str
 
-def fetch_disposition_periods() -> dict[str, str]:
-    """向 TWSE (上市) 與 TPEx (上櫃) 官方公開 Open API 撈取公告之處置起訖日期表"""
-    results: dict[str, str] = {}
+def fetch_disposition_periods() -> dict[str, dict[str, Any]]:
+    """向 TWSE (上市) 與 TPEx (上櫃) 官方公開 Open API 撈取公告之處置起訖日期表與處置等級"""
+    results: dict[str, dict[str, Any]] = {}
     headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'}
 
     # 1. TWSE 上市處置資訊
@@ -58,6 +58,9 @@ def fetch_disposition_periods() -> dict[str, str]:
             for item in data:
                 code = str(item.get('Code', '')).strip()
                 period = str(item.get('DispositionPeriod', '')).strip()
+                measures = str(item.get('DispositionMeasures', '')).strip()
+                detail = str(item.get('Detail', '')).strip()
+
                 parts = re.split(r'[～~～至\-]+', period)
                 if len(parts) >= 2:
                     start_d = parse_roc_date(parts[0])
@@ -65,8 +68,15 @@ def fetch_disposition_periods() -> dict[str, str]:
                     fmt = f"{start_d}~{end_d}"
                 else:
                     fmt = period
+
+                level = 1
+                if '第二次' in measures or '第二' in measures or '20分' in detail or '二十分' in detail:
+                    level = 2
+                elif '第三次' in measures or '第三' in measures:
+                    level = 3
+
                 if code:
-                    results[code] = fmt
+                    results[code] = {"period": fmt, "level": level}
     except Exception as e:
         logger.warning(f"Failed to fetch TWSE disposition info: {e}")
 
@@ -79,6 +89,8 @@ def fetch_disposition_periods() -> dict[str, str]:
             for item in data:
                 code = str(item.get('SecuritiesCompanyCode', '')).strip()
                 period = str(item.get('DispositionPeriod', '')).strip()
+                cond = str(item.get('DisposalCondition', '')).strip()
+
                 parts = re.split(r'[～~～至\-]+', period)
                 if len(parts) >= 2:
                     start_d = parse_roc_date(parts[0])
@@ -86,8 +98,11 @@ def fetch_disposition_periods() -> dict[str, str]:
                     fmt = f"{start_d}~{end_d}"
                 else:
                     fmt = period
+
+                level = 2 if ('曾發布處置' in cond or '20分' in cond or '二十分' in cond) else 1
+
                 if code:
-                    results[code] = fmt
+                    results[code] = {"period": fmt, "level": level}
     except Exception as e:
         logger.warning(f"Failed to fetch TPEx disposition info: {e}")
 
@@ -117,7 +132,7 @@ class ShioajiAdapter:
         self.last_quote_time: Optional[str] = None
         self.subscribed_codes: set[str] = set()
         self.contracts_cache: dict[str, dict] = {}
-        self.disposition_dates_cache: dict[str, str] = {}
+        self.disposition_dates_cache: dict[str, dict[str, Any]] = {}
         self._mock_task: Optional[asyncio.Task] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -170,7 +185,7 @@ class ShioajiAdapter:
         if not self.api:
             return
         
-        # 抓取官方處置公告區間快取
+        # 抓取官方處置公告區間與等級快取
         self.disposition_dates_cache = fetch_disposition_periods()
         logger.info(f"Loaded disposition periods cache for {len(self.disposition_dates_cache)} stocks.")
 
@@ -182,7 +197,11 @@ class ShioajiAdapter:
                     
                     is_att = bool(getattr(contract, "attention_flag", False))
                     disp_level = int(getattr(contract, "disposition_level", 0) or 0)
-                    disp_period = self.disposition_dates_cache.get(contract.code)
+                    
+                    disp_info = self.disposition_dates_cache.get(contract.code)
+                    disp_period = disp_info["period"] if disp_info else None
+                    if disp_info and disp_info.get("level"):
+                        disp_level = max(disp_level, disp_info["level"])
 
                     self.contracts_cache[contract.code] = {
                         "code": contract.code,

@@ -111,7 +111,9 @@ export const Header: React.FC<HeaderProps> = ({
           {showDropdown && results.length > 0 && (
             <div className="search-dropdown">
               {results.map((item) => {
-                const dispText = item.dispositionPeriod ? `處置 ${item.dispositionPeriod}` : '處置';
+                const lvlStr = item.dispositionLevel === 2 ? '二' : (item.dispositionLevel === 3 ? '三' : (item.dispositionLevel === 1 ? '一' : ''));
+                const dispPrefix = lvlStr ? `處置${lvlStr}` : '處置';
+                const dispText = item.dispositionPeriod ? `${dispPrefix} ${item.dispositionPeriod}` : dispPrefix;
                 return (
                   <div
                     key={item.code}

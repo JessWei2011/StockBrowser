@@ -85,8 +85,10 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
           changeClass = 'color-down'; // 跌停必定為綠
         }
 
-        // 4. 處置與注意標籤文字
-        const dispText = dispositionPeriod ? `處置 ${dispositionPeriod}` : '處置';
+        // 4. 處置與注意標籤文字 (印出處置等級，例如：處置二 10/12~10/16 或 處置一)
+        const lvlStr = dispositionLevel === 2 ? '二' : (dispositionLevel === 3 ? '三' : (dispositionLevel === 1 ? '一' : ''));
+        const dispPrefix = lvlStr ? `處置${lvlStr}` : '處置';
+        const dispText = dispositionPeriod ? `${dispPrefix} ${dispositionPeriod}` : dispPrefix;
 
         return (
           <div key={item.id} className="flat-stock-item">
