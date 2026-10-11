@@ -355,36 +355,44 @@ body {
   vertical-align: middle;
 }
 
-/* 視圖切換列 */
 .view-mode-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 24px;
+  padding: 8px 24px;
   background-color: var(--bg-main);
   border-bottom: 1px solid var(--border-color);
   font-size: 13px;
+  gap: 16px;
+  overflow-x: auto;
+  scrollbar-width: none;
   transition: background-color 0.2s ease;
+}
+
+.view-mode-bar::-webkit-scrollbar {
+  display: none;
 }
 
 .view-mode-info {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  gap: 10px;
   color: var(--text-muted);
 }
 
 .wealth-sync-tag {
   font-size: 12px;
   color: var(--color-orange);
+  white-space: nowrap;
 }
 
 .wealth-pnl-summary {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  margin-left: 12px;
+  white-space: nowrap;
+  gap: 10px;
   padding: 3px 12px;
   background-color: var(--bg-card);
   border: 1px solid var(--border-color);
@@ -394,8 +402,8 @@ body {
 .market-indices-summary {
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
   gap: 8px;
-  margin-left: 6px;
 }
 
 .index-pill {
