@@ -112,28 +112,31 @@ export const GroupModal: React.FC<GroupModalProps> = ({
                 const currentName = editingNames[g.id] ?? g.name;
                 const isModified = editingNames[g.id] !== undefined && editingNames[g.id] !== g.name;
 
+                const isWealth = g.id === 'g-wealth' || g.name === '財神簿' || g.isSystemGroup;
+
                 return (
                   <div key={g.id} className="group-edit-row">
                     <input
                       type="text"
                       className="modal-input-compact"
                       value={currentName}
+                      disabled={isWealth}
                       onChange={(e) =>
                         setEditingNames({ ...editingNames, [g.id]: e.target.value })
                       }
                     />
                     <button
                       className="btn-primary-sm"
-                      disabled={!isModified || loading}
+                      disabled={isWealth || !isModified || loading}
                       onClick={() => handleRename(g.id)}
                     >
                       儲存
                     </button>
                     <button
                       className="btn-danger-sm"
-                      disabled={groups.length <= 1 || loading}
+                      disabled={isWealth || groups.length <= 1 || loading}
                       onClick={() => handleDelete(g.id, g.name)}
-                      title={groups.length <= 1 ? '至少需保留一個群組' : '刪除此群組'}
+                      title={isWealth ? '財神簿為系統持股固定分頁，無法刪除' : (groups.length <= 1 ? '至少需保留一個群組' : '刪除此群組')}
                     >
                       刪除
                     </button>

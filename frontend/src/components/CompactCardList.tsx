@@ -3,6 +3,7 @@ import type { QuoteState, WatchlistItem } from '../types';
 
 interface CompactCardListProps {
   items: WatchlistItem[];
+  isWealthGroup?: boolean;
   quotes: Record<string, QuoteState>;
   dirtyCodes: Set<string>;
   onRemoveItem: (code: string) => Promise<void>;
@@ -11,6 +12,7 @@ interface CompactCardListProps {
 
 export const CompactCardList: React.FC<CompactCardListProps> = ({
   items,
+  isWealthGroup,
   quotes,
   onRemoveItem,
   onMoveItem,
@@ -202,8 +204,10 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
                 </button>
                 <button
                   className="btn-flat-action btn-flat-delete"
-                  onClick={() => onRemoveItem(item.code)}
-                  title="刪除"
+                  disabled={isWealthGroup}
+                  onClick={() => !isWealthGroup && onRemoveItem(item.code)}
+                  title={isWealthGroup ? '『財神簿』由永豐 API 持股自動同步，無法手動刪除' : '刪除'}
+                  style={isWealthGroup ? { opacity: 0.25, cursor: 'not-allowed' } : undefined}
                 >
                   ✕
                 </button>

@@ -123,6 +123,7 @@ async def get_all_groups() -> list[WatchlistGroup]:
                     position=i["position"]
                 ) for i in item_rows
             ]
+            is_sys = bool(g_row["id"] == "g-wealth" or g_row["name"] == "財神簿")
             result.append(
                 WatchlistGroup(
                     id=g_row["id"],
@@ -130,10 +131,45 @@ async def get_all_groups() -> list[WatchlistGroup]:
                     position=g_row["position"],
                     createdAt=g_row["created_at"],
                     updatedAt=g_row["updated_at"],
+                    isSystemGroup=is_sys,
                     items=items
                 )
             )
         return result
+
+async def ensure_wealth_book_group() -> str:
+    """確保「財神簿」固定為第一個系統群組 (position 0)"""
+    async with get_db_connection() as db:
+        cur = await db.execute("SELECT id FROM watchlist_groups WHERE id = 'g-wealth' OR name = '財神簿'")
+        row = await cur.fetchone()
+        ts = now_iso()
+        if row:
+            g_id = row[0]
+            # 確保 id 為 g-wealth 且 position 為 0
+            await db.execute("UPDATE watchlist_groups SET position = position + 1 WHERE id != ? AND position <= 0", (g_id,))
+            await db.execute("UPDATE watchlist_groups SET name = '財神簿', position = 0, updated_at = ? WHERE id = ?", (ts, g_id))
+        else:
+            g_id = "g-wealth"
+            await db.execute("UPDATE watchlist_groups SET position = position + 1 WHERE position >= 0")
+            await db.execute(
+                "INSERT INTO watchlist_groups (id, name, position, created_at, updated_at) VALUES (?, '財神簿', 0, ?, ?)",
+                (g_id, ts, ts)
+            )
+        await db.commit()
+        return g_id
+
+async def sync_group_items(group_id: str, items_data: list[tuple[str, str, str, str]]):
+    """將指定群組的持股項目完全同步為 items_data: [(code, name, exchange, security_type), ...]"""
+    async with get_db_connection() as db:
+        await db.execute("DELETE FROM watchlist_items WHERE group_id = ?", (group_id,))
+        for idx, (code, name, exchange, sec_type) in enumerate(items_data):
+            i_id = str(uuid.uuid4())
+            await db.execute(
+                "INSERT INTO watchlist_items (id, group_id, code, name, exchange, security_type, position) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (i_id, group_id, code, name, exchange, sec_type, idx)
+            )
+        await db.execute("UPDATE watchlist_groups SET updated_at = ? WHERE id = ?", (now_iso(), group_id))
+        await db.commit()
 
 async def get_all_subscribed_codes() -> set[str]:
     async with get_db_connection() as db:

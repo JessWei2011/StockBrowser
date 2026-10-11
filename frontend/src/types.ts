@@ -41,6 +41,7 @@ export interface WatchlistGroup {
   position: number;
   createdAt: string;
   updatedAt: string;
+  isSystemGroup?: boolean;
   items: WatchlistItem[];
 }
 

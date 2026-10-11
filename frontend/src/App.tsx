@@ -213,6 +213,7 @@ export const App: React.FC = () => {
     <div className="stock-browser-app">
       <Header
         currentGroupId={activeGroup?.id || null}
+        isWealthGroup={activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿' || activeGroup?.isSystemGroup}
         subscribedCount={upstream.subscribedCount}
         maxSubscribed={upstream.maxAllowed}
         wsConnected={wsConnected}
@@ -235,6 +236,11 @@ export const App: React.FC = () => {
       <div className="view-mode-bar">
         <div className="view-mode-info">
           本組合共 <strong>{activeGroup?.items.length || 0}</strong> 檔商品
+          {(activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿' || activeGroup?.isSystemGroup) && (
+            <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-orange)' }}>
+              (永豐 API 持股自動同步)
+            </span>
+          )}
         </div>
         <div className="view-mode-toggle">
           <span className="view-toggle-label">檢視模式：</span>
@@ -261,6 +267,7 @@ export const App: React.FC = () => {
         {viewMode === 'table' ? (
           <QuoteTable
             items={activeGroup?.items || []}
+            isWealthGroup={activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿' || activeGroup?.isSystemGroup}
             quotes={quotes}
             dirtyCodes={dirtyCodes}
             onRemoveItem={handleRemoveStock}
@@ -270,6 +277,7 @@ export const App: React.FC = () => {
         ) : (
           <CompactCardList
             items={activeGroup?.items || []}
+            isWealthGroup={activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿' || activeGroup?.isSystemGroup}
             quotes={quotes}
             dirtyCodes={dirtyCodes}
             onRemoveItem={handleRemoveStock}

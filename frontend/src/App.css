@@ -337,6 +337,17 @@ body {
   border-radius: 2px 2px 0 0;
 }
 
+.tab-wealth {
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.wealth-icon {
+  margin-right: 4px;
+  font-size: 13px;
+  vertical-align: middle;
+}
+
 /* 視圖切換列 */
 .view-mode-bar {
   display: flex;

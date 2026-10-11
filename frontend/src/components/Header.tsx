@@ -4,6 +4,7 @@ import { searchInstruments } from '../services/api';
 
 interface HeaderProps {
   currentGroupId: string | null;
+  isWealthGroup?: boolean;
   subscribedCount: number;
   maxSubscribed: number;
   wsConnected: boolean;
@@ -18,6 +19,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   currentGroupId,
+  isWealthGroup,
   subscribedCount,
   maxSubscribed,
   wsConnected,
@@ -101,10 +103,11 @@ export const Header: React.FC<HeaderProps> = ({
             />
             <button
               className="btn-add-stock"
-              disabled={!query.trim() || !currentGroupId || isAdding}
+              disabled={!query.trim() || !currentGroupId || isAdding || isWealthGroup}
               onClick={() => handleAdd(results[0]?.code || query)}
+              title={isWealthGroup ? '『財神簿』由永豐 API 持股自動同步' : '新增至目前組合'}
             >
-              {isAdding ? '新增中...' : '新增個股'}
+              {isWealthGroup ? '持股自動同步' : (isAdding ? '新增中...' : '新增個股')}
             </button>
           </div>
 

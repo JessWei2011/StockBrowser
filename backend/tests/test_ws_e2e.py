@@ -18,7 +18,7 @@ async def test_websocket_e2e_snapshot_and_delta():
     proc.start()
     
     # 等待伺服器啟動
-    time.sleep(2)
+    time.sleep(3.5)
     
     uri = "ws://127.0.0.1:8888/ws/quotes"
     try:

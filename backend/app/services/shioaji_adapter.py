@@ -243,6 +243,35 @@ class ShioajiAdapter:
                     break
         return matches
 
+    def fetch_stock_positions(self) -> list[str]:
+        """從永豐證券 API 取得真實帳戶持股代號清單"""
+        if not settings.SJ_API_KEY or not settings.SJ_SECRET_KEY:
+            return []
+        
+        try:
+            # 建立真實連線實例讀取庫存 (持股資料隸屬真實環境帳號)
+            real_api = sj.Shioaji(simulation=False)
+            real_api.login(
+                api_key=settings.SJ_API_KEY,
+                secret_key=settings.SJ_SECRET_KEY,
+                subscribe_trade=False
+            )
+            positions = real_api.list_positions(real_api.stock_account, unit=sj.Unit.Share)
+            codes = []
+            for p in positions:
+                code_str = str(getattr(p, 'code', '')).strip()
+                if code_str:
+                    codes.append(code_str)
+            try:
+                real_api.logout()
+            except Exception:
+                pass
+            logger.info(f"Fetched {len(codes)} stock positions from Shioaji: {codes}")
+            return codes
+        except Exception as e:
+            logger.error(f"Failed to fetch stock positions from Shioaji: {e}", exc_info=True)
+            return []
+
     def _on_quote_callback(self, quote):
         """由 Solace 執行緒回呼，需輕量無鎖快速合併"""
         try:

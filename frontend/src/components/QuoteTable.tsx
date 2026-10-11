@@ -3,6 +3,7 @@ import type { QuoteState, WatchlistItem } from '../types';
 
 interface QuoteTableProps {
   items: WatchlistItem[];
+  isWealthGroup?: boolean;
   quotes: Record<string, QuoteState>;
   dirtyCodes: Set<string>;
   onRemoveItem: (code: string) => Promise<void>;
@@ -12,6 +13,7 @@ interface QuoteTableProps {
 
 export const QuoteTable: React.FC<QuoteTableProps> = ({
   items,
+  isWealthGroup,
   quotes,
   onRemoveItem,
   onMoveItem,
@@ -260,8 +262,10 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                   <td className="td-action">
                     <button
                       className="btn-cell-delete"
-                      title="從此群組移除"
-                      onClick={() => onRemoveItem(item.code)}
+                      disabled={isWealthGroup}
+                      title={isWealthGroup ? '『財神簿』由永豐 API 持股自動同步，無法手動刪除' : '從此群組移除'}
+                      onClick={() => !isWealthGroup && onRemoveItem(item.code)}
+                      style={isWealthGroup ? { opacity: 0.25, cursor: 'not-allowed' } : undefined}
                     >
                       ✕
                     </button>

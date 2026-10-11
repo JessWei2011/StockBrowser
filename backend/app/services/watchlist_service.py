@@ -7,6 +7,25 @@ from backend.app.services.publisher import publisher
 logger = logging.getLogger("watchlist_service")
 
 class WatchlistService:
+    async def sync_wealth_book(self):
+        """從永豐 API 索取真實持股清單，並自動同步至固定第一個分頁『財神簿』"""
+        g_id = await db.ensure_wealth_book_group()
+        position_codes = shioaji_adapter.fetch_stock_positions()
+        if not position_codes:
+            logger.info("No stock positions fetched or Shioaji not connected.")
+            return
+
+        items_data = []
+        for code in position_codes:
+            info = shioaji_adapter.contracts_cache.get(code)
+            name = info["name"] if info else code
+            exchange = info["exchange"] if info else "TSE"
+            sec_type = info["securityType"] if info else "STOCK"
+            items_data.append((code, name, exchange, sec_type))
+
+        await db.sync_group_items(g_id, items_data)
+        logger.info(f"Successfully synced {len(items_data)} positions to 財神簿.")
+
     async def sync_subscriptions(self):
         """讀取資料庫中所有群組的股票聯集，並向 Shioaji 增量同步訂閱"""
         wanted_codes = await db.get_all_subscribed_codes()

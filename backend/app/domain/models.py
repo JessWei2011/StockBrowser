@@ -42,6 +42,7 @@ class WatchlistGroup(BaseModel):
     position: int
     createdAt: str
     updatedAt: str
+    isSystemGroup: bool = False
     items: list[WatchlistItem] = []
 
 class CreateGroupRequest(BaseModel):

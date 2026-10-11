@@ -30,10 +30,13 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_running_loop()
     shioaji_adapter.start(loop)
     
-    # 3. 同步資料庫內群組股票至 Shioaji 訂閱聯集
+    # 3. 同步永豐持股至「財神簿」固定分頁
+    await watchlist_service.sync_wealth_book()
+
+    # 4. 同步資料庫內所有群組股票至 Shioaji 訂閱聯集
     await watchlist_service.sync_subscriptions()
     
-    # 4. 啟動 1Hz 批次廣播
+    # 5. 啟動 1Hz 批次廣播
     await publisher.start()
     
     logger.info("StockBrowser backend initialized and running.")
