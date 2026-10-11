@@ -255,11 +255,6 @@ export const App: React.FC = () => {
       <div className="view-mode-bar">
         <div className="view-mode-info">
           本組合共 <strong>{activeGroup?.items.length || 0}</strong> 檔商品
-          {(activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿' || activeGroup?.isSystemGroup) && (
-            <span className="wealth-sync-tag">
-              (永豐 API 持股自動同步)
-            </span>
-          )}
           {wealthSummary && (
             <div className="wealth-pnl-summary">
               <span className="pnl-summary-item">
