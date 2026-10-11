@@ -42,6 +42,13 @@ export const App: React.FC = () => {
     totalMarketValue: number;
     returnPercent: number;
   } | null>(null);
+  const [marketIndices, setMarketIndices] = useState<Record<string, {
+    code: string;
+    name: string;
+    price: number;
+    change: number;
+    changePercent: number;
+  }> | null>(null);
 
   // 檢視模式：電腦預設為 'table' (完整表格)，手機預設為 'card' (兩行卡片)
   const [viewMode, setViewMode] = useState<'table' | 'card'>(() => {
@@ -82,6 +89,9 @@ export const App: React.FC = () => {
       setUpstream(data.upstream);
       if (data.wealthSummary) {
         setWealthSummary(data.wealthSummary);
+      }
+      if (data.marketIndices) {
+        setMarketIndices(data.marketIndices);
       }
       setActiveGroupId((prev) => {
         if (prev && data.groups.some((g) => g.id === prev)) return prev;
@@ -283,6 +293,78 @@ export const App: React.FC = () => {
                   {wealthSummary.returnPercent.toFixed(2)}%
                 </strong>
               </span>
+            </div>
+          )}
+          {marketIndices && (
+            <div className="market-indices-summary">
+              {marketIndices.TSE && (
+                <div className="index-pill">
+                  <span className="index-label">加權</span>
+                  <span
+                    className={`index-val ${
+                      marketIndices.TSE.change > 0
+                        ? 'color-up'
+                        : marketIndices.TSE.change < 0
+                        ? 'color-down'
+                        : 'color-neutral'
+                    }`}
+                  >
+                    {marketIndices.TSE.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span
+                    className={`index-chg ${
+                      marketIndices.TSE.change > 0
+                        ? 'color-up'
+                        : marketIndices.TSE.change < 0
+                        ? 'color-down'
+                        : 'color-neutral'
+                    }`}
+                  >
+                    {marketIndices.TSE.change > 0
+                      ? `▲${marketIndices.TSE.change.toFixed(2)}`
+                      : marketIndices.TSE.change < 0
+                      ? `▼${Math.abs(marketIndices.TSE.change).toFixed(2)}`
+                      : '0.00'}
+                    {' '}
+                    ({marketIndices.TSE.changePercent > 0 ? '+' : ''}
+                    {marketIndices.TSE.changePercent.toFixed(2)}%)
+                  </span>
+                </div>
+              )}
+              {marketIndices.OTC && (
+                <div className="index-pill">
+                  <span className="index-label">櫃買</span>
+                  <span
+                    className={`index-val ${
+                      marketIndices.OTC.change > 0
+                        ? 'color-up'
+                        : marketIndices.OTC.change < 0
+                        ? 'color-down'
+                        : 'color-neutral'
+                    }`}
+                  >
+                    {marketIndices.OTC.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span
+                    className={`index-chg ${
+                      marketIndices.OTC.change > 0
+                        ? 'color-up'
+                        : marketIndices.OTC.change < 0
+                        ? 'color-down'
+                        : 'color-neutral'
+                    }`}
+                  >
+                    {marketIndices.OTC.change > 0
+                      ? `▲${marketIndices.OTC.change.toFixed(2)}`
+                      : marketIndices.OTC.change < 0
+                      ? `▼${Math.abs(marketIndices.OTC.change).toFixed(2)}`
+                      : '0.00'}
+                    {' '}
+                    ({marketIndices.OTC.changePercent > 0 ? '+' : ''}
+                    {marketIndices.OTC.changePercent.toFixed(2)}%)
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -62,10 +62,19 @@ export interface WealthSummary {
   returnPercent: number;
 }
 
+export interface MarketIndexState {
+  code: string;
+  name: string;
+  price: number;
+  change: number;
+  changePercent: number;
+}
+
 export interface BootstrapResponse {
   groups: WatchlistGroup[];
   quotes: Record<string, QuoteState>;
   wealthSummary?: WealthSummary;
+  marketIndices?: Record<string, MarketIndexState>;
   serverVersion: number;
   upstream: UpstreamStatus;
 }

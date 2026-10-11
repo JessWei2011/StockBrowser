@@ -133,6 +133,10 @@ class ShioajiAdapter:
         self.subscribed_codes: set[str] = set()
         self.contracts_cache: dict[str, dict] = {}
         self.disposition_dates_cache: dict[str, dict[str, Any]] = {}
+        self.market_indices: dict[str, dict[str, Any]] = {
+            "TSE": {"code": "IX0001", "name": "加權指數", "price": 0.0, "change": 0.0, "changePercent": 0.0},
+            "OTC": {"code": "IX0043", "name": "櫃買指數", "price": 0.0, "change": 0.0, "changePercent": 0.0},
+        }
         self._mock_task: Optional[asyncio.Task] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -156,8 +160,12 @@ class ShioajiAdapter:
                 # 建立合約快取以供搜尋
                 self._build_contracts_cache()
                 
-                # 設定 Quote callback
+                # 設定 Quote callback (個股與指數)
                 self.api.set_on_quote_stk_v1_callback(self._on_quote_callback)
+                self.api.set_on_quote_idx_v1_callback(self._on_index_quote_callback)
+
+                # 初始化與訂閱大盤加權指數 (TSE IX0001) 與 櫃買指數 (OTC IX0043)
+                self._init_and_subscribe_indices()
             else:
                 logger.warning("SJ_API_KEY / SJ_SECRET_KEY not set. Running in offline/mock mode.")
         except Exception as e:
@@ -291,6 +299,67 @@ class ShioajiAdapter:
         except Exception as e:
             logger.error(f"Failed to fetch stock positions from Shioaji: {e}", exc_info=True)
             return [], {}
+
+    def _init_and_subscribe_indices(self):
+        """初始化並訂閱大盤加權指數 (TSE IX0001) 與 櫃買指數 (OTC IX0043)"""
+        if not self.api:
+            return
+        
+        try:
+            contracts_to_snap = []
+            tse_idx = self.api.Contracts.Indexs.TSE.get("IX0001")
+            otc_idx = self.api.Contracts.Indexs.OTC.get("IX0043")
+            if tse_idx:
+                contracts_to_snap.append(tse_idx)
+            if otc_idx:
+                contracts_to_snap.append(otc_idx)
+
+            if contracts_to_snap:
+                snaps = self.api.snapshots(contracts_to_snap)
+                for s in snaps:
+                    code = str(getattr(s, "code", ""))
+                    close_p = safe_float(getattr(s, "close", None))
+                    chg_p = safe_float(getattr(s, "change_price", None))
+                    chg_pct = safe_float(getattr(s, "change_rate", None))
+                    target_key = "TSE" if code == "IX0001" else ("OTC" if code == "IX0043" else None)
+                    if target_key and close_p is not None:
+                        self.market_indices[target_key]["price"] = round(close_p, 2)
+                        self.market_indices[target_key]["change"] = round(chg_p or 0.0, 2)
+                        self.market_indices[target_key]["changePercent"] = round(chg_pct or 0.0, 2)
+                logger.info(f"Initialized market indices snapshots: {self.market_indices}")
+
+            # 訂閱指數即時行情
+            if tse_idx:
+                try:
+                    self.api.subscribe(tse_idx, quote_type=sj.QuoteType.Quote, version=sj.QuoteVersion.v1)
+                    logger.info("Subscribed index Quote for TSE (IX0001)")
+                except Exception as e:
+                    logger.warning(f"Failed to subscribe TSE index quote: {e}")
+            if otc_idx:
+                try:
+                    self.api.subscribe(otc_idx, quote_type=sj.QuoteType.Quote, version=sj.QuoteVersion.v1)
+                    logger.info("Subscribed index Quote for OTC (IX0043)")
+                except Exception as e:
+                    logger.warning(f"Failed to subscribe OTC index quote: {e}")
+        except Exception as e:
+            logger.error(f"Error in _init_and_subscribe_indices: {e}", exc_info=True)
+
+    def _on_index_quote_callback(self, quote):
+        """大盤與櫃買指數即時回呼"""
+        try:
+            code = getattr(quote, "code", None)
+            close_p = safe_float(getattr(quote, "close", None))
+            chg_p = safe_float(getattr(quote, "change_price", None))
+            target_key = "TSE" if code == "IX0001" else ("OTC" if code == "IX0043" else None)
+            if target_key and close_p is not None:
+                self.market_indices[target_key]["price"] = round(close_p, 2)
+                if chg_p is not None:
+                    self.market_indices[target_key]["change"] = round(chg_p, 2)
+                    ref = close_p - chg_p
+                    if ref > 0:
+                        self.market_indices[target_key]["changePercent"] = round((chg_p / ref) * 100, 2)
+        except Exception as e:
+            logger.debug(f"Error parsing index quote callback: {e}")
 
     def _on_quote_callback(self, quote):
         """由 Solace 執行緒回呼，需輕量無鎖快速合併"""

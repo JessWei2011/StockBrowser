@@ -27,6 +27,13 @@ class QuoteState(BaseModel):
     dispositionLevel: int = 0
     dispositionPeriod: Optional[str] = None
 
+class MarketIndexQuote(BaseModel):
+    code: str
+    name: str
+    price: Optional[float] = None
+    change: Optional[float] = None
+    changePercent: Optional[float] = None
+
 class WatchlistItem(BaseModel):
     id: str
     groupId: str
