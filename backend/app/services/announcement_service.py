@@ -159,14 +159,18 @@ class AnnouncementService:
             return {}
 
         loop = asyncio.get_running_loop()
-        # 1. 抓取注意與處置 (Shioaji)
+        # 1. 抓取注意與處置 (Shioaji + TPEx 雙重備援)
         shioaji_items = await loop.run_in_executor(self._executor, self._fetch_shioaji_notice_punish, wanted_codes)
-        # 2. 抓取證交所當日重大訊息 (TWSE OpenAPI)
+        tpex_punish_items = await loop.run_in_executor(self._executor, self._fetch_tpex_notice_punish, wanted_codes)
+        # 2. 抓取證交所與櫃買中心重大訊息
         twse_news_items = await loop.run_in_executor(self._executor, self._fetch_twse_material_news, wanted_codes)
-        # 3. 抓取證交所每月最新營收 (TWSE OpenAPI t187ap05_L)
+        tpex_news_items = await loop.run_in_executor(self._executor, self._fetch_tpex_material_news, wanted_codes)
+        # 3. 抓取證交所與櫃買中心每月最新自結營收
         revenue_items = await loop.run_in_executor(self._executor, self._fetch_twse_monthly_revenue, wanted_codes)
-        # 4. 抓取證交所除權除息預告 (TWSE OpenAPI)
+        tpex_revenue_items = await loop.run_in_executor(self._executor, self._fetch_tpex_monthly_revenue, wanted_codes)
+        # 4. 抓取證交所與櫃買中心除權除息預告
         exdiv_items = await loop.run_in_executor(self._executor, self._fetch_twse_exdividend, wanted_codes)
+        tpex_exdiv_items = await loop.run_in_executor(self._executor, self._fetch_tpex_exdividend, wanted_codes)
         # 5. 抓取個股財報與行事曆 (yfinance)
         calendar_items = await loop.run_in_executor(self._executor, self._fetch_yfinance_calendar, wanted_codes)
 
@@ -174,8 +178,26 @@ class AnnouncementService:
         combined_by_code: dict[str, list[dict]] = {}
         all_flat: list[dict] = []
 
-        for item_list in [shioaji_items, twse_news_items, revenue_items, exdiv_items, calendar_items]:
+        all_sources = [
+            shioaji_items,
+            tpex_punish_items,
+            twse_news_items,
+            tpex_news_items,
+            revenue_items,
+            tpex_revenue_items,
+            exdiv_items,
+            tpex_exdiv_items,
+            calendar_items,
+        ]
+
+        seen_ids = set()
+        for item_list in all_sources:
             for it in item_list:
+                it_id = it.get("id")
+                if it_id and it_id in seen_ids:
+                    continue
+                if it_id:
+                    seen_ids.add(it_id)
                 c = it["code"]
                 combined_by_code.setdefault(c, []).append(it)
                 all_flat.append(it)
@@ -254,6 +276,96 @@ class AnnouncementService:
             logger.warning(f"Error in _fetch_shioaji_notice_punish: {e}")
         return results
 
+    def _fetch_tpex_notice_punish(self, wanted_codes: set[str]) -> list[dict]:
+        """從櫃買中心 TPEx OpenAPI 撈取上櫃注意與處置股票 (補足與備援)"""
+        results: list[dict] = []
+        today = date.today()
+
+        # 1. TPEx 處置股票
+        try:
+            url = "https://www.tpex.org.tw/openapi/v1/tpex_disposal_information"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                for it in data:
+                    c = str(it.get("SecuritiesCompanyCode", "")).strip()
+                    if c in wanted_codes:
+                        period_str = str(it.get("DispositionPeriod", "")).strip()
+                        end_d = None
+                        start_d_str = ""
+                        if "~" in period_str:
+                            s_part, e_part = period_str.split("~", 1)
+                            s_part, e_part = s_part.strip(), e_part.strip()
+                            if len(s_part) == 7:
+                                start_d_str = f"{int(s_part[3:5])}/{int(s_part[5:])}"
+                            if len(e_part) == 7:
+                                ey = int(e_part[:3]) + 1911
+                                em = int(e_part[3:5])
+                                ed = int(e_part[5:])
+                                end_d = date(ey, em, ed)
+                                end_d_str = f"{em}/{ed}"
+                                period_label = f"{start_d_str}~{end_d_str}" if start_d_str else period_str
+                            else:
+                                period_label = period_str
+                        else:
+                            period_label = period_str
+
+                        # 結束當天過後不顯示
+                        if end_d and end_d < today:
+                            continue
+
+                        cond = str(it.get("DisposalCondition", "")).strip()
+                        reasons = str(it.get("DispositionReasons", "")).strip()
+                        detail_text = cond if cond else reasons
+
+                        results.append({
+                            "id": f"disp-{c}-{period_str}",
+                            "code": c,
+                            "tag": f"處置 {period_label}".strip(),
+                            "title": "上櫃處置股票",
+                            "date": str(it.get("Date", "")),
+                            "detail": detail_text.replace("\r\n", "\n").strip(),
+                            "category": "disposition",
+                        })
+        except Exception as e:
+            logger.warning(f"Error fetching TPEx disposal: {e}")
+
+        # 2. TPEx 注意股票
+        try:
+            url = "https://www.tpex.org.tw/openapi/v1/tpex_trading_warning_information"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                for it in data:
+                    c = str(it.get("SecuritiesCompanyCode", "")).strip()
+                    if c in wanted_codes:
+                        d_raw = str(it.get("Date", "")).strip()
+                        d_obj = None
+                        if len(d_raw) == 7:
+                            yy = int(d_raw[:3]) + 1911
+                            mm = int(d_raw[3:5])
+                            dd = int(d_raw[5:])
+                            d_obj = date(yy, mm, dd)
+                        if d_obj and (today - d_obj).days > 3:
+                            continue
+
+                        close_p = it.get("ClosePrice", "")
+                        info = str(it.get("TradingInformation", "")).strip()
+
+                        results.append({
+                            "id": f"att-{c}-{d_raw}",
+                            "code": c,
+                            "tag": "注意",
+                            "title": f"上櫃注意股票 (收盤價: {close_p})" if close_p else "上櫃注意股票",
+                            "date": d_obj.strftime("%Y-%m-%d") if d_obj else d_raw,
+                            "detail": info.replace("\r\n", "\n").strip(),
+                            "category": "attention",
+                        })
+        except Exception as e:
+            logger.warning(f"Error fetching TPEx warning: {e}")
+
+        return results
+
     def _fetch_twse_material_news(self, wanted_codes: set[str]) -> list[dict]:
         """從證交所 OpenAPI 撈取最新重大訊息全文 (僅保留 3 日內最新消息)"""
         results: list[dict] = []
@@ -295,8 +407,48 @@ class AnnouncementService:
             logger.warning(f"Error fetching TWSE material news: {e}")
         return results
 
+    def _fetch_tpex_material_news(self, wanted_codes: set[str]) -> list[dict]:
+        """從櫃買中心 TPEx OpenAPI 撈取上櫃公司重大訊息 (mopsfin_t187ap04_O)"""
+        results: list[dict] = []
+        today = date.today()
+        try:
+            url = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap04_O"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                for it in data:
+                    c = str(it.get("SecuritiesCompanyCode", "")).strip()
+                    if c in wanted_codes:
+                        date_raw = str(it.get("發言日期", "")).strip()
+                        time_raw = str(it.get("發言時間", "")).strip()
+                        subj = (it.get("主旨 ") or it.get("主旨") or "").strip()
+                        desc = str(it.get("說明", "")).strip()
+                        fmt_date = date_raw
+                        d_obj = None
+                        if len(date_raw) == 7:
+                            yy = int(date_raw[:3]) + 1911
+                            mm = int(date_raw[3:5])
+                            dd = int(date_raw[5:])
+                            fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
+                            d_obj = date(yy, mm, dd)
+                        if d_obj and (today - d_obj).days > 3:
+                            continue
+
+                        results.append({
+                            "id": f"news-{c}-{date_raw}-{time_raw}",
+                            "code": c,
+                            "tag": "重訊",
+                            "title": subj.replace("\r\n", " "),
+                            "date": fmt_date,
+                            "detail": desc.replace("\r\n", "\n").strip(),
+                            "category": "news",
+                        })
+        except Exception as e:
+            logger.warning(f"Error fetching TPEx material news: {e}")
+        return results
+
     def _fetch_twse_monthly_revenue(self, wanted_codes: set[str]) -> list[dict]:
-        """從證交所 OpenAPI 撈取最新每月自結營收彙總 (t187ap05_L)，抓取最新開獎營收與巨幅增減"""
+        """從證交所 OpenAPI 撈取最新每月自結營收彙總 (t187ap05_L)"""
         results: list[dict] = []
         try:
             url = "https://openapi.twse.com.tw/v1/opendata/t187ap05_L"
@@ -307,7 +459,6 @@ class AnnouncementService:
                     c = str(it.get("公司代號", "")).strip()
                     if c in wanted_codes:
                         m_str = str(it.get("資料年月", "")).strip()
-                        # 當月營收單位為千元
                         raw_cur = float(it.get("營業收入-當月營收", 0) or 0)
                         cur_amount = raw_cur * 1000
                         mom = float(it.get("營業收入-上月比較增減(%)", 0) or 0)
@@ -315,11 +466,7 @@ class AnnouncementService:
 
                         month_label = ""
                         if len(m_str) >= 5:
-                            # 11509 -> 9月營收
                             month_label = f"{int(m_str[-2:])}月"
-
-                        # 標籤簡潔顯示為粉色「自結」，詳細數據與增減留待 hover 顯示
-                        tag_text = "自結"
 
                         detail_lines = [
                             f"{month_label}自結營收: {format_chinese_amount(cur_amount)}",
@@ -333,7 +480,7 @@ class AnnouncementService:
                         results.append({
                             "id": f"rev-{c}-{m_str}",
                             "code": c,
-                            "tag": tag_text,
+                            "tag": "自結",
                             "title": f"最新{month_label}自結營收公告",
                             "date": str(it.get("出表日期", "")),
                             "detail": "\n".join(detail_lines),
@@ -341,6 +488,49 @@ class AnnouncementService:
                         })
         except Exception as e:
             logger.warning(f"Error fetching TWSE monthly revenue: {e}")
+        return results
+
+    def _fetch_tpex_monthly_revenue(self, wanted_codes: set[str]) -> list[dict]:
+        """從櫃買中心 TPEx OpenAPI 撈取最新每月自結營收彙總 (mopsfin_t187ap05_O)"""
+        results: list[dict] = []
+        try:
+            url = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                for it in data:
+                    c = str(it.get("公司代號", "")).strip()
+                    if c in wanted_codes:
+                        m_str = str(it.get("資料年月", "")).strip()
+                        raw_cur = float(it.get("營業收入-當月營收", 0) or 0)
+                        cur_amount = raw_cur * 1000
+                        mom = float(it.get("營業收入-上月比較增減(%)", 0) or 0)
+                        yoy = float(it.get("營業收入-去年同月增減(%)", 0) or 0)
+
+                        month_label = ""
+                        if len(m_str) >= 5:
+                            month_label = f"{int(m_str[-2:])}月"
+
+                        detail_lines = [
+                            f"{month_label}自結營收: {format_chinese_amount(cur_amount)}",
+                            f"月增率 (MoM): {'+' if mom > 0 else ''}{mom:.2f}%",
+                            f"年增率 (YoY): {'+' if yoy > 0 else ''}{yoy:.2f}%",
+                        ]
+                        memo = str(it.get("備註", "")).strip()
+                        if memo and memo != "-":
+                            detail_lines.append(f"公司說明: {memo}")
+
+                        results.append({
+                            "id": f"rev-{c}-{m_str}",
+                            "code": c,
+                            "tag": "自結",
+                            "title": f"最新{month_label}自結營收公告",
+                            "date": str(it.get("出表日期", "")),
+                            "detail": "\n".join(detail_lines),
+                            "category": "revenue",
+                        })
+        except Exception as e:
+            logger.warning(f"Error fetching TPEx monthly revenue: {e}")
         return results
 
     def _fetch_twse_exdividend(self, wanted_codes: set[str]) -> list[dict]:
@@ -369,7 +559,6 @@ class AnnouncementService:
                             tag_type = "除息" if "息" in ex_type else "除權"
                             tag_label = f"{tag_type} {mm}/{dd}"
 
-                        # 嚴格過濾：除權息日期已過（d_obj < today），隔天即過期不顯示！
                         if d_obj and d_obj < today:
                             continue
 
@@ -394,6 +583,58 @@ class AnnouncementService:
                         })
         except Exception as e:
             logger.warning(f"Error fetching TWSE exdividend: {e}")
+        return results
+
+    def _fetch_tpex_exdividend(self, wanted_codes: set[str]) -> list[dict]:
+        """從櫃買中心 TPEx OpenAPI 撈取上櫃除權除息預告表 (tpex_exright_prepost)"""
+        results: list[dict] = []
+        today = date.today()
+        try:
+            url = "https://www.tpex.org.tw/openapi/v1/tpex_exright_prepost"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                for it in data:
+                    c = str(it.get("SecuritiesCompanyCode", "")).strip()
+                    if c in wanted_codes:
+                        date_raw = str(it.get("ExRrightsExDividendDate", "")).strip()
+                        d_obj = None
+                        fmt_date = date_raw
+                        tag_label = "除息"
+                        if len(date_raw) == 7:
+                            yy = int(date_raw[:3]) + 1911
+                            mm = int(date_raw[3:5])
+                            dd = int(date_raw[5:])
+                            d_obj = date(yy, mm, dd)
+                            fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
+                            ex_type = str(it.get("ExRrightsExDividend", "除息")).strip()
+                            tag_type = "除息" if "息" in ex_type else "除權"
+                            tag_label = f"{tag_type} {mm}/{dd}"
+
+                        if d_obj and d_obj < today:
+                            continue
+
+                        ex_type = str(it.get("ExRrightsExDividend", "除息")).strip()
+                        cash_div = str(it.get("CashDividend", "")).strip()
+                        stock_div = str(it.get("StockDividendRatio", "")).strip()
+
+                        detail_lines = []
+                        if cash_div and cash_div not in ["0.00000000", "0.00", "0"]:
+                            detail_lines.append(f"每股現金股利: {float(cash_div):.4f} 元")
+                        if stock_div and stock_div not in ["0.00000000", "0.00", "0"]:
+                            detail_lines.append(f"每股股票股利: {float(stock_div):.4f} 股")
+
+                        results.append({
+                            "id": f"exdiv-{c}-{date_raw}",
+                            "code": c,
+                            "tag": tag_label,
+                            "title": f"上櫃除權除息預告 ({ex_type})",
+                            "date": fmt_date,
+                            "detail": "\n".join(detail_lines) if detail_lines else "詳見櫃買中心除權除息公告",
+                            "category": "exdividend",
+                        })
+        except Exception as e:
+            logger.warning(f"Error fetching TPEx exdividend: {e}")
         return results
 
     def _fetch_yfinance_calendar(self, wanted_codes: set[str]) -> list[dict]:
