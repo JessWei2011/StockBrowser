@@ -17,13 +17,15 @@ export const GroupTabs: React.FC<GroupTabsProps> = ({
       <div className="tabs-list">
         {groups.map((group) => {
           const isActive = group.id === activeGroupId;
-          const isWealth = group.id === 'g-wealth' || group.name === '財神簿' || group.isSystemGroup;
+          const isVault = group.id === 'g-vault' || group.name === '財神庫';
+          const isWealth = group.id === 'g-wealth' || group.name === '財神簿';
           return (
             <button
               key={group.id}
-              className={`tab-item ${isActive ? 'active' : ''} ${isWealth ? 'tab-wealth' : ''}`}
+              className={`tab-item ${isActive ? 'active' : ''} ${isVault ? 'tab-vault' : isWealth ? 'tab-wealth' : ''}`}
               onClick={() => onSelectGroup(group.id)}
             >
+              {isVault && <span className="wealth-icon">🏦</span>}
               {isWealth && <span className="wealth-icon">💰</span>}
               {group.name}
             </button>

@@ -2,10 +2,10 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from backend.app.settings import settings
 from backend.app.repositories.db import init_db
 from backend.app.services.shioaji_adapter import shioaji_adapter

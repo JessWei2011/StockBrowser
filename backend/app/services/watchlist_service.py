@@ -16,11 +16,21 @@ class WatchlistService:
         }
 
     async def sync_wealth_book(self):
-        """從永豐 API 索取真實持股清單，並自動同步至固定第一個分頁『財神簿』"""
-        g_id = await db.ensure_wealth_book_group()
+        """從永豐 API 索取真實持股清單，並自動同步至固定分頁『財神庫』與『財神簿』"""
+        v_id, w_id = await db.ensure_system_wealth_groups()
         position_codes, summary = shioaji_adapter.fetch_stock_positions()
         if summary:
             self.wealth_summary = summary
+
+        if shioaji_adapter.stock_positions_detail:
+            await db.save_stock_positions(shioaji_adapter.stock_positions_detail)
+        elif not position_codes:
+            # 離線或重啟時，嘗試從 DB 載入快取的持股
+            cached_positions = await db.load_stock_positions()
+            if cached_positions:
+                shioaji_adapter.stock_positions_detail = cached_positions
+                position_codes = [p["code"] for p in cached_positions]
+
         if not position_codes:
             logger.info("No stock positions fetched or Shioaji not connected.")
             return
@@ -33,8 +43,9 @@ class WatchlistService:
             sec_type = info["securityType"] if info else "STOCK"
             items_data.append((code, name, exchange, sec_type))
 
-        await db.sync_group_items(g_id, items_data)
-        logger.info(f"Successfully synced {len(items_data)} positions to 財神簿.")
+        await db.sync_group_items(v_id, items_data)
+        await db.sync_group_items(w_id, items_data)
+        logger.info(f"Successfully synced {len(items_data)} positions to 財神庫 and 財神簿.")
 
     async def sync_subscriptions(self):
         """讀取資料庫中所有群組的股票聯集，並向 Shioaji 增量同步訂閱"""
@@ -59,6 +70,7 @@ class WatchlistService:
             "groups": [g.model_dump() for g in groups],
             "quotes": {k: v.model_dump() for k, v in all_quotes.items()},
             "wealthSummary": shioaji_adapter.get_live_wealth_summary(),
+            "positions": shioaji_adapter.get_positions_detail(),
             "marketIndices": shioaji_adapter.market_indices,
             "serverVersion": server_ver,
             "upstream": {

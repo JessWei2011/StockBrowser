@@ -55,6 +55,7 @@ class QuoteStore:
         exchange: Optional[str] = None,
         security_type: Optional[str] = None,
         last: Optional[float] = None,
+        odd_lot_last: Optional[float] = None,
         bid: Optional[float] = None,
         ask: Optional[float] = None,
         open_price: Optional[float] = None,
@@ -102,12 +103,16 @@ class QuoteStore:
                 current.securityType = security_type
                 changed = True
 
-            if previous_close is not None and previous_close != current.previousClose:
+            if previous_close is not None and previous_close > 0 and previous_close != current.previousClose:
                 current.previousClose = previous_close
                 changed = True
 
-            if last is not None and last != current.last:
+            if last is not None and last > 0 and last != current.last:
                 current.last = last
+                changed = True
+
+            if odd_lot_last is not None and odd_lot_last > 0 and odd_lot_last != current.oddLotLast:
+                current.oddLotLast = odd_lot_last
                 changed = True
 
             if bid is not None and bid != current.bid:
@@ -118,15 +123,15 @@ class QuoteStore:
                 current.ask = ask
                 changed = True
 
-            if open_price is not None and open_price != current.open:
+            if open_price is not None and open_price > 0 and open_price != current.open:
                 current.open = open_price
                 changed = True
 
-            if high is not None and high != current.high:
+            if high is not None and high > 0 and high != current.high:
                 current.high = high
                 changed = True
 
-            if low is not None and low != current.low:
+            if low is not None and low > 0 and low != current.low:
                 current.low = low
                 changed = True
 
@@ -138,8 +143,8 @@ class QuoteStore:
                 current.dataStatus = data_status
                 changed = True
 
-            # 計算漲跌與漲幅
-            if current.last is not None and current.previousClose is not None and current.previousClose > 0:
+            # 計算漲跌與漲幅 (只有當昨收與現價皆有效且大於 0 時才計算)
+            if current.last is not None and current.last > 0 and current.previousClose is not None and current.previousClose > 0:
                 new_chg = round(current.last - current.previousClose, 2)
                 new_pct = round((new_chg / current.previousClose) * 100, 2)
                 if new_chg != current.change:

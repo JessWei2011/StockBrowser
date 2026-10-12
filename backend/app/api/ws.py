@@ -4,6 +4,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from backend.app.services.publisher import publisher
 from backend.app.services.quote_store import quote_store, now_iso
 
+from backend.app.services.shioaji_adapter import shioaji_adapter
+
 logger = logging.getLogger("ws")
 router = APIRouter()
 
@@ -18,7 +20,10 @@ async def quotes_websocket(websocket: WebSocket):
         "type": "snapshot",
         "serverVersion": server_ver,
         "generatedAt": now_iso(),
-        "quotes": [q.model_dump() for q in all_quotes.values()]
+        "quotes": [q.model_dump() for q in all_quotes.values()],
+        "positions": shioaji_adapter.get_positions_detail(),
+        "wealthSummary": shioaji_adapter.get_live_wealth_summary(),
+        "marketIndices": shioaji_adapter.market_indices,
     }
     await websocket.send_text(json.dumps(snapshot_msg))
 

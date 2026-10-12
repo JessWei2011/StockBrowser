@@ -18,7 +18,7 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
   onMoveItem,
 }) => {
   const formatPrice = (val: number | null | undefined, isSim?: boolean): React.ReactNode => {
-    if (val === null || val === undefined || isNaN(val)) return '—';
+    if (val === null || val === undefined || isNaN(val) || val <= 0) return '—';
     const text = val.toFixed(2);
     if (isSim) {
       return (
@@ -37,7 +37,7 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
   };
 
   const getPriceClass = (val: number | null | undefined, prev: number | null | undefined): string => {
-    if (val === null || val === undefined || isNaN(val) || prev === null || prev === undefined || isNaN(prev)) return 'color-neutral';
+    if (val === null || val === undefined || isNaN(val) || val <= 0 || prev === null || prev === undefined || isNaN(prev) || prev <= 0) return 'color-neutral';
     if (val > prev) return 'color-up';
     if (val < prev) return 'color-down';
     return 'color-neutral';
@@ -55,10 +55,10 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
     <div className="flat-card-container">
       {items.map((item, idx) => {
         const q = quotes[item.code];
-        const prev = q?.previousClose ?? null;
-        const last = q?.last ?? null;
-        const chg = q?.change ?? null;
-        const pct = q?.changePercent ?? null;
+        const prev = (q?.previousClose && q.previousClose > 0) ? q.previousClose : null;
+        const last = (q?.last && q.last > 0) ? q.last : null;
+        const chg = (last !== null && prev !== null) ? (q?.change ?? (last - prev)) : null;
+        const pct = (last !== null && prev !== null) ? (q?.changePercent ?? (chg !== null ? (chg / prev) * 100 : null)) : null;
         const isSimulated = q?.isSimulated ?? false;
         const isAttention = q?.isAttention ?? false;
         const dispositionLevel = q?.dispositionLevel ?? 0;
@@ -66,8 +66,8 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
 
         // 1. 核心漲跌顏色判定 (紅漲、綠跌、平盤中性灰)
         let changeClass = 'color-neutral';
-        const effectiveChg = chg !== null ? chg : (last !== null && prev !== null ? last - prev : null);
-        const effectivePct = pct !== null ? pct : (effectiveChg !== null && prev !== null && prev > 0 ? (effectiveChg / prev) * 100 : null);
+        const effectiveChg = chg;
+        const effectivePct = pct;
         if (effectiveChg !== null && !isNaN(effectiveChg)) {
           if (effectiveChg > 0) changeClass = 'color-up';
           else if (effectiveChg < 0) changeClass = 'color-down';
@@ -97,8 +97,21 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
             {/* 上半行：商品識別 (左) + 核心即時現價與漲跌 (右) */}
             <div className="flat-row-primary">
               <div className="flat-stock-id">
-                <span className="flat-code">{item.code}</span>
-                <span className="flat-name">{item.name || q?.name || ''}</span>
+                {(() => {
+                  const isOtc = ((item.exchange || q?.exchange || '').toUpperCase() === 'OTC');
+                  return (
+                    <>
+                      <span
+                        className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
+                        title={isOtc ? '上櫃股票' : '上市股票'}
+                      >
+                        {isOtc ? '櫃' : '市'}
+                      </span>
+                      <span className={`flat-code ${isOtc ? 'code-otc' : 'code-tse'}`}>{item.code}</span>
+                      <span className="flat-name">{item.name || q?.name || ''}</span>
+                    </>
+                  );
+                })()}
                 {(dispositionLevel > 0 || dispositionPeriod) && (
                   <span className="stock-badge badge-disposition" title={dispositionPeriod ? `處置股票 (期間: ${dispositionPeriod})` : '處置股票'}>
                     [{dispText}]
@@ -109,19 +122,23 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
                     [注意]
                   </span>
                 )}
-                <span className="flat-tag">{item.exchange}</span>
               </div>
 
               <div className="flat-price-display">
-                {badgeClass ? (
-                  <span className={`flat-price-pill ${badgeClass}`}>
-                    {formatPrice(last, isSimulated)}
+                <div className="flat-price-stack">
+                  {badgeClass ? (
+                    <span className={`flat-price-pill ${badgeClass}`}>
+                      {formatPrice(last, isSimulated)}
+                    </span>
+                  ) : (
+                    <span className={`flat-price-val ${getPriceClass(last, prev)}`}>
+                      {formatPrice(last, isSimulated)}
+                    </span>
+                  )}
+                  <span className={`flat-oddlot-price ${getPriceClass(q?.oddLotLast, prev)}`} title="零股成交價">
+                    <span className="flat-oddlot-prefix">零</span>{formatPrice(q?.oddLotLast)}
                   </span>
-                ) : (
-                  <span className={`flat-price-val ${getPriceClass(last, prev)}`}>
-                    {formatPrice(last, isSimulated)}
-                  </span>
-                )}
+                </div>
 
                 <div className="flat-chg-stack">
                   <span className={`flat-chg-num ${changeClass}`}>

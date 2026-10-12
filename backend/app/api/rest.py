@@ -2,12 +2,13 @@ from fastapi import APIRouter, HTTPException, Query
 from backend.app.services.watchlist_service import watchlist_service
 from backend.app.services.shioaji_adapter import shioaji_adapter
 from backend.app.services.quote_store import quote_store
+from backend.app.settings import settings
 from backend.app.domain.models import (
     CreateGroupRequest,
     UpdateGroupRequest,
     AddItemRequest,
     ReorderItemsRequest,
-    InstrumentSearchResult
+    InstrumentSearchResult,
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -39,22 +40,22 @@ async def create_group(body: CreateGroupRequest):
 
 @router.patch("/groups/{group_id}")
 async def update_group(group_id: str, body: UpdateGroupRequest):
-    if group_id == "g-wealth":
-        raise HTTPException(status_code=400, detail="『財神簿』為系統持股固定分頁，無法更名或移動位置")
+    if group_id in ("g-vault", "g-wealth"):
+        raise HTTPException(status_code=400, detail="『財神庫』與『財神簿』為系統持股固定分頁，無法更名或移動位置")
     await watchlist_service.update_group(group_id, body.name, body.position)
     return {"status": "ok"}
 
 @router.delete("/groups/{group_id}")
 async def delete_group(group_id: str):
-    if group_id == "g-wealth":
-        raise HTTPException(status_code=400, detail="『財神簿』為系統持股固定分頁，無法刪除")
+    if group_id in ("g-vault", "g-wealth"):
+        raise HTTPException(status_code=400, detail="『財神庫』與『財神簿』為系統持股固定分頁，無法刪除")
     await watchlist_service.delete_group(group_id)
     return {"status": "ok"}
 
 @router.post("/groups/{group_id}/items")
 async def add_item(group_id: str, body: AddItemRequest):
-    if group_id == "g-wealth":
-        raise HTTPException(status_code=400, detail="『財神簿』由永豐 API 持股自動同步，無需手動新增")
+    if group_id in ("g-vault", "g-wealth"):
+        raise HTTPException(status_code=400, detail="『財神庫』與『財神簿』由永豐 API 持股自動同步，無需手動新增")
     code = body.code.strip().upper()
     if not code:
         raise HTTPException(status_code=400, detail="Stock code cannot be empty")
@@ -70,8 +71,8 @@ async def add_item(group_id: str, body: AddItemRequest):
 
 @router.delete("/groups/{group_id}/items/{code}")
 async def remove_item(group_id: str, code: str):
-    if group_id == "g-wealth":
-        raise HTTPException(status_code=400, detail="『財神簿』由永豐 API 持股自動同步，無法手動刪除")
+    if group_id in ("g-vault", "g-wealth"):
+        raise HTTPException(status_code=400, detail="『財神庫』與『財神簿』由永豐 API 持股自動同步，無法手動刪除")
     await watchlist_service.remove_item(group_id, code)
     return {"status": "ok"}
 
@@ -83,3 +84,4 @@ async def reorder_items(group_id: str, body: ReorderItemsRequest):
 @router.get("/instruments/search", response_model=list[InstrumentSearchResult])
 async def search_instruments(q: str = Query("", min_length=1)):
     return shioaji_adapter.search_contracts(q)
+

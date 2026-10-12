@@ -41,6 +41,17 @@ async def init_db():
             UNIQUE(group_id, code)
         );
         """)
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS stock_positions (
+            code TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            quantity REAL NOT NULL,
+            cost_price REAL NOT NULL,
+            initial_last REAL,
+            initial_pnl REAL,
+            updated_at TEXT NOT NULL
+        );
+        """)
         await db.commit()
 
         # 檢查是否需要預設種子資料
@@ -123,7 +134,7 @@ async def get_all_groups() -> list[WatchlistGroup]:
                     position=i["position"]
                 ) for i in item_rows
             ]
-            is_sys = bool(g_row["id"] == "g-wealth" or g_row["name"] == "財神簿")
+            is_sys = bool(g_row["id"] in ("g-vault", "g-wealth") or g_row["name"] in ("財神庫", "財神簿"))
             result.append(
                 WatchlistGroup(
                     id=g_row["id"],
@@ -137,26 +148,95 @@ async def get_all_groups() -> list[WatchlistGroup]:
             )
         return result
 
-async def ensure_wealth_book_group() -> str:
-    """確保「財神簿」固定為第一個系統群組 (position 0)"""
+async def ensure_system_wealth_groups() -> tuple[str, str]:
+    """
+    確保「財神庫」固定為第 1 個系統群組 (position 0)
+    確保「財神簿」固定為第 2 個系統群組 (position 1)
+    其餘自選群組從 position 2 開始
+    """
     async with get_db_connection() as db:
-        cur = await db.execute("SELECT id FROM watchlist_groups WHERE id = 'g-wealth' OR name = '財神簿'")
-        row = await cur.fetchone()
         ts = now_iso()
-        if row:
-            g_id = row[0]
-            # 確保 id 為 g-wealth 且 position 為 0
-            await db.execute("UPDATE watchlist_groups SET position = position + 1 WHERE id != ? AND position <= 0", (g_id,))
-            await db.execute("UPDATE watchlist_groups SET name = '財神簿', position = 0, updated_at = ? WHERE id = ?", (ts, g_id))
+        
+        # 1. 處理 財神庫 (g-vault)
+        cur_v = await db.execute("SELECT id FROM watchlist_groups WHERE id = 'g-vault' OR name = '財神庫'")
+        row_v = await cur_v.fetchone()
+        v_id = row_v[0] if row_v else "g-vault"
+
+        # 2. 處理 財神簿 (g-wealth)
+        cur_w = await db.execute("SELECT id FROM watchlist_groups WHERE id = 'g-wealth' OR name = '財神簿'")
+        row_w = await cur_w.fetchone()
+        w_id = row_w[0] if row_w else "g-wealth"
+
+        if row_v:
+            await db.execute("UPDATE watchlist_groups SET name = '財神庫', position = 0, updated_at = ? WHERE id = ?", (ts, v_id))
         else:
-            g_id = "g-wealth"
-            await db.execute("UPDATE watchlist_groups SET position = position + 1 WHERE position >= 0")
             await db.execute(
-                "INSERT INTO watchlist_groups (id, name, position, created_at, updated_at) VALUES (?, '財神簿', 0, ?, ?)",
-                (g_id, ts, ts)
+                "INSERT INTO watchlist_groups (id, name, position, created_at, updated_at) VALUES (?, '財神庫', 0, ?, ?)",
+                (v_id, ts, ts)
+            )
+
+        if row_w:
+            await db.execute("UPDATE watchlist_groups SET name = '財神簿', position = 1, updated_at = ? WHERE id = ?", (ts, w_id))
+        else:
+            await db.execute(
+                "INSERT INTO watchlist_groups (id, name, position, created_at, updated_at) VALUES (?, '財神簿', 1, ?, ?)",
+                (w_id, ts, ts)
+            )
+
+        # 重整其餘群組的連續 position (從 2 開始)
+        other_cur = await db.execute(
+            "SELECT id FROM watchlist_groups WHERE id NOT IN (?, ?) ORDER BY position ASC, created_at ASC",
+            (v_id, w_id)
+        )
+        other_rows = await other_cur.fetchall()
+        for idx, o_row in enumerate(other_rows, start=2):
+            await db.execute("UPDATE watchlist_groups SET position = ? WHERE id = ?", (idx, o_row["id"]))
+
+        await db.commit()
+        return v_id, w_id
+
+async def ensure_wealth_book_group() -> str:
+    _, w_id = await ensure_system_wealth_groups()
+    return w_id
+
+async def save_stock_positions(positions: list[dict]):
+    """持久化持股明細至 SQLite，確保即使 Shioaji 重啟或離線仍能呈現持股未實現損益"""
+    async with get_db_connection() as db:
+        await db.execute("DELETE FROM stock_positions")
+        ts = now_iso()
+        for p in positions:
+            await db.execute(
+                """INSERT OR REPLACE INTO stock_positions 
+                (code, name, quantity, cost_price, initial_last, initial_pnl, updated_at) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    p["code"],
+                    p.get("name", p["code"]),
+                    float(p.get("quantity", 0) or 0),
+                    float(p.get("cost_price", 0) or 0),
+                    float(p.get("initial_last", 0) or 0) if p.get("initial_last") is not None else None,
+                    float(p.get("initial_pnl", 0) or 0) if p.get("initial_pnl") is not None else None,
+                    ts
+                )
             )
         await db.commit()
-        return g_id
+
+async def load_stock_positions() -> list[dict]:
+    """從 SQLite 載入快取的持股明細"""
+    async with get_db_connection() as db:
+        cur = await db.execute("SELECT code, name, quantity, cost_price, initial_last, initial_pnl FROM stock_positions ORDER BY code ASC")
+        rows = await cur.fetchall()
+        return [
+            {
+                "code": r["code"],
+                "name": r["name"],
+                "quantity": float(r["quantity"]),
+                "cost_price": float(r["cost_price"]),
+                "initial_last": float(r["initial_last"]) if r["initial_last"] is not None else None,
+                "initial_pnl": float(r["initial_pnl"]) if r["initial_pnl"] is not None else None,
+            }
+            for r in rows
+        ]
 
 async def sync_group_items(group_id: str, items_data: list[tuple[str, str, str, str]]):
     """將指定群組的持股項目完全同步為 items_data: [(code, name, exchange, security_type), ...]"""

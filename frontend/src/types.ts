@@ -6,6 +6,7 @@ export interface QuoteState {
   exchange: string;
   securityType: string;
   last: number | null;
+  oddLotLast?: number | null;
   bid: number | null;
   ask: number | null;
   open: number | null;
@@ -70,9 +71,20 @@ export interface MarketIndexState {
   changePercent: number;
 }
 
+export interface StockPosition {
+  code: string;
+  name: string;
+  exchange?: string;
+  quantity: number;
+  costPrice: number;
+  initialLast?: number;
+  initialPnl?: number;
+}
+
 export interface BootstrapResponse {
   groups: WatchlistGroup[];
   quotes: Record<string, QuoteState>;
+  positions?: StockPosition[];
   wealthSummary?: WealthSummary;
   marketIndices?: Record<string, MarketIndexState>;
   serverVersion: number;
@@ -96,6 +108,7 @@ export type WebSocketMessage =
       serverVersion: number;
       generatedAt: string;
       quotes: QuoteState[];
+      positions?: StockPosition[];
       wealthSummary?: WealthSummary;
       marketIndices?: Record<string, MarketIndexState>;
     }

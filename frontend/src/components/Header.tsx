@@ -105,7 +105,7 @@ export const Header: React.FC<HeaderProps> = ({
               className="btn-add-stock"
               disabled={!query.trim() || !currentGroupId || isAdding || isWealthGroup}
               onClick={() => handleAdd(results[0]?.code || query)}
-              title={isWealthGroup ? '『財神簿』由永豐 API 持股自動同步' : '新增至目前組合'}
+              title={isWealthGroup ? '系統分頁由永豐 API 持股自動同步，無需手動新增' : '新增至目前組合'}
             >
               {isWealthGroup ? '持股自動同步' : (isAdding ? '新增中...' : '新增個股')}
             </button>

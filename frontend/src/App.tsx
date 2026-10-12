@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { WatchlistGroup, QuoteState, UpstreamStatus, WebSocketMessage } from './types';
+import type { WatchlistGroup, QuoteState, UpstreamStatus, WebSocketMessage, StockPosition } from './types';
 import {
   fetchBootstrap,
   createGroup,
@@ -14,6 +14,8 @@ import { Header } from './components/Header';
 import { GroupTabs } from './components/GroupTabs';
 import { QuoteTable } from './components/QuoteTable';
 import { CompactCardList } from './components/CompactCardList';
+import { VaultTable } from './components/VaultTable';
+import { VaultCardList } from './components/VaultCardList';
 import { GroupModal } from './components/GroupModal';
 import './App.css';
 
@@ -21,6 +23,7 @@ export const App: React.FC = () => {
   const [groups, setGroups] = useState<WatchlistGroup[]>([]);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<Record<string, QuoteState>>({});
+  const [positions, setPositions] = useState<StockPosition[]>([]);
   const [dirtyCodes, setDirtyCodes] = useState<Set<string>>(new Set());
   const [upstream, setUpstream] = useState<UpstreamStatus>({
     connected: false,
@@ -86,6 +89,9 @@ export const App: React.FC = () => {
       const data = await fetchBootstrap();
       setGroups(data.groups);
       setQuotes((prev) => ({ ...prev, ...data.quotes }));
+      if (data.positions) {
+        setPositions(data.positions);
+      }
       setUpstream(data.upstream);
       if (data.wealthSummary) {
         setWealthSummary(data.wealthSummary);
@@ -118,6 +124,7 @@ export const App: React.FC = () => {
           nextQuotes[q.code] = q;
         }
         setQuotes((prev) => ({ ...prev, ...nextQuotes }));
+        if (msg.positions) setPositions(msg.positions);
         if (msg.wealthSummary) setWealthSummary(msg.wealthSummary);
         if (msg.marketIndices) setMarketIndices(msg.marketIndices);
       } else if (msg.type === 'quote_delta') {
@@ -235,11 +242,15 @@ export const App: React.FC = () => {
     await loadBootstrap();
   };
 
+  const isVaultGroup = activeGroup?.id === 'g-vault' || activeGroup?.name === '財神庫';
+  const isWealthGroup = activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿';
+  const isSystemGroup = isVaultGroup || isWealthGroup || Boolean(activeGroup?.isSystemGroup);
+
   return (
     <div className="stock-browser-app">
       <Header
         currentGroupId={activeGroup?.id || null}
-        isWealthGroup={activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿' || activeGroup?.isSystemGroup}
+        isWealthGroup={isSystemGroup}
         subscribedCount={upstream.subscribedCount}
         maxSubscribed={upstream.maxAllowed}
         wsConnected={wsConnected}
@@ -262,7 +273,11 @@ export const App: React.FC = () => {
       <div className={`view-mode-bar ${viewMode === 'card' ? 'view-mode-card' : 'view-mode-table'}`}>
         <div className="view-mode-header-row">
           <div className="view-mode-count">
-            本組合共 <strong>{activeGroup?.items.length || 0}</strong> 檔商品
+            {isVaultGroup ? (
+              <>庫存共 <strong>{positions.length}</strong> 檔持股</>
+            ) : (
+              <>本組合共 <strong>{activeGroup?.items.length || 0}</strong> 檔商品</>
+            )}
           </div>
           <div className="view-mode-toggle">
             <span className="view-toggle-label">檢視模式：</span>
@@ -329,7 +344,7 @@ export const App: React.FC = () => {
                 <span
                   className={`index-val ${
                     marketIndices.TSE.change > 0
-                      ? 'color-up'
+                       ? 'color-up'
                       : marketIndices.TSE.change < 0
                       ? 'color-down'
                       : 'color-neutral'
@@ -396,10 +411,24 @@ export const App: React.FC = () => {
       </div>
 
       <main className="main-content">
-        {viewMode === 'table' ? (
+        {isVaultGroup ? (
+          viewMode === 'table' ? (
+            <VaultTable
+              positions={positions}
+              quotes={quotes}
+              dirtyCodes={dirtyCodes}
+            />
+          ) : (
+            <VaultCardList
+              positions={positions}
+              quotes={quotes}
+              dirtyCodes={dirtyCodes}
+            />
+          )
+        ) : viewMode === 'table' ? (
           <QuoteTable
             items={activeGroup?.items || []}
-            isWealthGroup={activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿' || activeGroup?.isSystemGroup}
+            isWealthGroup={isSystemGroup}
             quotes={quotes}
             dirtyCodes={dirtyCodes}
             onRemoveItem={handleRemoveStock}
@@ -409,7 +438,7 @@ export const App: React.FC = () => {
         ) : (
           <CompactCardList
             items={activeGroup?.items || []}
-            isWealthGroup={activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿' || activeGroup?.isSystemGroup}
+            isWealthGroup={isSystemGroup}
             quotes={quotes}
             dirtyCodes={dirtyCodes}
             onRemoveItem={handleRemoveStock}

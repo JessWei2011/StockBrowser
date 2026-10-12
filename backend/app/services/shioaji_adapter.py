@@ -177,9 +177,11 @@ class ShioajiAdapter:
                 # 建立合約快取以供搜尋
                 self._build_contracts_cache()
                 
-                # 設定 Quote callback (個股與指數)
+                # 設定 Quote callback (個股與指數) 與 盤中零股 Tick callback
                 self.api.set_on_quote_stk_v1_callback(self._on_quote_callback)
                 self.api.set_on_quote_idx_v1_callback(self._on_index_quote_callback)
+                self.api.set_on_tick_stk_v1_callback(self._on_tick_callback)
+                self.api.set_session_down_callback(self._on_session_down)
 
                 # 初始化與訂閱大盤加權指數 (TSE IX0001) 與 櫃買指數 (OTC IX0043)
                 self._init_and_subscribe_indices()
@@ -193,6 +195,53 @@ class ShioajiAdapter:
         # 如果開啟非盤中模擬跳動或處於測試模式，啟動輔助跳動背景任務
         if settings.ENABLE_OFFHOURS_MOCK_TICKS:
             self._mock_task = asyncio.create_task(self._mock_ticks_loop())
+
+    def _on_session_down(self):
+        logger.warning("Shioaji Solace session down event received! Scheduling reconnect...")
+        self.is_connected = False
+        if self._loop and not self._loop.is_closed():
+            self._loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(self.reconnect())
+            )
+
+    async def reconnect(self):
+        if getattr(self, "_reconnecting", False):
+            return
+        self._reconnecting = True
+        logger.info("Attempting to reconnect to Shioaji...")
+        try:
+            try:
+                if self.api:
+                    self.api.logout()
+            except Exception:
+                pass
+            await asyncio.sleep(2.0)
+            self.api = sj.Shioaji(simulation=settings.SJ_SIMULATION)
+            accounts = self.api.login(
+                api_key=settings.SJ_API_KEY,
+                secret_key=settings.SJ_SECRET_KEY,
+                subscribe_trade=False
+            )
+            self.is_logged_in = True
+            self.is_connected = True
+            logger.info("Shioaji re-login succeeded.")
+            
+            self.api.set_on_quote_stk_v1_callback(self._on_quote_callback)
+            self.api.set_on_quote_idx_v1_callback(self._on_index_quote_callback)
+            self.api.set_on_tick_stk_v1_callback(self._on_tick_callback)
+            self.api.set_session_down_callback(self._on_session_down)
+            
+            self._init_and_subscribe_indices()
+            
+            codes_to_resub = set(self.subscribed_codes)
+            self.subscribed_codes.clear()
+            self.subscribe_codes(codes_to_resub)
+            logger.info(f"Reconnected and successfully resubscribed {len(codes_to_resub)} stocks.")
+        except Exception as e:
+            logger.error(f"Reconnect failed: {e}", exc_info=True)
+            self.is_connected = False
+        finally:
+            self._reconnecting = False
 
     def stop(self):
         if self._mock_task:
@@ -274,14 +323,13 @@ class ShioajiAdapter:
             return [], {}
         
         try:
-            # 建立真實連線實例讀取庫存 (持股資料隸屬真實環境帳號)
-            real_api = sj.Shioaji(simulation=False)
-            real_api.login(
-                api_key=settings.SJ_API_KEY,
-                secret_key=settings.SJ_SECRET_KEY,
-                subscribe_trade=False
-            )
-            positions = real_api.list_positions(real_api.stock_account, unit=sj.Unit.Share)
+            # 優先使用現有已登入的 client，避免重複登入或呼叫 logout 破壞整體 Solace 連線
+            api_client = self.api if (self.api and self.is_logged_in) else None
+            if not api_client or not getattr(api_client, "stock_account", None):
+                logger.warning("Shioaji client not ready for list_positions.")
+                return [], {}
+
+            positions = api_client.list_positions(api_client.stock_account, unit=sj.Unit.Share)
             codes = []
             total_cost = 0.0
             total_pnl = 0.0
@@ -300,11 +348,17 @@ class ShioajiAdapter:
                 total_pnl += pnl
                 total_market_val += last_p * qty
                 if code_str:
+                    info = self.contracts_cache.get(code_str)
+                    s_name = info["name"] if info else code_str
+                    s_ex = info["exchange"] if info else "TSE"
                     self.stock_positions_detail.append({
                         "code": code_str,
+                        "name": s_name,
+                        "exchange": s_ex,
                         "quantity": qty,
                         "cost_price": price,
-                        "initial_last": last_p if last_p > 0 else price
+                        "initial_last": last_p if last_p > 0 else price,
+                        "initial_pnl": pnl
                     })
 
             roi = round((total_pnl / total_cost * 100), 2) if total_cost > 0 else 0.0
@@ -315,16 +369,30 @@ class ShioajiAdapter:
                 "returnPercent": roi,
             }
             self.cached_wealth_summary = summary
-
-            try:
-                real_api.logout()
-            except Exception:
-                pass
             logger.info(f"Fetched {len(codes)} stock positions from Shioaji. PnL: {summary['totalPnl']}, ROI: {summary['returnPercent']}%")
             return codes, summary
         except Exception as e:
             logger.error(f"Failed to fetch stock positions from Shioaji: {e}", exc_info=True)
             return [], {}
+
+    def get_positions_detail(self) -> list[dict[str, Any]]:
+        """回傳當前持股明細 (股票代號、名稱、市場別、剩餘股數、買進成本、初始參考價/損益)"""
+        result = []
+        for p in self.stock_positions_detail:
+            code = p["code"]
+            info = self.contracts_cache.get(code)
+            name = p.get("name") or (info["name"] if info else code)
+            exchange = p.get("exchange") or (info["exchange"] if info else "TSE")
+            result.append({
+                "code": code,
+                "name": name,
+                "exchange": exchange,
+                "quantity": p.get("quantity", 0.0),
+                "costPrice": p.get("cost_price", 0.0),
+                "initialLast": p.get("initial_last", p.get("cost_price", 0.0)),
+                "initialPnl": p.get("initial_pnl", 0.0),
+            })
+        return result
 
     def get_live_wealth_summary(self) -> dict[str, Any]:
         """根據當前即時行情動態計算最新總損益與報酬率"""
@@ -428,9 +496,21 @@ class ShioajiAdapter:
                 return
 
             last_price = safe_float(getattr(quote, "close", None))
+            if last_price is not None and last_price <= 0:
+                last_price = None
+
             open_price = safe_float(getattr(quote, "open", None))
+            if open_price is not None and open_price <= 0:
+                open_price = None
+
             high_price = safe_float(getattr(quote, "high", None))
+            if high_price is not None and high_price <= 0:
+                high_price = None
+
             low_price = safe_float(getattr(quote, "low", None))
+            if low_price is not None and low_price <= 0:
+                low_price = None
+
             tot_vol = safe_int(getattr(quote, "total_volume", None))
             
             bids = getattr(quote, "bid_price", [])
@@ -461,6 +541,28 @@ class ShioajiAdapter:
             )
         except Exception as e:
             logger.debug(f"Error parsing quote callback: {e}")
+
+    def _on_tick_callback(self, *args):
+        """由 Solace 執行緒回呼盤中零股 (TickSTKv1)"""
+        try:
+            tick = args[-1] if args else None
+            if not tick:
+                return
+            code = getattr(tick, "code", None)
+            if not code:
+                return
+
+            close_p = safe_float(getattr(tick, "close", None))
+            if close_p is not None and close_p > 0:
+                dt = getattr(tick, "datetime", None)
+                source_ts = dt.isoformat() if isinstance(dt, datetime) else None
+                quote_store.update_quote(
+                    code=code,
+                    odd_lot_last=close_p,
+                    source_ts=source_ts
+                )
+        except Exception as e:
+            logger.debug(f"Error parsing odd lot tick callback: {e}")
 
     def subscribe_codes(self, codes: set[str]):
         """增量訂閱新加入的股票"""
@@ -497,7 +599,7 @@ class ShioajiAdapter:
         # 批次取得快照
         self._fetch_snapshots(list(to_add))
 
-        # 呼叫 Shioaji API 訂閱即時行情
+        # 呼叫 Shioaji API 訂閱即時行情 (整股 Quote + 盤中零股 Tick)
         if self.api and self.is_logged_in:
             for code in to_add:
                 info = self.contracts_cache.get(code)
@@ -511,7 +613,18 @@ class ShioajiAdapter:
                         self.subscribed_codes.add(code)
                         logger.info(f"Subscribed Quote for {code}")
                     except Exception as e:
-                        logger.error(f"Failed to subscribe {code}: {e}")
+                        logger.error(f"Failed to subscribe Quote for {code}: {e}")
+
+                    try:
+                        self.api.subscribe(
+                            info["contract"],
+                            quote_type=sj.QuoteType.Tick,
+                            version=sj.QuoteVersion.v1,
+                            intraday_odd=True
+                        )
+                        logger.info(f"Subscribed Odd Lot Tick for {code}")
+                    except Exception as e:
+                        logger.warning(f"Failed to subscribe Odd Lot Tick for {code}: {e}")
                 else:
                     self.subscribed_codes.add(code)
         else:
@@ -532,7 +645,18 @@ class ShioajiAdapter:
                         )
                         logger.info(f"Unsubscribed Quote for {code}")
                     except Exception as e:
-                        logger.error(f"Failed to unsubscribe {code}: {e}")
+                        logger.error(f"Failed to unsubscribe Quote for {code}: {e}")
+
+                    try:
+                        self.api.unsubscribe(
+                            info["contract"],
+                            quote_type=sj.QuoteType.Tick,
+                            version=sj.QuoteVersion.v1,
+                            intraday_odd=True
+                        )
+                        logger.info(f"Unsubscribed Odd Lot Tick for {code}")
+                    except Exception as e:
+                        pass
                 self.subscribed_codes.discard(code)
                 quote_store.remove_quote(code)
 
@@ -555,6 +679,21 @@ class ShioajiAdapter:
             for s in snaps:
                 code = str(s.code)
                 last_price = safe_float(s.close)
+                if last_price is not None and last_price <= 0:
+                    last_price = None
+
+                open_price = safe_float(s.open)
+                if open_price is not None and open_price <= 0:
+                    open_price = None
+
+                high_price = safe_float(s.high)
+                if high_price is not None and high_price <= 0:
+                    high_price = None
+
+                low_price = safe_float(s.low)
+                if low_price is not None and low_price <= 0:
+                    low_price = None
+
                 chg_price = safe_float(s.change_price)
                 ref_close = (last_price - chg_price) if (last_price is not None and chg_price is not None) else None
                 
@@ -576,13 +715,13 @@ class ShioajiAdapter:
                     last=last_price,
                     bid=safe_float(s.buy_price),
                     ask=safe_float(s.sell_price),
-                    open_price=safe_float(s.open),
-                    high=safe_float(s.high),
-                    low=safe_float(s.low),
+                    open_price=open_price,
+                    high=high_price,
+                    low=low_price,
                     total_volume=safe_int(s.total_volume),
                     previous_close=ref_close,
                     source_ts=ts_str,
-                    data_status="closed"
+                    data_status="live" if is_taiwan_market_open() else "closed"
                 )
             logger.info(f"Loaded snapshots for {len(snaps)} contracts.")
         except Exception as e:

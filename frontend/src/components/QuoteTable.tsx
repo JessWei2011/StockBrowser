@@ -23,7 +23,7 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   const formatPrice = (val: number | null | undefined, isSim?: boolean): React.ReactNode => {
-    if (val === null || val === undefined || isNaN(val)) return '—';
+    if (val === null || val === undefined || isNaN(val) || val <= 0) return '—';
     const text = val.toFixed(2);
     if (isSim) {
       return (
@@ -42,7 +42,7 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
   };
 
   const getPriceClass = (val: number | null | undefined, prev: number | null | undefined): string => {
-    if (val === null || val === undefined || isNaN(val) || prev === null || prev === undefined || isNaN(prev)) return 'color-neutral';
+    if (val === null || val === undefined || isNaN(val) || val <= 0 || prev === null || prev === undefined || isNaN(prev) || prev <= 0) return 'color-neutral';
     if (val > prev) return 'color-up';
     if (val < prev) return 'color-down';
     return 'color-neutral';
@@ -86,6 +86,7 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
             <th className="th-reorder">排序</th>
             <th className="th-sticky-stock">商品</th>
             <th>成交價</th>
+            <th>零股價</th>
             <th>漲跌</th>
             <th>漲跌幅</th>
             <th>最高</th>
@@ -99,22 +100,22 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
         <tbody>
           {items.length === 0 ? (
             <tr>
-              <td colSpan={11} className="empty-message">
+              <td colSpan={12} className="empty-message">
                 目前群組沒有商品，請由上方搜尋並新增個股。
               </td>
             </tr>
           ) : (
             items.map((item, idx) => {
               const q = quotes[item.code];
-              const prev = q?.previousClose ?? null;
-              const last = q?.last ?? null;
-              const chg = q?.change ?? null;
-              const pct = q?.changePercent ?? null;
+              const prev = (q?.previousClose && q.previousClose > 0) ? q.previousClose : null;
+              const last = (q?.last && q.last > 0) ? q.last : null;
+              const chg = (last !== null && prev !== null) ? (q?.change ?? (last - prev)) : null;
+              const pct = (last !== null && prev !== null) ? (q?.changePercent ?? (chg !== null ? (chg / prev) * 100 : null)) : null;
 
               // 1. 核心漲跌顏色判定 (紅漲、綠跌、平盤中性灰)
               let changeClass = 'color-neutral';
-              const effectiveChg = chg !== null ? chg : (last !== null && prev !== null ? last - prev : null);
-              const effectivePct = pct !== null ? pct : (effectiveChg !== null && prev !== null && prev > 0 ? (effectiveChg / prev) * 100 : null);
+              const effectiveChg = chg;
+              const effectivePct = pct;
               if (effectiveChg !== null && !isNaN(effectiveChg)) {
                 if (effectiveChg > 0) changeClass = 'color-up';
                 else if (effectiveChg < 0) changeClass = 'color-down';
@@ -188,8 +189,21 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
 
                   {/* Sticky 商品代號與名稱 */}
                   <td className="td-sticky-stock">
-                    <span className="stock-code">{item.code}</span>
-                    <span className="stock-name">{item.name || q?.name || ''}</span>
+                    {(() => {
+                      const isOtc = ((item.exchange || q?.exchange || '').toUpperCase() === 'OTC');
+                      return (
+                        <>
+                          <span
+                            className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
+                            title={isOtc ? '上櫃股票' : '上市股票'}
+                          >
+                            {isOtc ? '櫃' : '市'}
+                          </span>
+                          <span className={`stock-code ${isOtc ? 'code-otc' : 'code-tse'}`}>{item.code}</span>
+                          <span className="stock-name">{item.name || q?.name || ''}</span>
+                        </>
+                      );
+                    })()}
                     {(dispositionLevel > 0 || dispositionPeriod) && (
                       <span className="stock-badge badge-disposition" title={dispositionPeriod ? `處置股票 (期間: ${dispositionPeriod})` : '處置股票'}>
                         [{dispText}]
@@ -209,6 +223,13 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                     ) : (
                       <span className={getPriceClass(last, prev)}>{formatPrice(last, isSimulated)}</span>
                     )}
+                  </td>
+
+                  {/* 零股價 */}
+                  <td className="td-num" title="盤中零股最新撮合成交價">
+                    <span className={getPriceClass(q?.oddLotLast, prev)}>
+                      {formatPrice(q?.oddLotLast)}
+                    </span>
                   </td>
 
                   {/* 漲跌 */}

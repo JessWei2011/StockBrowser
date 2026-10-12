@@ -9,6 +9,7 @@ class QuoteState(BaseModel):
     exchange: str = "TSE"
     securityType: str = "STOCK"
     last: Optional[float] = None
+    oddLotLast: Optional[float] = None
     bid: Optional[float] = None
     ask: Optional[float] = None
     open: Optional[float] = None
@@ -33,6 +34,15 @@ class MarketIndexQuote(BaseModel):
     price: Optional[float] = None
     change: Optional[float] = None
     changePercent: Optional[float] = None
+
+class StockPositionItem(BaseModel):
+    code: str
+    name: str = ""
+    exchange: str = "TSE"
+    quantity: float = 0.0
+    costPrice: float = 0.0
+    initialLast: Optional[float] = None
+    initialPnl: Optional[float] = None
 
 class WatchlistItem(BaseModel):
     id: str
