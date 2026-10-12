@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { WatchlistGroup, QuoteState, UpstreamStatus, WebSocketMessage, StockPosition } from './types';
+import type { WatchlistGroup, QuoteState, UpstreamStatus, WebSocketMessage, StockPosition, StockAnnouncement } from './types';
 import {
   fetchBootstrap,
   createGroup,
@@ -16,6 +16,7 @@ import { QuoteTable } from './components/QuoteTable';
 import { CompactCardList } from './components/CompactCardList';
 import { AssistantSidebar } from './components/AssistantSidebar';
 import { GroupModal } from './components/GroupModal';
+import { VaultPasswordModal, isVaultAuthenticated, clearVaultAuthenticated } from './components/VaultPasswordModal';
 import './App.css';
 
 export const App: React.FC = () => {
@@ -26,6 +27,7 @@ export const App: React.FC = () => {
   const [dirtyCodes, setDirtyCodes] = useState<Set<string>>(new Set());
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<'vault' | 'order'>('vault');
+  const [isVaultPasswordModalOpen, setIsVaultPasswordModalOpen] = useState(false);
   const [upstream, setUpstream] = useState<UpstreamStatus>({
     connected: false,
     loggedIn: false,
@@ -53,6 +55,8 @@ export const App: React.FC = () => {
     change: number;
     changePercent: number;
   }> | null>(null);
+
+  const [announcements, setAnnouncements] = useState<Record<string, StockAnnouncement[]>>({});
 
   // 檢視模式：電腦預設為 'table' (完整表格)，手機預設為 'card' (兩行卡片)
   const [viewMode, setViewMode] = useState<'table' | 'card'>(() => {
@@ -90,6 +94,9 @@ export const App: React.FC = () => {
       const data = await fetchBootstrap();
       setGroups(data.groups);
       setQuotes((prev) => ({ ...prev, ...data.quotes }));
+      if (data.announcements) {
+        setAnnouncements(data.announcements);
+      }
       if (data.positions) {
         setPositions(data.positions);
       }
@@ -271,8 +278,18 @@ export const App: React.FC = () => {
         activeGroupId={activeGroup?.id || null}
         onSelectGroup={(id) => setActiveGroupId(id)}
         onOpenDrawer={() => {
-          if (!isDrawerOpen) setDrawerTab('vault');
-          setIsDrawerOpen((prev) => !prev);
+          if (isDrawerOpen) {
+            // 已開啟時直接關閉
+            setIsDrawerOpen(false);
+            return;
+          }
+          // 未開啟時，開啟財神庫前需驗證密碼
+          if (!isVaultAuthenticated()) {
+            setIsVaultPasswordModalOpen(true);
+            return;
+          }
+          setDrawerTab('vault');
+          setIsDrawerOpen(true);
         }}
         isDrawerOpen={isDrawerOpen}
       />
@@ -284,11 +301,21 @@ export const App: React.FC = () => {
             isOpen={isDrawerOpen}
             onClose={() => setIsDrawerOpen(false)}
             activeTab={drawerTab}
-            onChangeTab={setDrawerTab}
+            onChangeTab={(tab) => {
+              if (tab === 'vault' && !isVaultAuthenticated()) {
+                setIsVaultPasswordModalOpen(true);
+                return;
+              }
+              setDrawerTab(tab);
+            }}
             positions={positions}
             quotes={quotes}
             wealthSummary={wealthSummary}
             dirtyCodes={dirtyCodes}
+            onLock={() => {
+              clearVaultAuthenticated();
+              setIsDrawerOpen(false);
+            }}
           />
         )}
 
@@ -400,6 +427,7 @@ export const App: React.FC = () => {
                 items={activeGroup?.items || []}
                 isWealthGroup={isSystemGroup}
                 quotes={quotes}
+                announcements={announcements}
                 dirtyCodes={dirtyCodes}
                 onRemoveItem={handleRemoveStock}
                 onMoveItem={handleMoveStock}
@@ -410,6 +438,7 @@ export const App: React.FC = () => {
                 items={activeGroup?.items || []}
                 isWealthGroup={isSystemGroup}
                 quotes={quotes}
+                announcements={announcements}
                 dirtyCodes={dirtyCodes}
                 onRemoveItem={handleRemoveStock}
                 onMoveItem={handleMoveStock}
@@ -450,6 +479,16 @@ export const App: React.FC = () => {
         onCreateGroup={handleCreateGroup}
         onRenameGroup={handleRenameGroup}
         onDeleteGroup={handleDeleteGroup}
+      />
+
+      <VaultPasswordModal
+        isOpen={isVaultPasswordModalOpen}
+        onClose={() => setIsVaultPasswordModalOpen(false)}
+        onSuccess={() => {
+          setIsVaultPasswordModalOpen(false);
+          setDrawerTab('vault');
+          setIsDrawerOpen(true);
+        }}
       />
     </div>
   );

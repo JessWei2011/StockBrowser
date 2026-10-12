@@ -1,4 +1,4 @@
-import type { BootstrapResponse, InstrumentSearchResult, WatchlistGroup, WatchlistItem } from '../types';
+import type { BootstrapResponse, InstrumentSearchResult, WatchlistGroup, WatchlistItem, StockAnnouncement } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 
@@ -71,5 +71,11 @@ export async function reorderItems(groupId: string, codes: string[]): Promise<vo
     body: JSON.stringify({ codes }),
   });
   if (!res.ok) throw new Error('Failed to reorder items');
+}
+
+export async function fetchAnnouncements(): Promise<Record<string, StockAnnouncement[]>> {
+  const res = await fetch(`${API_BASE}/api/v1/announcements`);
+  if (!res.ok) throw new Error('Failed to fetch announcements');
+  return res.json();
 }
 

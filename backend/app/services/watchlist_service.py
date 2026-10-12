@@ -64,11 +64,13 @@ class WatchlistService:
             shioaji_adapter.unsubscribe_codes(to_remove)
 
     async def get_bootstrap_data(self) -> dict:
+        from backend.app.services.announcement_service import announcement_service
         groups = await db.get_all_groups()
         server_ver, all_quotes = quote_store.get_all_quotes()
         return {
             "groups": [g.model_dump() for g in groups],
             "quotes": {k: v.model_dump() for k, v in all_quotes.items()},
+            "announcements": announcement_service.get_all_announcements(),
             "wealthSummary": shioaji_adapter.get_live_wealth_summary(),
             "positions": shioaji_adapter.get_positions_detail(),
             "marketIndices": shioaji_adapter.market_indices,

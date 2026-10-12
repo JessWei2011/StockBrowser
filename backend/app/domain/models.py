@@ -84,3 +84,13 @@ class InstrumentSearchResult(BaseModel):
     isAttention: bool = False
     dispositionLevel: int = 0
     dispositionPeriod: Optional[str] = None
+
+class StockAnnouncementItem(BaseModel):
+    id: str
+    code: str
+    tag: str
+    title: str
+    date: Optional[str] = None
+    detail: Optional[str] = None
+    category: str
+    updatedAt: Optional[str] = None

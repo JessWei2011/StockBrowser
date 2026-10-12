@@ -11,6 +11,7 @@ from backend.app.repositories.db import init_db
 from backend.app.services.shioaji_adapter import shioaji_adapter
 from backend.app.services.publisher import publisher
 from backend.app.services.watchlist_service import watchlist_service
+from backend.app.services.announcement_service import announcement_service
 from backend.app.api.rest import router as rest_router
 from backend.app.api.ws import router as ws_router
 
@@ -36,7 +37,10 @@ async def lifespan(app: FastAPI):
     # 4. 同步資料庫內所有群組股票至 Shioaji 訂閱聯集
     await watchlist_service.sync_subscriptions()
     
-    # 5. 啟動 1Hz 批次廣播
+    # 5. 啟動個股公告服務 (盤前 08:30 自動定時抓取與啟動預載)
+    await announcement_service.start()
+
+    # 6. 啟動 1Hz 批次廣播
     await publisher.start()
     
     logger.info("StockBrowser backend initialized and running.")
@@ -44,6 +48,7 @@ async def lifespan(app: FastAPI):
     
     logger.info("Shutting down StockBrowser application...")
     await publisher.stop()
+    await announcement_service.stop()
     shioaji_adapter.stop()
     logger.info("StockBrowser shutdown complete.")
 

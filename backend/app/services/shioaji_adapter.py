@@ -4,7 +4,7 @@ import random
 import re
 import urllib.request
 import json
-from datetime import datetime, timezone, timedelta, time
+from datetime import datetime, date, timezone, timedelta, time
 from typing import Optional, Any
 import shioaji as sj
 from backend.app.settings import settings
@@ -53,6 +53,14 @@ def parse_roc_date(d_str: str) -> str:
         return f"{mm}/{dd}"
     return d_str
 
+def parse_roc_to_date(d_str: str) -> Optional[date]:
+    m = re.search(r'(\d{2,3})[/\-.]?(\d{2})[/\-.]?(\d{2})', d_str)
+    if m:
+        yy, mm, dd = m.groups()
+        year = int(yy) + 1911
+        return date(year, int(mm), int(dd))
+    return None
+
 def fetch_disposition_periods() -> dict[str, dict[str, Any]]:
     """向 TWSE (上市) 與 TPEx (上櫃) 官方公開 Open API 撈取公告之處置起訖日期表與處置等級"""
     results: dict[str, dict[str, Any]] = {}
@@ -75,6 +83,10 @@ def fetch_disposition_periods() -> dict[str, dict[str, Any]]:
                     start_d = parse_roc_date(parts[0])
                     end_d = parse_roc_date(parts[1])
                     fmt = f"{start_d}~{end_d}"
+                    # 檢查處置結束日期是否過期
+                    end_obj = parse_roc_to_date(parts[1])
+                    if end_obj and end_obj < date.today():
+                        continue
                 else:
                     fmt = period
 
@@ -105,6 +117,10 @@ def fetch_disposition_periods() -> dict[str, dict[str, Any]]:
                     start_d = parse_roc_date(parts[0])
                     end_d = parse_roc_date(parts[1])
                     fmt = f"{start_d}~{end_d}"
+                    # 檢查處置結束日期是否過期
+                    end_obj = parse_roc_to_date(parts[1])
+                    if end_obj and end_obj < date.today():
+                        continue
                 else:
                     fmt = period
 

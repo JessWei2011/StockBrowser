@@ -81,9 +81,21 @@ export interface StockPosition {
   initialPnl?: number;
 }
 
+export interface StockAnnouncement {
+  id: string;
+  code: string;
+  tag: string;
+  title: string;
+  date?: string | null;
+  detail?: string | null;
+  category: 'attention' | 'disposition' | 'news' | 'exdividend' | 'earnings' | 'revenue';
+  updatedAt?: string | null;
+}
+
 export interface BootstrapResponse {
   groups: WatchlistGroup[];
   quotes: Record<string, QuoteState>;
+  announcements?: Record<string, StockAnnouncement[]>;
   positions?: StockPosition[];
   wealthSummary?: WealthSummary;
   marketIndices?: Record<string, MarketIndexState>;

@@ -52,6 +52,21 @@ async def init_db():
             updated_at TEXT NOT NULL
         );
         """)
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS stock_announcements (
+            id TEXT PRIMARY KEY,
+            code TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            title TEXT NOT NULL,
+            date TEXT,
+            detail TEXT,
+            category TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """)
+        await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_announcements_code ON stock_announcements(code);
+        """)
         await db.commit()
 
         # 檢查是否需要預設種子資料

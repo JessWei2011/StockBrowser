@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import type { QuoteState, WatchlistItem } from '../types';
+import type { QuoteState, WatchlistItem, StockAnnouncement } from '../types';
 
 interface QuoteTableProps {
   items: WatchlistItem[];
   isWealthGroup?: boolean;
   quotes: Record<string, QuoteState>;
+  announcements?: Record<string, StockAnnouncement[]>;
   dirtyCodes: Set<string>;
   onRemoveItem: (code: string) => Promise<void>;
   onMoveItem: (index: number, direction: 'up' | 'down') => Promise<void>;
@@ -15,6 +16,7 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
   items,
   isWealthGroup,
   quotes,
+  announcements = {},
   onRemoveItem,
   onMoveItem,
   onReorderItems,
@@ -204,16 +206,66 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                         </>
                       );
                     })()}
-                    {(dispositionLevel > 0 || dispositionPeriod) && (
-                      <span className="stock-badge badge-disposition" title={dispositionPeriod ? `處置股票 (期間: ${dispositionPeriod})` : '處置股票'}>
-                        [{dispText}]
-                      </span>
-                    )}
-                    {dispositionLevel === 0 && !dispositionPeriod && isAttention && (
-                      <span className="stock-badge badge-attention" title="注意股票">
-                        [注意]
-                      </span>
-                    )}
+                    {(() => {
+                      const stockAnns = announcements[item.code] || [];
+                      // 1. 處置標籤
+                      const dispAnn = stockAnns.find((a) => a.category === 'disposition');
+                      const hasDisp = dispAnn || dispositionLevel > 0 || dispositionPeriod;
+                      const dispTitle = dispAnn ? `${dispAnn.title}\n${dispAnn.detail || ''}`.trim() : (dispositionPeriod ? `處置股票 (期間: ${dispositionPeriod})` : '處置股票');
+                      const dispLabel = dispAnn?.tag || dispText;
+
+                      // 2. 注意標籤
+                      const attAnn = stockAnns.find((a) => a.category === 'attention');
+                      const hasAtt = !hasDisp && (attAnn || isAttention);
+                      const attTitle = attAnn ? `${attAnn.title}\n${attAnn.detail || ''}`.trim() : '注意股票';
+
+                      // 3. 財報/法說標籤
+                      const earnAnn = stockAnns.find((a) => a.category === 'earnings');
+
+                      // 4. 重大訊息標籤
+                      const newsAnn = stockAnns.find((a) => a.category === 'news');
+
+                      // 5. 除權除息標籤
+                      const exdivAnn = stockAnns.find((a) => a.category === 'exdividend');
+
+                      // 6. 最新自結營收標籤
+                      const revAnn = stockAnns.find((a) => a.category === 'revenue');
+
+                      return (
+                        <>
+                          {hasDisp && (
+                            <span className="stock-badge badge-disposition" title={dispTitle}>
+                              [{dispLabel}]
+                            </span>
+                          )}
+                          {hasAtt && (
+                            <span className="stock-badge badge-attention" title={attTitle}>
+                              [注意]
+                            </span>
+                          )}
+                          {revAnn && (
+                            <span className="stock-badge badge-revenue" title={`${revAnn.title}\n${revAnn.detail || ''}`.trim()}>
+                              [{revAnn.tag}]
+                            </span>
+                          )}
+                          {earnAnn && (
+                            <span className="stock-badge badge-earnings" title={`${earnAnn.title}\n${earnAnn.detail || ''}`.trim()}>
+                              [{earnAnn.tag}]
+                            </span>
+                          )}
+                          {newsAnn && (
+                            <span className="stock-badge badge-news" title={`${newsAnn.title}\n${newsAnn.detail || ''}`.trim()}>
+                              [{newsAnn.tag}]
+                            </span>
+                          )}
+                          {exdivAnn && (
+                            <span className="stock-badge badge-exdiv" title={`${exdivAnn.title}\n${exdivAnn.detail || ''}`.trim()}>
+                              [{exdivAnn.tag}]
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
                   </td>
 
                   {/* 成交價 */}

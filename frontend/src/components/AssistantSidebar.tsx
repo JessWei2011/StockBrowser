@@ -11,6 +11,7 @@ interface AssistantSidebarProps {
   wealthSummary: WealthSummary | null;
   dirtyCodes: Set<string>;
   initialOrderCode?: string;
+  onLock?: () => void;
 }
 
 function calcPositionMetrics(
@@ -58,6 +59,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   wealthSummary,
   dirtyCodes,
   initialOrderCode,
+  onLock,
 }) => {
   // 下單頁面 (財神筆) 狀態
   const [orderAction, setOrderAction] = useState<'buy' | 'sell'>('buy');
@@ -172,13 +174,24 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
             <span className="sidebar-tab-title">財神筆</span>
           </button>
         </div>
-        <button
-          className="btn-sidebar-collapse"
-          onClick={onClose}
-          title="收合左側輔助視窗"
-        >
-          ◂ 收合
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {onLock && (
+            <button
+              className="btn-sidebar-lock"
+              onClick={onLock}
+              title="立即上鎖財神庫（下次開啟需重新輸入密碼）"
+            >
+              🔒 上鎖
+            </button>
+          )}
+          <button
+            className="btn-sidebar-collapse"
+            onClick={onClose}
+            title="收合左側輔助視窗"
+          >
+            ◂ 收合
+          </button>
+        </div>
       </div>
 
       {/* 側邊主體內容 */}
