@@ -7,6 +7,46 @@ interface VaultTableProps {
   dirtyCodes: Set<string>;
 }
 
+function calcPositionMetrics(
+  code: string,
+  currPrice: number,
+  qty: number,
+  costPrice: number,
+  initialLast?: number,
+  initialPnl?: number
+): { pnl: number; roi: number; netMarketVal: number } {
+  const cost = costPrice * qty;
+  // 若價格與券商初始同步價格相同（例如收盤或未變動），直接使用券商 API 精確計算之 initialPnl
+  if (
+    initialPnl !== undefined &&
+    initialLast !== undefined &&
+    initialLast > 0 &&
+    Math.abs(currPrice - initialLast) < 0.0001
+  ) {
+    const pnl = initialPnl;
+    const roi = cost > 0 ? (pnl / cost) * 100 : 0;
+    return { pnl, roi, netMarketVal: cost + pnl };
+  }
+
+  const grossMv = currPrice * qty;
+  // 證券交易稅: 債券ETF 0%, 股票型ETF 0.1%, 普通現股 0.3%
+  let taxRate = 0.003;
+  if (code.includes('B')) {
+    taxRate = 0;
+  } else if (code.startsWith('00')) {
+    taxRate = 0.001;
+  }
+  const tax = Math.floor(grossMv * taxRate);
+
+  // 賣出手續費: 0.1425%, 最低 1 元
+  const fee = Math.max(1, Math.floor(grossMv * 0.001425));
+
+  const netMarketVal = grossMv - tax - fee;
+  const pnl = netMarketVal - cost;
+  const roi = cost > 0 ? (pnl / cost) * 100 : 0;
+  return { pnl, roi, netMarketVal };
+}
+
 export const VaultTable: React.FC<VaultTableProps> = ({
   positions,
   quotes,
@@ -15,20 +55,31 @@ export const VaultTable: React.FC<VaultTableProps> = ({
   // 依股票代號排序（與財神簿相同順序）
   const sortedPositions = [...positions].sort((a, b) => a.code.localeCompare(b.code));
 
-  // 計算整體彙總
+  // 計算整體彙總（計入賣出手續費與證券交易稅）
   let totalShares = 0;
   let totalCost = 0;
-  let totalMarketVal = 0;
+  let totalPnl = 0;
 
   for (const pos of sortedPositions) {
     const q = quotes[pos.code];
-    const currPrice = (q?.last !== null && q?.last !== undefined) ? q.last : (pos.initialLast ?? pos.costPrice);
+    const currPrice = (q?.last !== null && q?.last !== undefined && q.last > 0)
+      ? q.last
+      : (pos.initialLast && pos.initialLast > 0 ? pos.initialLast : pos.costPrice);
+    const cost = pos.costPrice * pos.quantity;
     totalShares += pos.quantity;
-    totalCost += pos.costPrice * pos.quantity;
-    totalMarketVal += currPrice * pos.quantity;
+    totalCost += cost;
+
+    const metrics = calcPositionMetrics(
+      pos.code,
+      currPrice,
+      pos.quantity,
+      pos.costPrice,
+      pos.initialLast,
+      pos.initialPnl
+    );
+    totalPnl += metrics.pnl;
   }
 
-  const totalPnl = totalMarketVal - totalCost;
   const totalRoi = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
 
   return (
@@ -52,11 +103,17 @@ export const VaultTable: React.FC<VaultTableProps> = ({
           ) : (
             sortedPositions.map((pos) => {
               const q = quotes[pos.code];
-              const currPrice = (q?.last !== null && q?.last !== undefined && q.last > 0) ? q.last : (pos.initialLast && pos.initialLast > 0 ? pos.initialLast : pos.costPrice);
-              const cost = pos.costPrice * pos.quantity;
-              const marketVal = currPrice * pos.quantity;
-              const pnl = marketVal - cost;
-              const roi = cost > 0 ? (pnl / cost) * 100 : 0;
+              const currPrice = (q?.last !== null && q?.last !== undefined && q.last > 0)
+                ? q.last
+                : (pos.initialLast && pos.initialLast > 0 ? pos.initialLast : pos.costPrice);
+              const { pnl, roi } = calcPositionMetrics(
+                pos.code,
+                currPrice,
+                pos.quantity,
+                pos.costPrice,
+                pos.initialLast,
+                pos.initialPnl
+              );
 
               // 損益紅漲綠跌顏色 (台股慣例：正紅、負綠、平中性)
               const pnlClass = pnl > 0 ? 'color-up' : pnl < 0 ? 'color-down' : 'color-neutral';

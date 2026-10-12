@@ -290,36 +290,78 @@ body {
   color: var(--text-main);
 }
 
-/* Tabs 區塊 */
-.tabs-container {
+/* Tabs 區塊：頁籤列外層容器 (包含左側 3號紅框按鈕+分頁列表、右側 4號紅框檢視模式) */
+.tabs-bar-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   background-color: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
-  padding: 0 12px;
-  overflow-x: auto;
-  scrollbar-width: none; /* Firefox 隱藏捲軸 */
-  -ms-overflow-style: none; /* IE/Edge 隱藏捲軸 */
-  white-space: nowrap;
+  padding: 0 16px;
+  gap: 12px;
+  min-height: 44px;
   transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
-.tabs-container::-webkit-scrollbar {
-  display: none; /* Chrome, Safari, Edge 隱藏捲軸 */
+.tabs-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.tabs-bar-left::-webkit-scrollbar {
+  display: none;
+}
+
+/* 3號紅框位置按鈕：左側輔助視窗開關按鈕 (財神庫 / 財神筆) */
+.btn-drawer-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 13px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 6px;
+  color: var(--color-orange);
+  cursor: pointer;
+  font-size: 13.5px;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.btn-drawer-trigger:hover {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: rgba(245, 158, 11, 0.55);
+}
+
+.btn-drawer-trigger.active {
+  background: var(--color-orange);
+  color: #fff;
+  border-color: var(--color-orange);
+}
+
+.drawer-btn-icon {
+  font-size: 14px;
 }
 
 .tabs-list {
   display: flex;
-  gap: 3px; /* 將間距微調縮減，讓左右顯示容量大幅提升 >20% */
+  gap: 3px;
 }
 
 .tab-item {
   border: none;
   background: transparent;
-  padding: 10px 10px; /* 將水平內邊距由 16px 縮為 10px，全部分頁可完整容納不出現橫向捲軸 */
+  padding: 10px 10px;
   font-size: 13.5px;
   color: var(--text-muted);
   cursor: pointer;
   position: relative;
-  font-weight: 500;
   flex-shrink: 0;
   transition: color 0.15s;
 }
@@ -330,7 +372,6 @@ body {
 
 .tab-item.active {
   color: var(--color-orange);
-  font-weight: 700;
 }
 
 .tab-item.active::after {
@@ -344,9 +385,7 @@ body {
   border-radius: 2px 2px 0 0;
 }
 
-.tab-vault,
 .tab-wealth {
-  font-weight: 700;
   letter-spacing: 0.2px;
 }
 
@@ -1522,4 +1561,801 @@ body {
 .card-pnl-val, .card-roi-val {
   font-feature-settings: 'tnum';
   font-size: 15px;
+}
+
+/* ==================== 左右並排工作區 (Side-by-Side Workspace) ==================== */
+.app-workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+.workspace-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 左側輔助視窗 (並排側邊欄) */
+.assistant-sidebar {
+  width: 520px;
+  min-width: 480px;
+  max-width: 560px;
+  flex-shrink: 0;
+  background-color: var(--bg-card);
+  border-right: 1px solid var(--border-color);
+  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 10;
+  animation: slideSidebarIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideSidebarIn {
+  from {
+    width: 0;
+    opacity: 0;
+  }
+  to {
+    width: 520px;
+    opacity: 1;
+  }
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color);
+  background-color: var(--bg-secondary);
+}
+
+.sidebar-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sidebar-tab-btn:hover {
+  color: var(--text-main);
+  background-color: var(--bg-hover);
+}
+
+.sidebar-tab-btn.active {
+  background-color: var(--bg-card);
+  color: var(--text-main);
+  border-color: var(--border-color);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.sidebar-tab-badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background-color: var(--badge-bg);
+  color: var(--text-muted);
+}
+
+.btn-sidebar-collapse {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-sidebar-collapse:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-main);
+  border-color: var(--text-muted);
+}
+
+.sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+/* 財神庫分頁內容 */
+.sidebar-vault-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sidebar-vault-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.sidebar-summary-card {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  gap: 4px;
+}
+
+.sidebar-summary-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sidebar-summary-val {
+  font-size: 15px;
+  font-feature-settings: 'tnum';
+}
+
+.sidebar-vault-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.sidebar-empty-msg {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 30px 16px;
+  font-size: 13px;
+}
+
+/* 持股明細清單標題列 */
+.sidebar-vault-col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 2px;
+  gap: 8px;
+}
+
+.sidebar-vault-col-header .col-h-stock {
+  flex: 2.2;
+  min-width: 175px;
+}
+
+.sidebar-vault-col-header .col-h-qty {
+  flex: 0.8;
+  text-align: right;
+  min-width: 60px;
+}
+
+.sidebar-vault-col-header .col-h-pnl {
+  flex: 1.1;
+  text-align: right;
+  min-width: 85px;
+}
+
+.sidebar-vault-col-header .col-h-roi {
+  flex: 0.8;
+  text-align: right;
+  min-width: 60px;
+}
+
+.sidebar-vault-col-header .col-h-action {
+  width: 46px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* 扁平化單行持股卡片 */
+.sidebar-stock-card.flat-card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 6px 10px;
+  gap: 8px;
+  transition: all 0.15s;
+}
+
+.sidebar-stock-card.flat-card:hover {
+  background-color: var(--bg-hover);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.flat-card-stock {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 2.2;
+  min-width: 175px;
+}
+
+.flat-stock-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-main);
+  white-space: nowrap;
+}
+
+.flat-stock-code {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.flat-card-qty {
+  flex: 0.8;
+  text-align: right;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  min-width: 60px;
+}
+
+.flat-card-qty .flat-unit {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 2px;
+}
+
+.flat-card-pnl {
+  flex: 1.1;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-feature-settings: 'tnum';
+  white-space: nowrap;
+  min-width: 85px;
+}
+
+.flat-card-pnl .flat-unit {
+  font-size: 10px;
+  font-weight: 400;
+  margin-left: 2px;
+}
+
+.flat-card-roi {
+  flex: 0.8;
+  text-align: right;
+  font-size: 11.5px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  font-feature-settings: 'tnum';
+  white-space: nowrap;
+  min-width: 60px;
+}
+
+.btn-order-shortcut {
+  padding: 3px 6px;
+  font-size: 11px;
+  line-height: 1.2;
+  border-radius: 4px;
+  background-color: rgba(245, 158, 11, 0.12);
+  color: var(--brand-color);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  width: 46px;
+  text-align: center;
+}
+
+.btn-order-shortcut:hover {
+  background-color: var(--brand-color);
+  color: #fff;
+  border-color: var(--brand-color);
+}
+
+/* 財神筆 (下單雛形) 內容 */
+.sidebar-order-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sidebar-order-notice {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: var(--color-green);
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+@media (max-width: 768px) {
+  .app-workspace.sidebar-open {
+    flex-direction: column;
+  }
+  .assistant-sidebar {
+    width: 100%;
+    min-width: 100%;
+    max-width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+    max-height: 55vh;
+  }
+}
+
+.order-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 1. 買賣方向區 */
+.order-section-action {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.action-toggle-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+}
+
+.btn-action-toggle {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.btn-action-toggle.btn-buy:hover {
+  border-color: rgba(239, 68, 68, 0.5);
+  color: var(--color-red);
+}
+
+.btn-action-toggle.btn-sell:hover {
+  border-color: rgba(16, 185, 129, 0.5);
+  color: var(--color-green);
+}
+
+.btn-action-toggle.btn-buy.active {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: #fff;
+  border-color: #ef4444;
+  box-shadow: 0 3px 10px rgba(239, 68, 68, 0.35);
+}
+
+.btn-action-toggle.btn-sell.active {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #fff;
+  border-color: #10b981;
+  box-shadow: 0 3px 10px rgba(16, 185, 129, 0.35);
+}
+
+.action-mode-banner {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.action-mode-banner.banner-buy {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
+.action-mode-banner.banner-sell {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #34d399;
+}
+
+/* 功能區塊通用卡片 */
+.order-card-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background-color: var(--bg-card);
+  transition: border-color 0.15s;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.section-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.section-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+/* 2. 標的商品區 (藍色調) */
+.order-card-section.section-stock {
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.03);
+}
+
+.badge-stock {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+.holding-pill {
+  font-size: 11px;
+  color: #38bdf8;
+  background: rgba(14, 165, 233, 0.12);
+  padding: 1px 7px;
+  border-radius: 12px;
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  font-feature-settings: 'tnum';
+}
+
+.order-stock-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stock-quick-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 0 2px;
+}
+
+.stock-quick-info .quick-name {
+  color: #60a5fa;
+  font-weight: 500;
+}
+
+.stock-quick-info .quick-last {
+  font-family: var(--font-mono);
+  color: var(--text-main);
+}
+
+/* 3. 委託規格區 (紫色調) */
+.order-card-section.section-specs {
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  background: rgba(168, 85, 247, 0.03);
+}
+
+.badge-specs {
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+}
+
+.specs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.specs-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.specs-label {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.pill-toggle-group {
+  display: flex;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.pill-toggle {
+  flex: 1;
+  padding: 5px 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.pill-toggle.active {
+  background-color: var(--bg-card);
+  color: var(--text-main);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  font-weight: 500;
+}
+
+/* 4. 委託價格區 (金黃/琥珀色調) */
+.order-card-section.section-price {
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.03);
+}
+
+.badge-price {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.order-price-control,
+.order-qty-control {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.form-input {
+  width: 100%;
+  padding: 8px 12px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-main);
+  font-size: 14px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.form-input:focus {
+  border-color: var(--color-orange);
+}
+
+.price-steppers {
+  display: flex;
+  gap: 4px;
+}
+
+.btn-step {
+  padding: 7px 12px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-main);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color 0.15s;
+}
+
+.btn-step:hover {
+  background-color: var(--bg-hover);
+}
+
+.quick-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.chip-btn {
+  padding: 3px 8px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.chip-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.chip-btn.chip-up {
+  color: var(--color-red);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.chip-btn.chip-down {
+  color: var(--color-green);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.chip-btn.chip-prev {
+  color: var(--text-main);
+}
+
+.chip-btn.chip-last {
+  color: #38bdf8;
+}
+
+/* 5. 委託數量區 (青藍色調) */
+.order-card-section.section-qty {
+  border: 1px solid rgba(14, 165, 233, 0.35);
+  background: rgba(14, 165, 233, 0.03);
+}
+
+.badge-qty {
+  background: rgba(14, 165, 233, 0.2);
+  color: #38bdf8;
+  border: 1px solid rgba(14, 165, 233, 0.4);
+}
+
+.btn-fill-holding {
+  font-size: 11px;
+  color: #38bdf8;
+  background: rgba(14, 165, 233, 0.12);
+  border: 1px solid rgba(14, 165, 233, 0.35);
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-fill-holding:hover {
+  background: #0284c7;
+  color: #fff;
+  border-color: #0284c7;
+}
+
+.qty-input {
+  text-align: center;
+  font-weight: 600;
+  font-feature-settings: 'tnum';
+}
+
+/* 6. 金額試算與交割款項明細區 (紅/綠高對比) */
+.order-calc-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  transition: all 0.15s;
+}
+
+.order-calc-card.calc-buy {
+  border: 1.5px solid rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.order-calc-card.calc-sell {
+  border: 1.5px solid rgba(16, 185, 129, 0.45);
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.calc-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+}
+
+.calc-card-title {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.calc-buy .calc-card-title {
+  color: #f87171;
+}
+
+.calc-sell .calc-card-title {
+  color: #34d399;
+}
+
+.calc-note {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.calc-row {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-feature-settings: 'tnum';
+}
+
+.calc-row.calc-total {
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-color);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+/* 7. 送出按鈕 */
+.btn-order-submit {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: none;
+  font-size: 14.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: #fff;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.btn-order-submit.submit-buy {
+  background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35);
+}
+
+.btn-order-submit.submit-sell {
+  background: linear-gradient(135deg, #10b981 0%, #047857 100%);
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+}
+
+.btn-order-submit:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.btn-order-submit:active {
+  transform: translateY(0);
 }

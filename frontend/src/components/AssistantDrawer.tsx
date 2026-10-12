@@ -1,0 +1,622 @@
+import React, { useState } from 'react';
+import type { StockPosition, QuoteState, WealthSummary } from '../types';
+
+interface AssistantDrawerProps {
+  isOpen: boolean;
+  onClose: () => void;
+  activeTab: 'vault' | 'order';
+  onChangeTab: (tab: 'vault' | 'order') => void;
+  positions: StockPosition[];
+  quotes: Record<string, QuoteState>;
+  wealthSummary: WealthSummary | null;
+  dirtyCodes: Set<string>;
+  initialOrderCode?: string;
+}
+
+function calcPositionMetrics(
+  code: string,
+  currPrice: number,
+  qty: number,
+  costPrice: number,
+  initialLast?: number,
+  initialPnl?: number
+): { pnl: number; roi: number; netMarketVal: number } {
+  const cost = costPrice * qty;
+  if (
+    initialPnl !== undefined &&
+    initialLast !== undefined &&
+    initialLast > 0 &&
+    Math.abs(currPrice - initialLast) < 0.0001
+  ) {
+    const pnl = initialPnl;
+    const roi = cost > 0 ? (pnl / cost) * 100 : 0;
+    return { pnl, roi, netMarketVal: cost + pnl };
+  }
+
+  const grossMv = currPrice * qty;
+  let taxRate = 0.003;
+  if (code.includes('B')) {
+    taxRate = 0;
+  } else if (code.startsWith('00')) {
+    taxRate = 0.001;
+  }
+  const tax = Math.floor(grossMv * taxRate);
+  const fee = Math.max(1, Math.floor(grossMv * 0.001425));
+  const netMarketVal = grossMv - tax - fee;
+  const pnl = netMarketVal - cost;
+  const roi = cost > 0 ? (pnl / cost) * 100 : 0;
+  return { pnl, roi, netMarketVal };
+}
+
+export const AssistantDrawer: React.FC<AssistantDrawerProps> = ({
+  isOpen,
+  onClose,
+  activeTab,
+  onChangeTab,
+  positions,
+  quotes,
+  wealthSummary,
+  dirtyCodes,
+  initialOrderCode,
+}) => {
+  // 下單頁面 (財神筆) 狀態
+  const [orderAction, setOrderAction] = useState<'buy' | 'sell'>('buy');
+  const [orderUnit, setOrderUnit] = useState<'lot' | 'share'>('lot'); // lot: 整股(張), share: 零股(股)
+  const [orderType, setOrderType] = useState<'limit' | 'market'>('limit');
+  const [stockCode, setStockCode] = useState(initialOrderCode || (positions[0]?.code || '2330'));
+  const [orderPrice, setOrderPrice] = useState<string>('');
+  const [orderQty, setOrderQty] = useState<number>(1);
+  const [orderNotice, setOrderNotice] = useState<string | null>(null);
+
+  // 當 initialOrderCode 變更時同步更新
+  React.useEffect(() => {
+    if (initialOrderCode) {
+      setStockCode(initialOrderCode);
+    }
+  }, [initialOrderCode]);
+
+  // 當選定個股時，若尚未輸入價格則帶入現價或昨收
+  const currentQuote = quotes[stockCode];
+  React.useEffect(() => {
+    if (currentQuote && currentQuote.last && currentQuote.last > 0 && !orderPrice) {
+      setOrderPrice(currentQuote.last.toFixed(2));
+    }
+  }, [stockCode, currentQuote]);
+
+  if (!isOpen) return null;
+
+  // 排序持股：依損益金額遞減
+  const sortedPositions = [...positions].sort((a, b) => {
+    const qA = quotes[a.code];
+    const qB = quotes[b.code];
+    const priceA = (qA?.last && qA.last > 0) ? qA.last : (a.initialLast && a.initialLast > 0 ? a.initialLast : a.costPrice);
+    const priceB = (qB?.last && qB.last > 0) ? qB.last : (b.initialLast && b.initialLast > 0 ? b.initialLast : b.costPrice);
+    const pnlA = calcPositionMetrics(a.code, priceA, a.quantity, a.costPrice, a.initialLast, a.initialPnl).pnl;
+    const pnlB = calcPositionMetrics(b.code, priceB, b.quantity, b.costPrice, b.initialLast, b.initialPnl).pnl;
+    return pnlB - pnlA;
+  });
+
+  // 點選持股一鍵帶入財神筆下單
+  const handleSelectToOrder = (code: string, quantity?: number) => {
+    setStockCode(code);
+    const q = quotes[code];
+    if (q && q.last && q.last > 0) {
+      setOrderPrice(q.last.toFixed(2));
+    }
+    // 預設導入現有個股數與單位，並預設為賣出
+    if (quantity && quantity > 0) {
+      if (quantity >= 1000 && quantity % 1000 === 0) {
+        setOrderUnit('lot');
+        setOrderQty(Math.floor(quantity / 1000));
+      } else {
+        setOrderUnit('share');
+        setOrderQty(quantity);
+      }
+      setOrderAction('sell');
+    }
+    onChangeTab('order');
+  };
+
+  // 價格快速晶片 (跌停/平盤/現價/漲停)
+  const prevClose = currentQuote?.previousClose;
+  const lastPrice = currentQuote?.last;
+  const limitUp = prevClose && prevClose > 0 ? (prevClose * 1.1).toFixed(2) : null;
+  const limitDown = prevClose && prevClose > 0 ? (prevClose * 0.9).toFixed(2) : null;
+
+  // 查詢當前輸入代號之庫存資訊
+  const currentPosition = positions.find((p) => p.code === stockCode);
+
+  // 試算金額 (含手續費 0.1425% 與賣出證交稅 0.3%/0.1%)
+  const numPrice = parseFloat(orderPrice) || (lastPrice && lastPrice > 0 ? lastPrice : 0);
+  const totalShares = orderUnit === 'lot' ? orderQty * 1000 : orderQty;
+  const estimatedAmount = Math.round(numPrice * totalShares);
+  const estimatedFee = Math.max(20, Math.round(estimatedAmount * 0.001425));
+  const isEtf = stockCode.startsWith('00');
+  const taxRate = isEtf ? 0.001 : 0.003;
+  const estimatedTax = orderAction === 'sell' ? Math.round(estimatedAmount * taxRate) : 0;
+  const estimatedTotal = orderAction === 'buy'
+    ? estimatedAmount + estimatedFee
+    : Math.max(0, estimatedAmount - estimatedFee - estimatedTax);
+
+  const handleSubmitOrder = (e: React.FormEvent) => {
+    e.preventDefault();
+    setOrderNotice(`【委託雛形展示】已建立「${orderAction === 'buy' ? '買進' : '賣出'}」${stockCode} 價格: ${orderPrice || '市價'} 數量: ${orderQty} ${orderUnit === 'lot' ? '張' : '股'}，預估款項: ${estimatedTotal.toLocaleString()} 元。待後續下單 API 串接完成。`);
+    setTimeout(() => {
+      setOrderNotice(null);
+    }, 4500);
+  };
+
+  return (
+    <div className="drawer-overlay" onClick={onClose}>
+      <aside
+        className="assistant-drawer"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label="輔助資料視窗"
+      >
+        {/* 頂部標題與分頁切換列 */}
+        <div className="drawer-header">
+          <div className="drawer-tabs">
+            <button
+              className={`drawer-tab-btn ${activeTab === 'vault' ? 'active' : ''}`}
+              onClick={() => onChangeTab('vault')}
+              title="分頁一：財神庫（庫存持股與未實現損益）"
+            >
+              <span className="drawer-tab-icon">🏦</span>
+              <span className="drawer-tab-title">財神庫</span>
+              <span className="drawer-tab-badge">{positions.length}</span>
+            </button>
+            <button
+              className={`drawer-tab-btn ${activeTab === 'order' ? 'active' : ''}`}
+              onClick={() => onChangeTab('order')}
+              title="分頁二：財神筆（快速下單委託雛形）"
+            >
+              <span className="drawer-tab-icon">✍️</span>
+              <span className="drawer-tab-title">財神筆</span>
+            </button>
+          </div>
+          <button
+            className="btn-drawer-close"
+            onClick={onClose}
+            title="關閉視窗 (或點擊外部遮罩)"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* 視窗主體內容 */}
+        <div className="drawer-body">
+          {activeTab === 'vault' ? (
+            /* ==================== 分頁一：財神庫 ==================== */
+            <div className="drawer-vault-content">
+              {/* 庫存即時總損益摘要 */}
+              {wealthSummary && (
+                <div className="drawer-vault-summary">
+                  <div className="drawer-summary-card">
+                    <span className="drawer-summary-label">總未實現損益</span>
+                    <span
+                      className={`drawer-summary-val ${
+                        wealthSummary.totalPnl > 0
+                          ? 'color-up'
+                          : wealthSummary.totalPnl < 0
+                          ? 'color-down'
+                          : 'color-neutral'
+                      }`}
+                    >
+                      {wealthSummary.totalPnl > 0 ? '+' : ''}
+                      {Math.round(wealthSummary.totalPnl).toLocaleString()} 元
+                    </span>
+                  </div>
+                  <div className="drawer-summary-card">
+                    <span className="drawer-summary-label">總報酬率</span>
+                    <span
+                      className={`drawer-summary-val ${
+                        wealthSummary.returnPercent > 0
+                          ? 'color-up'
+                          : wealthSummary.returnPercent < 0
+                          ? 'color-down'
+                          : 'color-neutral'
+                      }`}
+                    >
+                      {wealthSummary.returnPercent > 0 ? '+' : ''}
+                      {wealthSummary.returnPercent.toFixed(2)}%
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* 持股明細清單 */}
+              <div className="drawer-vault-list">
+                {sortedPositions.length === 0 ? (
+                  <div className="drawer-empty-msg">
+                    尚無持股資料，系統將於永豐證券 API 連線後自動同步。
+                  </div>
+                ) : (
+                  <>
+                    <div className="sidebar-vault-col-header">
+                      <span className="col-h-stock">商品</span>
+                      <span className="col-h-qty">股數</span>
+                      <span className="col-h-pnl">損益試算</span>
+                      <span className="col-h-roi">報酬率</span>
+                      <span className="col-h-action">操作</span>
+                    </div>
+                    {sortedPositions.map((pos) => {
+                      const q = quotes[pos.code];
+                      const currPrice =
+                        q?.last !== null && q?.last !== undefined && q.last > 0
+                          ? q.last
+                          : pos.initialLast && pos.initialLast > 0
+                          ? pos.initialLast
+                          : pos.costPrice;
+                      const { pnl, roi } = calcPositionMetrics(
+                        pos.code,
+                        currPrice,
+                        pos.quantity,
+                        pos.costPrice,
+                        pos.initialLast,
+                        pos.initialPnl
+                      );
+                      const isOtc = ((pos.exchange || q?.exchange || '').toUpperCase() === 'OTC');
+                      const isDirty = dirtyCodes.has(pos.code);
+
+                      const pnlClass = pnl > 0 ? 'color-up' : pnl < 0 ? 'color-down' : 'color-neutral';
+                      const roiClass = roi > 0 ? 'color-up' : roi < 0 ? 'color-down' : 'color-neutral';
+
+                      return (
+                        <div
+                          key={pos.code}
+                          className={`sidebar-stock-card flat-card ${isDirty ? 'card-flash' : ''}`}
+                        >
+                          <div className="flat-card-stock">
+                            <span
+                              className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
+                              title={isOtc ? '上櫃股票' : '上市股票'}
+                            >
+                              {isOtc ? '櫃' : '市'}
+                            </span>
+                            <span className="flat-stock-name" title={pos.name || pos.code}>
+                              {pos.name || pos.code}
+                            </span>
+                            <span className={`flat-stock-code ${isOtc ? 'code-otc' : 'code-tse'}`}>
+                              {pos.code}
+                            </span>
+                          </div>
+
+                          <div className="flat-card-qty" title={`剩餘股數: ${Math.round(pos.quantity).toLocaleString()} 股`}>
+                            <span className="flat-qty-num">{Math.round(pos.quantity).toLocaleString()}</span>
+                            <span className="flat-unit">股</span>
+                          </div>
+
+                          <div className={`flat-card-pnl ${pnlClass}`} title="損益試算 (已扣手續費與稅金)">
+                            {pnl > 0 ? '+' : ''}{Math.round(pnl).toLocaleString()}
+                            <span className="flat-unit">元</span>
+                          </div>
+
+                          <div className={`flat-card-roi ${roiClass}`} title="報酬率">
+                            {roi > 0 ? '+' : ''}{roi.toFixed(2)}%
+                          </div>
+
+                          <button
+                            className="btn-order-shortcut"
+                            title={`帶入「${pos.name || pos.code}」現有 ${Math.round(pos.quantity).toLocaleString()} 股至財神筆快速下單`}
+                            onClick={() => handleSelectToOrder(pos.code, pos.quantity)}
+                          >
+                            下單 ↗
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* ==================== 分頁二：財神筆 ==================== */
+            <div className="drawer-order-content">
+              {orderNotice && (
+                <div className="drawer-order-notice">
+                  {orderNotice}
+                </div>
+              )}
+
+              <form className="order-form" onSubmit={handleSubmitOrder}>
+                {/* 1. 買賣方向區 (紅/綠高對比警示) */}
+                <div className={`order-section-action action-${orderAction}`}>
+                  <div className="action-toggle-group">
+                    <button
+                      type="button"
+                      className={`btn-action-toggle btn-buy ${orderAction === 'buy' ? 'active' : ''}`}
+                      onClick={() => setOrderAction('buy')}
+                    >
+                      🔴 買進 (Buy)
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn-action-toggle btn-sell ${orderAction === 'sell' ? 'active' : ''}`}
+                      onClick={() => setOrderAction('sell')}
+                    >
+                      🟢 賣出 (Sell)
+                    </button>
+                  </div>
+                  <div className={`action-mode-banner banner-${orderAction}`}>
+                    {orderAction === 'buy' ? (
+                      <span>🔴 買進委託（扣款委託）：成交款項將自交割銀行帳戶扣款 (T+2)</span>
+                    ) : (
+                      <span>🟢 賣出委託（入帳委託）：成交款項扣除手續費與稅金後匯入交割帳戶 (T+2)</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. 標的商品區 (藍色調區塊) */}
+                <div className="order-card-section section-stock">
+                  <div className="section-header">
+                    <div className="section-title-wrap">
+                      <span className="section-badge badge-stock">標的</span>
+                      <span className="section-title">委託商品</span>
+                    </div>
+                    {currentPosition && (
+                      <span className="holding-pill">
+                        庫存: {Math.round(currentPosition.quantity).toLocaleString()} 股
+                      </span>
+                    )}
+                  </div>
+                  <div className="order-stock-picker">
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="輸入股號 (例: 2330)"
+                      value={stockCode}
+                      onChange={(e) => setStockCode(e.target.value.toUpperCase())}
+                    />
+                    {currentQuote && (
+                      <div className="stock-quick-info">
+                        <span className="quick-name">{currentQuote.name || stockCode}</span>
+                        {currentQuote.last && currentQuote.last > 0 && (
+                          <span className="quick-last">現價 {currentQuote.last.toFixed(2)}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. 委託規格區 (紫色調區塊) */}
+                <div className="order-card-section section-specs">
+                  <div className="section-header">
+                    <div className="section-title-wrap">
+                      <span className="section-badge badge-specs">規格</span>
+                      <span className="section-title">交易單位與委託種類</span>
+                    </div>
+                  </div>
+                  <div className="specs-grid">
+                    <div className="specs-col">
+                      <span className="specs-label">單位</span>
+                      <div className="pill-toggle-group">
+                        <button
+                          type="button"
+                          className={`pill-toggle ${orderUnit === 'lot' ? 'active' : ''}`}
+                          onClick={() => setOrderUnit('lot')}
+                        >
+                          現股整股 (張)
+                        </button>
+                        <button
+                          type="button"
+                          className={`pill-toggle ${orderUnit === 'share' ? 'active' : ''}`}
+                          onClick={() => setOrderUnit('share')}
+                        >
+                          盤中零股 (股)
+                        </button>
+                      </div>
+                    </div>
+                    <div className="specs-col">
+                      <span className="specs-label">條件</span>
+                      <div className="pill-toggle-group">
+                        <button
+                          type="button"
+                          className={`pill-toggle ${orderType === 'limit' ? 'active' : ''}`}
+                          onClick={() => setOrderType('limit')}
+                        >
+                          限價 (ROD)
+                        </button>
+                        <button
+                          type="button"
+                          className={`pill-toggle ${orderType === 'market' ? 'active' : ''}`}
+                          onClick={() => {
+                            setOrderType('market');
+                            setOrderPrice('');
+                          }}
+                        >
+                          市價
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. 委託價格區 (金黃/琥珀色調區塊) */}
+                <div className="order-card-section section-price">
+                  <div className="section-header">
+                    <div className="section-title-wrap">
+                      <span className="section-badge badge-price">價格</span>
+                      <span className="section-title">委託價格 (NT$)</span>
+                    </div>
+                  </div>
+                  <div className="order-price-control">
+                    <input
+                      type="number"
+                      step="0.05"
+                      className="form-input"
+                      placeholder={orderType === 'market' ? '市價委託' : '輸入價格'}
+                      disabled={orderType === 'market'}
+                      value={orderPrice}
+                      onChange={(e) => setOrderPrice(e.target.value)}
+                    />
+                    {orderType === 'limit' && (
+                      <div className="price-steppers">
+                        <button
+                          type="button"
+                          className="btn-step"
+                          onClick={() => {
+                            const cur = parseFloat(orderPrice) || (lastPrice || 0);
+                            setOrderPrice((cur - 0.5 > 0 ? (cur - 0.5).toFixed(2) : '0'));
+                          }}
+                        >
+                          -0.5
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-step"
+                          onClick={() => {
+                            const cur = parseFloat(orderPrice) || (lastPrice || 0);
+                            setOrderPrice((cur + 0.5).toFixed(2));
+                          }}
+                        >
+                          +0.5
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {/* 價格快捷鍵 */}
+                  {orderType === 'limit' && (
+                    <div className="quick-chips-row">
+                      {limitDown && (
+                        <button
+                          type="button"
+                          className="chip-btn chip-down"
+                          onClick={() => setOrderPrice(limitDown)}
+                        >
+                          跌停 {limitDown}
+                        </button>
+                      )}
+                      {prevClose && prevClose > 0 && (
+                        <button
+                          type="button"
+                          className="chip-btn chip-prev"
+                          onClick={() => setOrderPrice(prevClose.toFixed(2))}
+                        >
+                          平盤 {prevClose.toFixed(2)}
+                        </button>
+                      )}
+                      {lastPrice && lastPrice > 0 && (
+                        <button
+                          type="button"
+                          className="chip-btn chip-last"
+                          onClick={() => setOrderPrice(lastPrice.toFixed(2))}
+                        >
+                          現價 {lastPrice.toFixed(2)}
+                        </button>
+                      )}
+                      {limitUp && (
+                        <button
+                          type="button"
+                          className="chip-btn chip-up"
+                          onClick={() => setOrderPrice(limitUp)}
+                        >
+                          漲停 {limitUp}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 5. 委託數量區 (青藍色調區塊) */}
+                <div className="order-card-section section-qty">
+                  <div className="section-header">
+                    <div className="section-title-wrap">
+                      <span className="section-badge badge-qty">數量</span>
+                      <span className="section-title">
+                        委託數量 ({orderUnit === 'lot' ? '張 (1,000股)' : '股'})
+                      </span>
+                    </div>
+                    {currentPosition && (
+                      <button
+                        type="button"
+                        className="btn-fill-holding"
+                        onClick={() => {
+                          if (currentPosition.quantity >= 1000 && currentPosition.quantity % 1000 === 0) {
+                            setOrderUnit('lot');
+                            setOrderQty(Math.floor(currentPosition.quantity / 1000));
+                          } else {
+                            setOrderUnit('share');
+                            setOrderQty(currentPosition.quantity);
+                          }
+                        }}
+                        title="帶入庫存全數"
+                      >
+                        帶入庫存全數 ({Math.round(currentPosition.quantity).toLocaleString()} 股)
+                      </button>
+                    )}
+                  </div>
+                  <div className="order-qty-control">
+                    <button
+                      type="button"
+                      className="btn-step"
+                      onClick={() => setOrderQty((q) => Math.max(1, q - 1))}
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min="1"
+                      className="form-input qty-input"
+                      value={orderQty}
+                      onChange={(e) => setOrderQty(Math.max(1, parseInt(e.target.value) || 1))}
+                    />
+                    <button
+                      type="button"
+                      className="btn-step"
+                      onClick={() => setOrderQty((q) => q + 1)}
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                {/* 6. 金額試算與交割款項明細區 (紅/綠強對比區分) */}
+                <div className={`order-calc-card ${orderAction === 'buy' ? 'calc-buy' : 'calc-sell'}`}>
+                  <div className="calc-card-header">
+                    <span className="calc-card-title">
+                      {orderAction === 'buy' ? '🔴 買進交割扣款試算' : '🟢 賣出交割入帳試算'}
+                    </span>
+                    <span className="calc-note">
+                      {orderAction === 'buy' ? '由銀行交割戶扣款' : '匯入銀行交割戶'}
+                    </span>
+                  </div>
+                  <div className="calc-row">
+                    <span>預估成交價金</span>
+                    <span>{estimatedAmount.toLocaleString()} 元</span>
+                  </div>
+                  <div className="calc-row">
+                    <span>預估手續費 (0.1425%)</span>
+                    <span>{estimatedFee.toLocaleString()} 元</span>
+                  </div>
+                  {orderAction === 'sell' && (
+                    <div className="calc-row">
+                      <span>預估證交稅 ({isEtf ? '0.1%' : '0.3%'})</span>
+                      <span>{estimatedTax.toLocaleString()} 元</span>
+                    </div>
+                  )}
+                  <div className="calc-row calc-total">
+                    <span>預估應{orderAction === 'buy' ? '付總額 (交割扣款)' : '收總額 (交割入帳)'}</span>
+                    <span className={orderAction === 'buy' ? 'color-up' : 'color-down'}>
+                      {estimatedTotal.toLocaleString()} 元
+                    </span>
+                  </div>
+                </div>
+
+                {/* 7. 送出委託按鈕 */}
+                <button
+                  type="submit"
+                  className={`btn-order-submit ${orderAction === 'buy' ? 'submit-buy' : 'submit-sell'}`}
+                >
+                  {orderAction === 'buy'
+                    ? `🔴 確認買進【${stockCode || '---'}】(扣款 NT$ ${estimatedTotal.toLocaleString()})`
+                    : `🟢 確認賣出【${stockCode || '---'}】(入帳 NT$ ${estimatedTotal.toLocaleString()})`}
+                </button>
+              </form>
+            </div>
+          )}
+        </div>
+      </aside>
+    </div>
+  );
+};

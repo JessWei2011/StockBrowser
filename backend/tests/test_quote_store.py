@@ -51,3 +51,16 @@ def test_quote_store_null_not_coerced_to_zero():
     assert q.bid is None
     assert q.ask is None
     assert q.change is None
+
+def test_quote_store_odd_lot_caching_and_batch():
+    store = QuoteStore()
+    # 批次更新零股
+    store.update_odd_lot_batch({"2330": 2545.0, "0050": 114.9})
+    
+    # 之後初始化的個股應直接帶入零股價格
+    q_2330 = store.init_or_get_quote("2330", name="台積電")
+    assert q_2330.oddLotLast == 2545.0
+    
+    # 單筆 update_quote 更新零股
+    store.update_quote("2330", odd_lot_last=2550.0)
+    assert store.get_all_quotes()[1]["2330"].oddLotLast == 2550.0

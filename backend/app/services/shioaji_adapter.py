@@ -117,6 +117,51 @@ def fetch_disposition_periods() -> dict[str, dict[str, Any]]:
 
     return results
 
+def fetch_closing_odd_lots() -> dict[str, float]:
+    """向 TWSE 與 TPEx 官方公開管道撈取盤中零股收盤成交價"""
+    results: dict[str, float] = {}
+    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'}
+
+    # 1. TWSE 上市盤中零股行情 (TWTC7U)
+    try:
+        url = 'https://www.twse.com.tw/rwd/zh/afterTrading/TWTC7U?response=json'
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            rows = data.get('data', [])
+            for r in rows:
+                if len(r) > 6:
+                    code = str(r[0]).strip()
+                    price_str = str(r[6]).replace(',', '').strip()
+                    try:
+                        p = float(price_str)
+                        if p > 0:
+                            results[code] = p
+                    except (ValueError, TypeError):
+                        pass
+    except Exception as e:
+        logger.warning(f"Failed to fetch TWSE odd lots: {e}")
+
+    # 2. TPEx 上櫃盤中零股行情
+    try:
+        url = 'https://www.tpex.org.tw/openapi/v1/tpex_odd_stock'
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            for item in data:
+                code = str(item.get('SecuritiesCompanyCode', '')).strip()
+                price_str = str(item.get('Price', '')).replace(',', '').strip()
+                try:
+                    p = float(price_str)
+                    if p > 0:
+                        results[code] = p
+                except (ValueError, TypeError):
+                    pass
+    except Exception as e:
+        logger.warning(f"Failed to fetch TPEx odd lots: {e}")
+
+    return results
+
 def safe_float(val) -> Optional[float]:
     if val is None or val == "" or val == "-":
         return None
@@ -132,6 +177,23 @@ def safe_int(val) -> Optional[int]:
         return int(val)
     except (ValueError, TypeError):
         return None
+
+def calc_position_net_pnl(code: str, price: float, qty: float, cost: float, initial_last: float = 0.0, initial_pnl: float = 0.0) -> float:
+    """計算扣除賣出手續費與證券交易稅後之個股淨損益"""
+    if initial_last > 0 and abs(price - initial_last) < 1e-4:
+        return initial_pnl
+    mv = price * qty
+    # 證券交易稅: 債券ETF 0%, 股票型ETF 0.1%, 普通現股 0.3%
+    if 'B' in code:
+        tax = 0.0
+    elif code.startswith('00'):
+        tax = float(int(mv * 0.001))
+    else:
+        tax = float(int(mv * 0.003))
+    # 賣出手續費: 0.1425%, 最低 1 元
+    fee = max(1.0, float(int(mv * 0.001425)))
+    net_mv = mv - tax - fee
+    return round(net_mv - cost, 2)
 
 class ShioajiAdapter:
     def __init__(self):
@@ -156,6 +218,18 @@ class ShioajiAdapter:
         }
         self._mock_task: Optional[asyncio.Task] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._last_odd_fetch_date: Optional[str] = None
+
+    async def _fetch_and_apply_closing_odd_lots(self):
+        """非同步向 TWSE / TPEx 抓取最新盤後零股行情並更新進 quote_store"""
+        try:
+            loop = asyncio.get_running_loop()
+            odd_data = await loop.run_in_executor(None, fetch_closing_odd_lots)
+            if odd_data:
+                quote_store.update_odd_lot_batch(odd_data)
+                logger.info(f"Loaded {len(odd_data)} closing odd lot quotes into quote_store.")
+        except Exception as e:
+            logger.warning(f"Error updating closing odd lots: {e}")
 
     def start(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
@@ -191,6 +265,9 @@ class ShioajiAdapter:
             logger.error(f"Failed to connect to Shioaji: {e}", exc_info=True)
             self.is_connected = False
             self.is_logged_in = False
+
+        # 啟動非同步盤後零股補抓任務
+        asyncio.create_task(self._fetch_and_apply_closing_odd_lots())
 
         # 如果開啟非盤中模擬跳動或處於測試模式，啟動輔助跳動背景任務
         if settings.ENABLE_OFFHOURS_MOCK_TICKS:
@@ -333,7 +410,6 @@ class ShioajiAdapter:
             codes = []
             total_cost = 0.0
             total_pnl = 0.0
-            total_market_val = 0.0
 
             self.stock_positions_detail = []
             for p in positions:
@@ -344,9 +420,9 @@ class ShioajiAdapter:
                 price = float(getattr(p, 'price', 0) or 0)
                 pnl = float(getattr(p, 'pnl', 0) or 0)
                 last_p = float(getattr(p, 'last_price', 0) or 0)
-                total_cost += price * qty
+                cost = price * qty
+                total_cost += cost
                 total_pnl += pnl
-                total_market_val += last_p * qty
                 if code_str:
                     info = self.contracts_cache.get(code_str)
                     s_name = info["name"] if info else code_str
@@ -361,6 +437,7 @@ class ShioajiAdapter:
                         "initial_pnl": pnl
                     })
 
+            total_market_val = total_cost + total_pnl
             roi = round((total_pnl / total_cost * 100), 2) if total_cost > 0 else 0.0
             summary = {
                 "totalPnl": round(total_pnl, 2),
@@ -395,25 +472,35 @@ class ShioajiAdapter:
         return result
 
     def get_live_wealth_summary(self) -> dict[str, Any]:
-        """根據當前即時行情動態計算最新總損益與報酬率"""
+        """根據當前即時行情動態計算最新總損益與報酬率（計入賣出手續費與證券交易稅）"""
         if not self.stock_positions_detail:
             return self.cached_wealth_summary
 
         total_cost = 0.0
-        total_market_val = 0.0
+        total_pnl = 0.0
         _, quotes = quote_store.get_all_quotes()
 
         for p in self.stock_positions_detail:
             code = p["code"]
             qty = p["quantity"]
             cost_p = p["cost_price"]
-            total_cost += cost_p * qty
+            cost = cost_p * qty
+            total_cost += cost
 
             curr_q = quotes.get(code)
-            curr_price = curr_q.last if (curr_q and curr_q.last is not None) else p.get("initial_last", cost_p)
-            total_market_val += curr_price * qty
+            curr_price = curr_q.last if (curr_q and curr_q.last is not None and curr_q.last > 0) else p.get("initial_last", cost_p)
+            
+            p_pnl = calc_position_net_pnl(
+                code=code,
+                price=curr_price,
+                qty=qty,
+                cost=cost,
+                initial_last=float(p.get("initial_last", 0.0) or 0.0),
+                initial_pnl=float(p.get("initial_pnl", 0.0) or 0.0)
+            )
+            total_pnl += p_pnl
 
-        total_pnl = total_market_val - total_cost
+        total_market_val = total_cost + total_pnl
         roi = round((total_pnl / total_cost * 100), 2) if total_cost > 0 else 0.0
         live_summary = {
             "totalPnl": round(total_pnl, 2),
@@ -733,6 +820,14 @@ class ShioajiAdapter:
         while True:
             try:
                 await asyncio.sleep(2.0)
+                # 盤後自動確保有最新零股行情 (每日盤後 13:35 後確認一次)
+                tz_tw = timezone(timedelta(hours=8))
+                now_tw = datetime.now(tz_tw)
+                today_str = now_tw.strftime("%Y-%m-%d")
+                if not is_taiwan_trading_or_trial_day_hours() and self._last_odd_fetch_date != today_str:
+                    self._last_odd_fetch_date = today_str
+                    asyncio.create_task(self._fetch_and_apply_closing_odd_lots())
+
                 # 營業日時段 (08:30~13:35) 絕對不進行任何模擬
                 if is_taiwan_trading_or_trial_day_hours():
                     continue

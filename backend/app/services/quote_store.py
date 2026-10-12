@@ -1,10 +1,19 @@
+import json
+import logging
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 from backend.app.domain.models import QuoteState, DataStatus
+from backend.app.settings import BASE_DIR
+
+logger = logging.getLogger("quote_store")
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+CACHE_DIR = BASE_DIR / "data"
+ODD_CACHE_FILE = CACHE_DIR / "odd_quotes_cache.json"
 
 class QuoteStore:
     def __init__(self):
@@ -12,6 +21,47 @@ class QuoteStore:
         self._quotes: dict[str, QuoteState] = {}
         self._dirty_codes: set[str] = set()
         self._server_version: int = 0
+        self._odd_cache: dict[str, float] = {}
+        self._load_odd_cache()
+
+    def _load_odd_cache(self):
+        try:
+            if ODD_CACHE_FILE.exists():
+                with open(ODD_CACHE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        self._odd_cache = {str(k): float(v) for k, v in data.items() if v is not None}
+                        logger.info(f"Loaded {len(self._odd_cache)} odd lot prices from cache.")
+        except Exception as e:
+            logger.warning(f"Failed to load odd quotes cache: {e}")
+
+    def _save_odd_cache_locked(self):
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            temp_file = CACHE_DIR / "odd_quotes_cache.json.tmp"
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(self._odd_cache, f)
+            temp_file.replace(ODD_CACHE_FILE)
+        except Exception as e:
+            logger.warning(f"Failed to save odd quotes cache: {e}")
+
+    def update_odd_lot_batch(self, odd_lots: dict[str, float]):
+        with self._lock:
+            changed_any = False
+            for code, price in odd_lots.items():
+                if price is not None and price > 0:
+                    self._odd_cache[code] = price
+                    if code in self._quotes:
+                        curr = self._quotes[code]
+                        if curr.oddLotLast != price:
+                            curr.oddLotLast = price
+                            curr.revision += 1
+                            curr.receivedAt = now_iso()
+                            self._dirty_codes.add(code)
+                            changed_any = True
+            if changed_any:
+                self._server_version += 1
+            self._save_odd_cache_locked()
 
     def init_or_get_quote(
         self,
@@ -26,6 +76,7 @@ class QuoteStore:
     ) -> QuoteState:
         with self._lock:
             if code not in self._quotes:
+                cached_odd = self._odd_cache.get(code)
                 self._quotes[code] = QuoteState(
                     code=code,
                     name=name,
@@ -37,7 +88,8 @@ class QuoteStore:
                     isSimulated=is_simulated,
                     isAttention=is_attention,
                     dispositionLevel=disposition_level,
-                    dispositionPeriod=disposition_period
+                    dispositionPeriod=disposition_period,
+                    oddLotLast=cached_odd
                 )
             return self._quotes[code]
 
@@ -113,6 +165,8 @@ class QuoteStore:
 
             if odd_lot_last is not None and odd_lot_last > 0 and odd_lot_last != current.oddLotLast:
                 current.oddLotLast = odd_lot_last
+                self._odd_cache[code] = odd_lot_last
+                self._save_odd_cache_locked()
                 changed = True
 
             if bid is not None and bid != current.bid:

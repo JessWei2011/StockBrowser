@@ -14,8 +14,7 @@ import { Header } from './components/Header';
 import { GroupTabs } from './components/GroupTabs';
 import { QuoteTable } from './components/QuoteTable';
 import { CompactCardList } from './components/CompactCardList';
-import { VaultTable } from './components/VaultTable';
-import { VaultCardList } from './components/VaultCardList';
+import { AssistantSidebar } from './components/AssistantSidebar';
 import { GroupModal } from './components/GroupModal';
 import './App.css';
 
@@ -25,6 +24,8 @@ export const App: React.FC = () => {
   const [quotes, setQuotes] = useState<Record<string, QuoteState>>({});
   const [positions, setPositions] = useState<StockPosition[]>([]);
   const [dirtyCodes, setDirtyCodes] = useState<Set<string>>(new Set());
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [drawerTab, setDrawerTab] = useState<'vault' | 'order'>('vault');
   const [upstream, setUpstream] = useState<UpstreamStatus>({
     connected: false,
     loggedIn: false,
@@ -100,8 +101,9 @@ export const App: React.FC = () => {
         setMarketIndices(data.marketIndices);
       }
       setActiveGroupId((prev) => {
-        if (prev && data.groups.some((g) => g.id === prev)) return prev;
-        return data.groups[0]?.id || null;
+        if (prev && prev !== 'g-vault' && data.groups.some((g) => g.id === prev && g.name !== '財神庫')) return prev;
+        const firstWatchlist = data.groups.find((g) => g.id !== 'g-vault' && g.name !== '財神庫');
+        return firstWatchlist?.id || data.groups[0]?.id || null;
       });
     } catch (e) {
       console.error('Failed to load bootstrap data:', e);
@@ -175,8 +177,9 @@ export const App: React.FC = () => {
     };
   }, [loadBootstrap]);
 
-  // 目前選取的群組
-  const activeGroup = groups.find((g) => g.id === activeGroupId) || groups[0] || null;
+  // 目前選取的群組 (排除財神庫，財神庫由左側輔助視窗獨立呈現)
+  const watchlistGroups = groups.filter((g) => g.id !== 'g-vault' && g.name !== '財神庫');
+  const activeGroup = watchlistGroups.find((g) => g.id === activeGroupId) || watchlistGroups[0] || null;
 
   // 新增個股
   const handleAddStock = async (code: string) => {
@@ -267,185 +270,154 @@ export const App: React.FC = () => {
         groups={groups}
         activeGroupId={activeGroup?.id || null}
         onSelectGroup={(id) => setActiveGroupId(id)}
+        onOpenDrawer={() => {
+          if (!isDrawerOpen) setDrawerTab('vault');
+          setIsDrawerOpen((prev) => !prev);
+        }}
+        isDrawerOpen={isDrawerOpen}
       />
 
-      {/* 視圖切換列 (可直接切換「完整表格」與「兩行卡片」) */}
-      <div className={`view-mode-bar ${viewMode === 'card' ? 'view-mode-card' : 'view-mode-table'}`}>
-        <div className="view-mode-header-row">
-          <div className="view-mode-count">
-            {isVaultGroup ? (
-              <>庫存共 <strong>{positions.length}</strong> 檔持股</>
-            ) : (
-              <>本組合共 <strong>{activeGroup?.items.length || 0}</strong> 檔商品</>
-            )}
-          </div>
-          <div className="view-mode-toggle">
-            <span className="view-toggle-label">檢視模式：</span>
-            <div className="toggle-pill-group">
-              <button
-                className={`toggle-pill ${viewMode === 'table' ? 'active' : ''}`}
-                onClick={() => handleToggleViewMode('table')}
-                title="橫向滑動完整表格 (固定商品欄位)"
-              >
-                ⊞ 完整表格
-              </button>
-              <button
-                className={`toggle-pill ${viewMode === 'card' ? 'active' : ''}`}
-                onClick={() => handleToggleViewMode('card')}
-                title="手機兩行式精簡卡片 (無需左右滑動)"
-              >
-                ▤ 兩行卡片
-              </button>
+      {/* 工作區：支援左側並排推擠輔助視窗 (財神庫/財神筆) 與右側自選股行情同時對照 */}
+      <div className={`app-workspace ${isDrawerOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
+        {isDrawerOpen && (
+          <AssistantSidebar
+            isOpen={isDrawerOpen}
+            onClose={() => setIsDrawerOpen(false)}
+            activeTab={drawerTab}
+            onChangeTab={setDrawerTab}
+            positions={positions}
+            quotes={quotes}
+            wealthSummary={wealthSummary}
+            dirtyCodes={dirtyCodes}
+          />
+        )}
+
+        <div className="workspace-main">
+          {/* 視圖切換列與市場損益資訊列 */}
+          <div className={`view-mode-bar ${viewMode === 'card' ? 'view-mode-card' : 'view-mode-table'}`}>
+            <div className="view-mode-header-row">
+              <div className="view-mode-count">
+                本組合共 <strong>{activeGroup?.items.length || 0}</strong> 檔商品
+              </div>
+              <div className="view-mode-toggle">
+                <span className="view-toggle-label">檢視模式：</span>
+                <div className="toggle-pill-group">
+                  <button
+                    className={`toggle-pill ${viewMode === 'table' ? 'active' : ''}`}
+                    onClick={() => handleToggleViewMode('table')}
+                    title="橫向滑動完整表格 (固定商品欄位)"
+                  >
+                    ⊞ 完整表格
+                  </button>
+                  <button
+                    className={`toggle-pill ${viewMode === 'card' ? 'active' : ''}`}
+                    onClick={() => handleToggleViewMode('card')}
+                    title="手機兩行式精簡卡片 (無需左右滑動)"
+                  >
+                    ▤ 兩行卡片
+                  </button>
+                </div>
+              </div>
             </div>
+
+            {marketIndices && (
+              <div className="market-indices-summary">
+                {marketIndices.TSE && (
+                  <div className="index-pill">
+                    <span className="index-label">加權</span>
+                    <span
+                      className={`index-val ${
+                        marketIndices.TSE.change > 0
+                           ? 'color-up'
+                          : marketIndices.TSE.change < 0
+                          ? 'color-down'
+                          : 'color-neutral'
+                      }`}
+                    >
+                      {marketIndices.TSE.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    <span
+                      className={`index-chg ${
+                        marketIndices.TSE.change > 0
+                          ? 'color-up'
+                          : marketIndices.TSE.change < 0
+                          ? 'color-down'
+                          : 'color-neutral'
+                      }`}
+                    >
+                      {marketIndices.TSE.change > 0
+                        ? `▲${marketIndices.TSE.change.toFixed(2)}`
+                        : marketIndices.TSE.change < 0
+                        ? `▼${Math.abs(marketIndices.TSE.change).toFixed(2)}`
+                        : '0.00'}
+                      {' '}
+                      ({marketIndices.TSE.changePercent > 0 ? '+' : ''}
+                      {marketIndices.TSE.changePercent.toFixed(2)}%)
+                    </span>
+                  </div>
+                )}
+                {marketIndices.OTC && (
+                  <div className="index-pill">
+                    <span className="index-label">櫃買</span>
+                    <span
+                      className={`index-val ${
+                        marketIndices.OTC.change > 0
+                          ? 'color-up'
+                          : marketIndices.OTC.change < 0
+                          ? 'color-down'
+                          : 'color-neutral'
+                      }`}
+                    >
+                      {marketIndices.OTC.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    <span
+                      className={`index-chg ${
+                        marketIndices.OTC.change > 0
+                          ? 'color-up'
+                          : marketIndices.OTC.change < 0
+                          ? 'color-down'
+                          : 'color-neutral'
+                      }`}
+                    >
+                      {marketIndices.OTC.change > 0
+                        ? `▲${marketIndices.OTC.change.toFixed(2)}`
+                        : marketIndices.OTC.change < 0
+                        ? `▼${Math.abs(marketIndices.OTC.change).toFixed(2)}`
+                        : '0.00'}
+                      {' '}
+                      ({marketIndices.OTC.changePercent > 0 ? '+' : ''}
+                      {marketIndices.OTC.changePercent.toFixed(2)}%)
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
+
+          <main className="main-content">
+            {viewMode === 'table' ? (
+              <QuoteTable
+                items={activeGroup?.items || []}
+                isWealthGroup={isSystemGroup}
+                quotes={quotes}
+                dirtyCodes={dirtyCodes}
+                onRemoveItem={handleRemoveStock}
+                onMoveItem={handleMoveStock}
+                onReorderItems={handleReorderItems}
+              />
+            ) : (
+              <CompactCardList
+                items={activeGroup?.items || []}
+                isWealthGroup={isSystemGroup}
+                quotes={quotes}
+                dirtyCodes={dirtyCodes}
+                onRemoveItem={handleRemoveStock}
+                onMoveItem={handleMoveStock}
+              />
+            )}
+          </main>
         </div>
-
-        {wealthSummary && (
-          <div className="wealth-pnl-summary">
-            <span className="pnl-summary-item">
-              總損益{' '}
-              <strong
-                className={
-                  wealthSummary.totalPnl > 0
-                    ? 'color-up'
-                    : wealthSummary.totalPnl < 0
-                    ? 'color-down'
-                    : 'color-neutral'
-                }
-              >
-                {wealthSummary.totalPnl > 0 ? '+' : ''}
-                {Math.round(wealthSummary.totalPnl).toLocaleString()}元
-              </strong>
-            </span>
-            <span className="pnl-summary-divider">•</span>
-            <span className="pnl-summary-item">
-              報酬率{' '}
-              <strong
-                className={
-                  wealthSummary.returnPercent > 0
-                    ? 'color-up'
-                    : wealthSummary.returnPercent < 0
-                    ? 'color-down'
-                    : 'color-neutral'
-                }
-              >
-                {wealthSummary.returnPercent > 0 ? '+' : ''}
-                {wealthSummary.returnPercent.toFixed(2)}%
-              </strong>
-            </span>
-          </div>
-        )}
-
-        {marketIndices && (
-          <div className="market-indices-summary">
-            {marketIndices.TSE && (
-              <div className="index-pill">
-                <span className="index-label">加權</span>
-                <span
-                  className={`index-val ${
-                    marketIndices.TSE.change > 0
-                       ? 'color-up'
-                      : marketIndices.TSE.change < 0
-                      ? 'color-down'
-                      : 'color-neutral'
-                  }`}
-                >
-                  {marketIndices.TSE.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-                <span
-                  className={`index-chg ${
-                    marketIndices.TSE.change > 0
-                      ? 'color-up'
-                      : marketIndices.TSE.change < 0
-                      ? 'color-down'
-                      : 'color-neutral'
-                  }`}
-                >
-                  {marketIndices.TSE.change > 0
-                    ? `▲${marketIndices.TSE.change.toFixed(2)}`
-                    : marketIndices.TSE.change < 0
-                    ? `▼${Math.abs(marketIndices.TSE.change).toFixed(2)}`
-                    : '0.00'}
-                  {' '}
-                  ({marketIndices.TSE.changePercent > 0 ? '+' : ''}
-                  {marketIndices.TSE.changePercent.toFixed(2)}%)
-                </span>
-              </div>
-            )}
-            {marketIndices.OTC && (
-              <div className="index-pill">
-                <span className="index-label">櫃買</span>
-                <span
-                  className={`index-val ${
-                    marketIndices.OTC.change > 0
-                      ? 'color-up'
-                      : marketIndices.OTC.change < 0
-                      ? 'color-down'
-                      : 'color-neutral'
-                  }`}
-                >
-                  {marketIndices.OTC.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-                <span
-                  className={`index-chg ${
-                    marketIndices.OTC.change > 0
-                      ? 'color-up'
-                      : marketIndices.OTC.change < 0
-                      ? 'color-down'
-                      : 'color-neutral'
-                  }`}
-                >
-                  {marketIndices.OTC.change > 0
-                    ? `▲${marketIndices.OTC.change.toFixed(2)}`
-                    : marketIndices.OTC.change < 0
-                    ? `▼${Math.abs(marketIndices.OTC.change).toFixed(2)}`
-                    : '0.00'}
-                  {' '}
-                  ({marketIndices.OTC.changePercent > 0 ? '+' : ''}
-                  {marketIndices.OTC.changePercent.toFixed(2)}%)
-                </span>
-              </div>
-            )}
-          </div>
-        )}
       </div>
-
-      <main className="main-content">
-        {isVaultGroup ? (
-          viewMode === 'table' ? (
-            <VaultTable
-              positions={positions}
-              quotes={quotes}
-              dirtyCodes={dirtyCodes}
-            />
-          ) : (
-            <VaultCardList
-              positions={positions}
-              quotes={quotes}
-              dirtyCodes={dirtyCodes}
-            />
-          )
-        ) : viewMode === 'table' ? (
-          <QuoteTable
-            items={activeGroup?.items || []}
-            isWealthGroup={isSystemGroup}
-            quotes={quotes}
-            dirtyCodes={dirtyCodes}
-            onRemoveItem={handleRemoveStock}
-            onMoveItem={handleMoveStock}
-            onReorderItems={handleReorderItems}
-          />
-        ) : (
-          <CompactCardList
-            items={activeGroup?.items || []}
-            isWealthGroup={isSystemGroup}
-            quotes={quotes}
-            dirtyCodes={dirtyCodes}
-            onRemoveItem={handleRemoveStock}
-            onMoveItem={handleMoveStock}
-          />
-        )}
-      </main>
 
       <footer className="app-footer">
         <div className="footer-status">
