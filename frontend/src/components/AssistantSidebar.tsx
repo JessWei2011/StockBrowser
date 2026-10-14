@@ -130,12 +130,18 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   const activeOrdersCount = orders.filter((o) => o.canCancel).length;
   const currentStockActiveOrders = orders.filter((o) => o.code === stockCode && o.canCancel);
 
-  // 當 initialOrderCode 變更時同步更新
+  // 當 initialOrderCode 變更時同步更新代號與最新參考價
   useEffect(() => {
     if (initialOrderCode) {
       setStockCode(initialOrderCode);
+      const q = quotes[initialOrderCode];
+      if (q && q.last && q.last > 0) {
+        setOrderPrice(q.last.toFixed(2));
+      } else if (q && q.previousClose && q.previousClose > 0) {
+        setOrderPrice(q.previousClose.toFixed(2));
+      }
     }
-  }, [initialOrderCode]);
+  }, [initialOrderCode, quotes]);
 
   // 當選定個股時，若尚未輸入價格則帶入現價或昨收；若為盤後定價則鎖定為收盤價
   const currentQuote = quotes[stockCode];
@@ -612,7 +618,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                           title={`帶入「${pos.name || pos.code}」現有 ${Math.round(pos.quantity).toLocaleString()} 股至財神筆快速下單`}
                           onClick={() => handleSelectToOrder(pos.code, pos.quantity)}
                         >
-                          下單 ↗
+                          <span>下單</span>
+                          <span className="order-shortcut-arrow">↗</span>
                         </button>
                       </div>
                     );

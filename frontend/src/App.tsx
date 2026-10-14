@@ -30,6 +30,8 @@ export const App: React.FC = () => {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<'vault' | 'order'>('vault');
   const [isVaultPasswordModalOpen, setIsVaultPasswordModalOpen] = useState(false);
+  const [orderTargetCode, setOrderTargetCode] = useState<string | null>(null);
+  const [pendingOrderCode, setPendingOrderCode] = useState<string | null>(null);
   const [selectedChartCode, setSelectedChartCode] = useState<string | null>(null);
   const [upstream, setUpstream] = useState<UpstreamStatus>({
     connected: false,
@@ -253,6 +255,18 @@ export const App: React.FC = () => {
     await loadBootstrap();
   };
 
+  // 點選任一個股最右側下單按鈕：需財神庫密碼通過後方可開啟財神筆
+  const handleOpenOrder = (code: string) => {
+    if (!isVaultAuthenticated()) {
+      setPendingOrderCode(code);
+      setIsVaultPasswordModalOpen(true);
+      return;
+    }
+    setOrderTargetCode(code);
+    setDrawerTab('order');
+    setIsDrawerOpen(true);
+  };
+
   const isVaultGroup = activeGroup?.id === 'g-vault' || activeGroup?.name === '財神庫';
   const isWealthGroup = activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿';
   const isSystemGroup = isVaultGroup || isWealthGroup || Boolean(activeGroup?.isSystemGroup);
@@ -313,6 +327,7 @@ export const App: React.FC = () => {
             quotes={quotes}
             wealthSummary={wealthSummary}
             dirtyCodes={dirtyCodes}
+            initialOrderCode={orderTargetCode || undefined}
             orderedCodes={
               groups.find((g) => g.id === 'g-wealth' || g.name === '財神簿')?.items.map((i) => i.code) ||
               groups.find((g) => g.id === 'g-vault' || g.name === '財神庫')?.items.map((i) => i.code) ||
@@ -452,6 +467,7 @@ export const App: React.FC = () => {
                 onMoveItem={handleMoveStock}
                 onReorderItems={handleReorderItems}
                 onSelectStock={(code) => setSelectedChartCode(code)}
+                onOpenOrder={handleOpenOrder}
               />
             ) : (
               <CompactCardList
@@ -464,6 +480,7 @@ export const App: React.FC = () => {
                 onRemoveItem={handleRemoveStock}
                 onMoveItem={handleMoveStock}
                 onSelectStock={(code) => setSelectedChartCode(code)}
+                onOpenOrder={handleOpenOrder}
               />
             )}
           </main>
@@ -505,11 +522,21 @@ export const App: React.FC = () => {
 
       <VaultPasswordModal
         isOpen={isVaultPasswordModalOpen}
-        onClose={() => setIsVaultPasswordModalOpen(false)}
+        onClose={() => {
+          setIsVaultPasswordModalOpen(false);
+          setPendingOrderCode(null);
+        }}
         onSuccess={() => {
           setIsVaultPasswordModalOpen(false);
-          setDrawerTab('vault');
-          setIsDrawerOpen(true);
+          if (pendingOrderCode) {
+            setOrderTargetCode(pendingOrderCode);
+            setPendingOrderCode(null);
+            setDrawerTab('order');
+            setIsDrawerOpen(true);
+          } else {
+            setDrawerTab('vault');
+            setIsDrawerOpen(true);
+          }
         }}
       />
 

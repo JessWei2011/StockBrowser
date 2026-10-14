@@ -12,6 +12,7 @@ interface QuoteTableProps {
   onMoveItem: (index: number, direction: 'up' | 'down') => Promise<void>;
   onReorderItems: (fromIndex: number, toIndex: number) => Promise<void>;
   onSelectStock?: (code: string) => void;
+  onOpenOrder?: (code: string) => void;
 }
 
 export const QuoteTable: React.FC<QuoteTableProps> = ({
@@ -24,6 +25,7 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
   onMoveItem,
   onReorderItems,
   onSelectStock,
+  onOpenOrder,
 }) => {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -390,6 +392,20 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                           ) : isWealthGroup ? (
                             <span className="color-neutral ma-empty">—</span>
                           ) : null}
+
+                          {/* 下單快捷鍵 */}
+                          <button
+                            type="button"
+                            className="btn-order-shortcut"
+                            title={`帶入「${item.name || item.code}」快速下單`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenOrder?.(item.code);
+                            }}
+                          >
+                            <span>下單</span>
+                            <span className="order-shortcut-arrow">↗</span>
+                          </button>
 
                           {/* 刪除鍵：財神簿外之群組保留刪除功能 */}
                           {!isWealthGroup && (

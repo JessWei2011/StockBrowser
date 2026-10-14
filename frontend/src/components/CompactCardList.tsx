@@ -11,6 +11,7 @@ interface CompactCardListProps {
   onRemoveItem: (code: string) => Promise<void>;
   onMoveItem: (index: number, direction: 'up' | 'down') => Promise<void>;
   onSelectStock?: (code: string) => void;
+  onOpenOrder?: (code: string) => void;
 }
 
 export const CompactCardList: React.FC<CompactCardListProps> = ({
@@ -22,6 +23,7 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
   onRemoveItem,
   onMoveItem,
   onSelectStock,
+  onOpenOrder,
 }) => {
   const formatPrice = (val: number | null | undefined, isSim?: boolean): React.ReactNode => {
     if (val === null || val === undefined || isNaN(val) || val <= 0) return '—';
@@ -193,42 +195,57 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
                 })()}
               </div>
 
-              <div className="flat-price-display">
-                <div className="flat-price-stack">
-                  {badgeClass ? (
-                    <span className={`flat-price-pill ${badgeClass}`}>
-                      {formatPrice(last, isSimulated)}
+              <div className="flat-primary-right">
+                <div className="flat-price-display">
+                  <div className="flat-price-stack">
+                    {badgeClass ? (
+                      <span className={`flat-price-pill ${badgeClass}`}>
+                        {formatPrice(last, isSimulated)}
+                      </span>
+                    ) : (
+                      <span className={`flat-price-val ${getPriceClass(last, prev)}`}>
+                        {formatPrice(last, isSimulated)}
+                      </span>
+                    )}
+                    <span className={`flat-oddlot-price ${getPriceClass(q?.oddLotLast, prev)}`} title="零股成交價">
+                      <span className="flat-oddlot-prefix">零</span>{formatPrice(q?.oddLotLast)}
                     </span>
-                  ) : (
-                    <span className={`flat-price-val ${getPriceClass(last, prev)}`}>
-                      {formatPrice(last, isSimulated)}
+                  </div>
+
+                  <div className="flat-chg-stack">
+                    <span className={`flat-chg-num ${changeClass}`}>
+                      {effectiveChg === null || isNaN(effectiveChg)
+                        ? '—'
+                        : effectiveChg > 0
+                        ? `▲ ${effectiveChg.toFixed(2)}`
+                        : effectiveChg < 0
+                        ? `▼ ${Math.abs(effectiveChg).toFixed(2)}`
+                        : '— 0.00'}
                     </span>
-                  )}
-                  <span className={`flat-oddlot-price ${getPriceClass(q?.oddLotLast, prev)}`} title="零股成交價">
-                    <span className="flat-oddlot-prefix">零</span>{formatPrice(q?.oddLotLast)}
-                  </span>
+                    <span className={`flat-pct-num ${changeClass}`}>
+                      {effectivePct === null || isNaN(effectivePct)
+                        ? ''
+                        : effectivePct > 0
+                        ? `+${effectivePct.toFixed(2)}%`
+                        : effectivePct < 0
+                        ? `${effectivePct.toFixed(2)}%`
+                        : '0.00%'}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="flat-chg-stack">
-                  <span className={`flat-chg-num ${changeClass}`}>
-                    {effectiveChg === null || isNaN(effectiveChg)
-                      ? '—'
-                      : effectiveChg > 0
-                      ? `▲ ${effectiveChg.toFixed(2)}`
-                      : effectiveChg < 0
-                      ? `▼ ${Math.abs(effectiveChg).toFixed(2)}`
-                      : '— 0.00'}
-                  </span>
-                  <span className={`flat-pct-num ${changeClass}`}>
-                    {effectivePct === null || isNaN(effectivePct)
-                      ? ''
-                      : effectivePct > 0
-                      ? `+${effectivePct.toFixed(2)}%`
-                      : effectivePct < 0
-                      ? `${effectivePct.toFixed(2)}%`
-                      : '0.00%'}
-                  </span>
-                </div>
+                <button
+                  type="button"
+                  className="btn-order-shortcut"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenOrder?.(item.code);
+                  }}
+                  title={`帶入「${item.name || item.code}」快速下單`}
+                >
+                  <span>下單</span>
+                  <span className="order-shortcut-arrow">↗</span>
+                </button>
               </div>
             </div>
 
