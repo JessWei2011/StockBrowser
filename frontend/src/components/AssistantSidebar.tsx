@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import type { StockPosition, QuoteState, WealthSummary, OrderItem } from '../types';
 import { submitOrder, fetchOrders, cancelOrder, updateOrder } from '../services/api';
 
@@ -695,14 +696,16 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                         className={`pill-toggle ${orderUnit === 'lot' ? 'active' : ''}`}
                         onClick={() => setOrderUnit('lot')}
                       >
-                        現股整股 (張)
+                        {orderUnit === 'lot' && <span className="pill-check-icon">✓</span>}
+                        <span>現股整股 (張)</span>
                       </button>
                       <button
                         type="button"
                         className={`pill-toggle ${orderUnit === 'share' ? 'active' : ''}`}
                         onClick={() => setOrderUnit('share')}
                       >
-                        盤中零股 (股)
+                        {orderUnit === 'share' && <span className="pill-check-icon">✓</span>}
+                        <span>盤中零股 (股)</span>
                       </button>
                     </div>
                   </div>
@@ -714,7 +717,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                         className={`pill-toggle ${orderType === 'limit' ? 'active' : ''}`}
                         onClick={() => setOrderType('limit')}
                       >
-                        限價 (ROD)
+                        {orderType === 'limit' && <span className="pill-check-icon">✓</span>}
+                        <span>限價 (ROD)</span>
                       </button>
                       <button
                         type="button"
@@ -724,7 +728,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                           setOrderPrice('');
                         }}
                       >
-                        市價
+                        {orderType === 'market' && <span className="pill-check-icon">✓</span>}
+                        <span>市價</span>
                       </button>
                     </div>
                   </div>
@@ -1087,7 +1092,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
             )}
 
             {/* ==================== 撤單確認彈窗 (Modal) ==================== */}
-            {cancellingOrder && (
+            {cancellingOrder && createPortal(
               <div className="order-modal-overlay" onClick={() => !isCancelling && setCancellingOrder(null)}>
                 <div className="order-modal-card" onClick={(e) => e.stopPropagation()}>
                   <div className="modal-header">
@@ -1148,11 +1153,12 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     </button>
                   </div>
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
 
             {/* ==================== 改價彈窗 (Modal) ==================== */}
-            {editingPriceOrder && (
+            {editingPriceOrder && createPortal(
               <div className="order-modal-overlay" onClick={() => !isUpdatingPrice && setEditingPriceOrder(null)}>
                 <div className="order-modal-card" onClick={(e) => e.stopPropagation()}>
                   <div className="modal-header">
@@ -1267,11 +1273,12 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     </button>
                   </div>
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
 
             {/* ==================== 改量(減量)彈窗 (Modal) ==================== */}
-            {editingQtyOrder && (
+            {editingQtyOrder && createPortal(
               <div className="order-modal-overlay" onClick={() => !isUpdatingQty && setEditingQtyOrder(null)}>
                 <div className="order-modal-card" onClick={(e) => e.stopPropagation()}>
                   <div className="modal-header">
@@ -1391,11 +1398,12 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     </button>
                   </div>
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
 
             {/* 4. 下單前雙重防護確認視窗 (超大字眼買入/賣出警示) */}
-            {isConfirmModalOpen && (
+            {isConfirmModalOpen && createPortal(
               <div className="order-modal-overlay" onClick={() => !isSubmitting && setIsConfirmModalOpen(false)}>
                 <div
                   className={`order-modal-card order-confirm-modal ${orderAction === 'buy' ? 'modal-theme-buy' : 'modal-theme-sell'}`}
@@ -1490,7 +1498,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     </button>
                   </div>
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         )}
