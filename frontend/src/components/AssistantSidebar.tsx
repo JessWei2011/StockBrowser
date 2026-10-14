@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { StockPosition, QuoteState, WealthSummary, OrderItem } from '../types';
 import { submitOrder, fetchOrders, cancelOrder, updateOrder } from '../services/api';
+import { getStoredVaultPassword } from './VaultPasswordModal';
 
 interface AssistantSidebarProps {
   isOpen: boolean;
@@ -215,6 +216,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
   // 買入金額 >= 30 萬強烈防護條件
   const isHighValueBuy = orderAction === 'buy' && estimatedTotal >= 300000;
+  const isPinCorrect = isHighValueBuy ? confirmPin === getStoredVaultPassword() : true;
 
   // 1. 表單提交：前置檢查通過後，彈出二次防護確認視窗
   const handleSubmitOrder = (e: React.FormEvent) => {
@@ -243,8 +245,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
   // 2. 於防護確認視窗按下確認後，實際送出委託
   const handleExecuteOrder = async () => {
-    // 若為 >=30 萬買入委託，必須驗證 1030 密碼方可放行
-    if (isHighValueBuy && confirmPin !== '1030') {
+    // 若為 >=30 萬買入委託，必須驗證安全密碼方可放行
+    if (isHighValueBuy && !isPinCorrect) {
       return;
     }
     setIsConfirmModalOpen(false);
@@ -1487,33 +1489,34 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                           <span>大額買入強烈防護警示（金額達 NT$ {estimatedTotal.toLocaleString()} 元）</span>
                         </div>
                         <div className="huge-alert-msg">
-                          ⚠️ 本筆買入金額已達 <strong>30 萬元</strong>！為防止手滑下錯單，必須輸入確認密碼【<strong>1030</strong>】方可解鎖送出委託。
+                          ⚠️ 本筆買入金額已達 <strong>30 萬元</strong>！為防止大額誤下單，請輸入交易安全密碼以解鎖送出委託。
                         </div>
                         <div className="huge-alert-pin-input-wrap">
                           <label className="pin-input-label" htmlFor="high-value-pin-input">
-                            🔑 請輸入確認密碼：
+                            🔑 安全密碼：
                           </label>
                           <input
                             id="high-value-pin-input"
-                            type="text"
+                            type="password"
                             inputMode="numeric"
-                            pattern="[0-9]*"
-                            maxLength={4}
-                            className={`pin-confirm-input ${confirmPin === '1030' ? 'pin-valid' : ''}`}
-                            placeholder="1030"
+                            maxLength={12}
+                            className={`pin-confirm-input ${isPinCorrect ? 'pin-valid' : confirmPin ? 'pin-invalid' : ''}`}
+                            placeholder="••••"
                             value={confirmPin}
                             onChange={(e) => setConfirmPin(e.target.value.trim())}
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter' && confirmPin === '1030' && !isSubmitting) {
+                              if (e.key === 'Enter' && isPinCorrect && !isSubmitting) {
                                 handleExecuteOrder();
                               }
                             }}
                             autoFocus
                           />
-                          {confirmPin === '1030' ? (
+                          {isPinCorrect ? (
                             <span className="pin-status pin-pass">✅ 密碼正確已解鎖</span>
+                          ) : confirmPin.length > 0 ? (
+                            <span className="pin-status pin-error">❌ 密碼錯誤</span>
                           ) : (
-                            <span className="pin-status pin-pending">⚠️ 請輸入 1030 解鎖</span>
+                            <span className="pin-status pin-pending">🔒 請輸入安全密碼解鎖</span>
                           )}
                         </div>
                       </div>
@@ -1536,15 +1539,15 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     </button>
                     <button
                       type="button"
-                      className={`btn-modal-confirm ${orderAction === 'buy' ? 'btn-confirm-buy' : 'btn-confirm-sell'} ${isHighValueBuy && confirmPin !== '1030' ? 'btn-confirm-locked' : ''}`}
-                      disabled={isSubmitting || (isHighValueBuy && confirmPin !== '1030')}
+                      className={`btn-modal-confirm ${orderAction === 'buy' ? 'btn-confirm-buy' : 'btn-confirm-sell'} ${isHighValueBuy && !isPinCorrect ? 'btn-confirm-locked' : ''}`}
+                      disabled={isSubmitting || (isHighValueBuy && !isPinCorrect)}
                       onClick={handleExecuteOrder}
                       autoFocus={!isHighValueBuy}
                     >
                       {isSubmitting ? (
                         '⏳ 委託送出中...'
-                      ) : isHighValueBuy && confirmPin !== '1030' ? (
-                        '🔒 請輸入 1030 密碼解鎖'
+                      ) : isHighValueBuy && !isPinCorrect ? (
+                        '🔒 請輸入安全密碼解鎖'
                       ) : orderAction === 'buy' ? (
                         `🔴 確認【買入】${stockCode}`
                       ) : (
