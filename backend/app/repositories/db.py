@@ -253,17 +253,73 @@ async def load_stock_positions() -> list[dict]:
             for r in rows
         ]
 
+def is_dimmed_asset(code: str, sec_type: str = "") -> bool:
+    """判斷是否為長期持有/暗色標的 (ETF、債券、虎航 6757)"""
+    c = (code or "").upper()
+    s = (sec_type or "").upper()
+    return c.startswith("00") or "B" in c or s in ("ETF", "BOND") or c == "6757"
+
 async def sync_group_items(group_id: str, items_data: list[tuple[str, str, str, str]]):
-    """將指定群組的持股項目完全同步為 items_data: [(code, name, exchange, security_type), ...]"""
+    """
+    將指定群組的持股項目同步為 items_data: [(code, name, exchange, security_type), ...]
+    【重點】：完整保留使用者已排定的自訂排序 (position)，絕不在同步或重啟時被覆蓋重設！
+    - 若已有使用者自訂排序：依照既有 position 排序，新進股票接續在後。
+    - 若為首次初始化或尚無排序：將一般個股置於上方，ETF、債券、虎航自動排至最下方。
+    """
     async with get_db_connection() as db:
-        await db.execute("DELETE FROM watchlist_items WHERE group_id = ?", (group_id,))
-        for idx, (code, name, exchange, sec_type) in enumerate(items_data):
-            i_id = str(uuid.uuid4())
+        cur = await db.execute(
+            "SELECT id, code, position FROM watchlist_items WHERE group_id = ?",
+            (group_id,)
+        )
+        existing_rows = await cur.fetchall()
+        existing_map = {r["code"]: (r["id"], r["position"]) for r in existing_rows}
+        incoming_codes = {item[0] for item in items_data}
+
+        # 1. 移除已不再持有的股票
+        for code in set(existing_map.keys()) - incoming_codes:
             await db.execute(
-                "INSERT INTO watchlist_items (id, group_id, code, name, exchange, security_type, position) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (i_id, group_id, code, name, exchange, sec_type, idx)
+                "DELETE FROM watchlist_items WHERE group_id = ? AND code = ?",
+                (group_id, code)
             )
-        await db.execute("UPDATE watchlist_groups SET updated_at = ? WHERE id = ?", (now_iso(), group_id))
+
+        # 2. 計算排序權重 (有自訂排序者優先保留；新標的一般股在前、ETF/債券/虎航在後)
+        def sort_key(item_tuple):
+            code, name, exchange, sec_type = item_tuple
+            if code in existing_map:
+                return (0, existing_map[code][1], code)
+            dimmed = is_dimmed_asset(code, sec_type)
+            # 次排序：普通股 (0), ETF (1), 債券 (2), 虎航 (3)
+            sub_tier = 0
+            if code == "6757":
+                sub_tier = 3
+            elif "B" in code.upper() or sec_type.upper() == "BOND":
+                sub_tier = 2
+            elif code.startswith("00") or sec_type.upper() == "ETF":
+                sub_tier = 1
+            return (1, sub_tier, code)
+
+        sorted_items = sorted(items_data, key=sort_key)
+
+        # 3. 更新既有項目或插入新項目，連續正規化 position (0, 1, 2, ...)
+        ts = now_iso()
+        for idx, (code, name, exchange, sec_type) in enumerate(sorted_items):
+            if code in existing_map:
+                await db.execute(
+                    """UPDATE watchlist_items 
+                    SET name = ?, exchange = ?, security_type = ?, position = ? 
+                    WHERE group_id = ? AND code = ?""",
+                    (name, exchange, sec_type, idx, group_id, code)
+                )
+            else:
+                new_id = str(uuid.uuid4())
+                await db.execute(
+                    """INSERT INTO watchlist_items 
+                    (id, group_id, code, name, exchange, security_type, position) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (new_id, group_id, code, name, exchange, sec_type, idx)
+                )
+
+        await db.execute("UPDATE watchlist_groups SET updated_at = ? WHERE id = ?", (ts, group_id))
         await db.commit()
 
 async def get_all_subscribed_codes() -> set[str]:
@@ -332,10 +388,16 @@ async def remove_item_from_group(group_id: str, code: str):
 
 async def reorder_items(group_id: str, codes: list[str]):
     async with get_db_connection() as db:
-        for idx, code in enumerate(codes):
-            await db.execute(
-                "UPDATE watchlist_items SET position = ? WHERE group_id = ? AND code = ?",
-                (idx, group_id, code)
-            )
-        await db.execute("UPDATE watchlist_groups SET updated_at = ? WHERE id = ?", (now_iso(), group_id))
+        target_group_ids = [group_id]
+        if group_id in ("g-vault", "g-wealth"):
+            target_group_ids = ["g-vault", "g-wealth"]
+
+        ts = now_iso()
+        for gid in target_group_ids:
+            for idx, code in enumerate(codes):
+                await db.execute(
+                    "UPDATE watchlist_items SET position = ? WHERE group_id = ? AND code = ?",
+                    (idx, gid, code)
+                )
+            await db.execute("UPDATE watchlist_groups SET updated_at = ? WHERE id = ?", (ts, gid))
         await db.commit()

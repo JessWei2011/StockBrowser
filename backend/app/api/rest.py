@@ -10,6 +10,8 @@ from backend.app.domain.models import (
     ReorderItemsRequest,
     InstrumentSearchResult,
     PlaceOrderRequest,
+    OrderItem,
+    UpdateOrderRequest,
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -105,6 +107,7 @@ async def refresh_system_quotes():
 
 @router.get("/charts/{code}")
 async def get_stock_chart(code: str):
+    import asyncio
     from backend.app.services.stock_chart_service import parse_stock_report
     # 嘗試從即時記憶體快取中獲取當日即時報價
     live_quote = None
@@ -123,20 +126,21 @@ async def get_stock_chart(code: str):
     except Exception:
         pass
 
-    chart_data = parse_stock_report(code, live_quote)
+    chart_data = await asyncio.to_thread(parse_stock_report, code, live_quote)
     if not chart_data:
         raise HTTPException(status_code=404, detail=f"Stock {code} report not found in StockCenter")
     return chart_data
 
 @router.get("/indicators")
 async def get_stock_indicators(codes: str = Query("")):
+    import asyncio
     from backend.app.services.stock_chart_service import get_multiple_stocks_ma_summary
     code_list = [c.strip() for c in codes.split(",") if c.strip()]
     if not code_list:
         from backend.app.repositories.db import get_all_groups
         groups = await get_all_groups()
         code_list = list({it.code for g in groups for it in g.items})
-    return get_multiple_stocks_ma_summary(code_list)
+    return await asyncio.to_thread(get_multiple_stocks_ma_summary, code_list)
 
 @router.post("/orders/place")
 async def place_order(body: PlaceOrderRequest):
@@ -152,6 +156,32 @@ async def place_order(body: PlaceOrderRequest):
         return res
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/orders", response_model=list[OrderItem])
+async def get_orders():
+    """查詢今日所有證券委託單與成交狀態"""
+    return shioaji_adapter.fetch_orders()
+
+@router.post("/orders/{order_id}/cancel")
+async def cancel_order(order_id: str):
+    """取消特定委託單"""
+    try:
+        return shioaji_adapter.cancel_order(order_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/orders/{order_id}/update")
+async def update_order(order_id: str, body: UpdateOrderRequest):
+    """修改委託價格或委託數量(減量)"""
+    try:
+        return shioaji_adapter.update_order(
+            order_id=order_id,
+            new_price=body.newPrice,
+            new_qty=body.newQty,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 
 

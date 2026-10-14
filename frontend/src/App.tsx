@@ -313,6 +313,11 @@ export const App: React.FC = () => {
             quotes={quotes}
             wealthSummary={wealthSummary}
             dirtyCodes={dirtyCodes}
+            orderedCodes={
+              groups.find((g) => g.id === 'g-wealth' || g.name === '財神簿')?.items.map((i) => i.code) ||
+              groups.find((g) => g.id === 'g-vault' || g.name === '財神庫')?.items.map((i) => i.code) ||
+              []
+            }
             onLock={() => {
               clearVaultAuthenticated();
               setIsDrawerOpen(false);

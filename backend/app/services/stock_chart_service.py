@@ -1,11 +1,12 @@
 import glob
+import logging
 import os
 import re
-from datetime import datetime, date
+import time
+from datetime import datetime, date, timedelta
 from typing import Optional
 from bs4 import BeautifulSoup
 from pydantic import BaseModel
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +14,46 @@ logger = logging.getLogger(__name__)
 STOCK_CENTER_DIR = "/Users/jess/Desktop/Python/StockCenter"
 STOCK_CENTER_REPORTS_DIR = os.path.join(STOCK_CENTER_DIR, "reports")
 STOCK_CENTER_STATE_FILE = os.path.join(STOCK_CENTER_DIR, "reports_state.json")
+
+_last_generation_attempt: dict[str, float] = {}
+
+def get_latest_market_cutoff() -> datetime:
+    """
+    計算市場最新已結算交易日的盤後時間點（基準點定為該日 15:00）。
+    - 平日（週一至週五）15:30 之後：當日已收盤，基準點為今天 15:00。
+    - 平日 15:30 之前：尚未產生當日完整盤後，基準點為前一交易日 15:00（若今天是週一則為上週五 15:00）。
+    - 週末（週六、週日）：基準點為週五 15:00。
+    """
+    now = datetime.now()
+    weekday = now.weekday()  # 0: Mon, ..., 4: Fri, 5: Sat, 6: Sun
+
+    if weekday in (5, 6):  # 週六或週日
+        days_back = 1 if weekday == 5 else 2
+        ref_date = (now - timedelta(days=days_back)).date()
+    elif weekday == 0:  # 週一
+        if now.hour > 15 or (now.hour == 15 and now.minute >= 30):
+            ref_date = now.date()
+        else:
+            ref_date = (now - timedelta(days=3)).date()
+    else:  # 週二至週五
+        if now.hour > 15 or (now.hour == 15 and now.minute >= 30):
+            ref_date = now.date()
+        else:
+            ref_date = (now - timedelta(days=1)).date()
+
+    return datetime(ref_date.year, ref_date.month, ref_date.day, 15, 0, 0)
+
+def is_report_stale(filepath: str) -> bool:
+    """判斷報告檔案是否早於最近應結算的交易日基準點"""
+    if not os.path.exists(filepath):
+        return True
+    try:
+        mtime = datetime.fromtimestamp(os.path.getmtime(filepath))
+        cutoff = get_latest_market_cutoff()
+        return mtime < cutoff
+    except Exception as e:
+        logger.warning(f"Error checking report mtime for {filepath}: {e}")
+        return False
 
 def is_etf_or_bond(code: str) -> bool:
     """判定是否為 ETF 或債券標的（以 00 開頭）"""
@@ -130,18 +171,103 @@ def find_stock_report_path(code: str) -> Optional[str]:
         return matches[0]
     return None
 
+def recalculate_indicators(kline_bars: list[KlineBar]):
+    """重新計算所有 K 棒的 MA5, MA10, MA20, MA60 及布林通道指標"""
+    closes = [b.close for b in kline_bars]
+    for idx, b in enumerate(kline_bars):
+        if idx >= 4:
+            b.ma5 = round(sum(closes[idx-4:idx+1]) / 5, 2)
+        if idx >= 9:
+            b.ma10 = round(sum(closes[idx-9:idx+1]) / 10, 2)
+        if idx >= 19:
+            sub = closes[idx-19:idx+1]
+            avg = sum(sub) / 20.0
+            b.ma20 = round(avg, 2)
+            var = sum((x - avg) ** 2 for x in sub) / 20.0
+            std = var ** 0.5
+            b.boll_mid = round(avg, 2)
+            b.boll_up = round(avg + 2 * std, 2)
+            b.boll_down = round(avg - 2 * std, 2)
+        if idx >= 59:
+            b.ma60 = round(sum(closes[idx-59:idx+1]) / 60, 2)
+
+def backfill_missing_kline_bars(code: str, kline_bars: list[KlineBar]) -> list[KlineBar]:
+    """
+    若 HTML 報告歷史 K 線與今天之間存在缺漏交易日（例如 StockCenter 暫停或未及時爬取），
+    利用 yfinance 快速回補缺漏的真實交易日 K 線，確保日期序列完整連續不跳天。
+    """
+    if not kline_bars:
+        return kline_bars
+
+    existing_dates = {b.date for b in kline_bars}
+    today_date = date.today()
+    today_label = today_date.strftime("%m/%d")
+    last_date_str = kline_bars[-1].date
+
+    try:
+        import yfinance as yf
+        hist = None
+        for suffix in [".TW", ".TWO"]:
+            try:
+                hist = yf.Ticker(f"{code}{suffix}").history(period="10d")
+                if hist is not None and not hist.empty:
+                    break
+            except Exception:
+                continue
+
+        if hist is not None and not hist.empty:
+            # 找出 hist 中對應 last_date_str 的位置，只回補該日期之後且在今日之前的交易日
+            matching_indices = [i for i, ts in enumerate(hist.index) if ts.strftime("%m/%d") == last_date_str]
+            start_pos = (matching_indices[-1] + 1) if matching_indices else 0
+            sub_hist = hist.iloc[start_pos:]
+
+            added_any = False
+            for ts, row in sub_hist.iterrows():
+                bar_date = ts.strftime("%m/%d")
+                # 不回補今天（今天由即時報價處理）且尚未存在於歷史清單中
+                if bar_date not in existing_dates and bar_date != today_label:
+                    close_p = float(row["Close"])
+                    if close_p > 0:
+                        vol = round(float(row["Volume"]) / 1000.0, 1)
+                        new_bar = KlineBar(
+                            date=bar_date,
+                            open=float(row["Open"]),
+                            high=float(row["High"]),
+                            low=float(row["Low"]),
+                            close=close_p,
+                            volume=vol,
+                        )
+                        kline_bars.append(new_bar)
+                        existing_dates.add(bar_date)
+                        added_any = True
+
+            if added_any:
+                recalculate_indicators(kline_bars)
+    except Exception as e:
+        logger.warning(f"Failed to backfill missing bars via yfinance for {code}: {e}")
+
+    return kline_bars
+
 def parse_stock_report(code: str, live_quote: Optional[dict] = None) -> Optional[StockAnalysisChartData]:
-    """解析 StockCenter 既有的 HTML 分析報告，若無則連動 StockCenter 現場生成並持久化存檔"""
+    """解析 StockCenter 既有的 HTML 分析報告，若過期或無報告則連動 StockCenter 現場生成並持久化存檔"""
     if is_etf_or_bond(code):
         logger.info(f"Stock {code} is ETF or Bond, skipping chart report.")
         return None
 
     filepath = find_stock_report_path(code)
-    if not filepath or not os.path.exists(filepath):
-        logger.info(f"Report for stock {code} not found in {STOCK_CENTER_REPORTS_DIR}. Triggering on-demand generation via StockCenter...")
-        success = generate_stock_report_via_stockcenter(code)
-        if success:
-            filepath = find_stock_report_path(code)
+    is_stale = is_report_stale(filepath) if (filepath and os.path.exists(filepath)) else True
+
+    if not filepath or not os.path.exists(filepath) or is_stale:
+        now_ts = time.time()
+        last_attempt = _last_generation_attempt.get(code, 0)
+        # 5 分鐘冷卻防連環重複呼叫
+        if now_ts - last_attempt > 300:
+            _last_generation_attempt[code] = now_ts
+            reason = "not found" if not filepath else "stale"
+            logger.info(f"Report for stock {code} is {reason}. Triggering on-demand generation via StockCenter...")
+            success = generate_stock_report_via_stockcenter(code)
+            if success:
+                filepath = find_stock_report_path(code)
 
     if not filepath or not os.path.exists(filepath):
         logger.warning(f"Report for stock {code} could not be found or generated in {STOCK_CENTER_REPORTS_DIR}")
@@ -208,15 +334,9 @@ def parse_stock_report(code: str, live_quote: Optional[dict] = None) -> Optional
                     ))
             break
 
-    # 計算補充均線 MA10, MA20, MA60 (若未在表內)
-    close_prices = [b.close for b in kline_bars]
-    for idx, b in enumerate(kline_bars):
-        if idx >= 9:
-            b.ma10 = round(sum(close_prices[idx-9:idx+1]) / 10, 2)
-        if idx >= 19:
-            b.ma20 = round(sum(close_prices[idx-19:idx+1]) / 20, 2)
-        if idx >= 59:
-            b.ma60 = round(sum(close_prices[idx-59:idx+1]) / 60, 2)
+    # 執行缺日補齊與均線/布林指標全面計算
+    backfill_missing_kline_bars(code, kline_bars)
+    recalculate_indicators(kline_bars)
 
     # 3. 解析三大法人 (近 20 日)
     institutional_data: list[InstitutionalFlowItem] = []
@@ -285,14 +405,16 @@ def parse_stock_report(code: str, live_quote: Optional[dict] = None) -> Optional
             holders_data.sort(key=lambda x: x.date)
             break
 
-    # 6. 即時動態拼接：如果有提供今日即時報價，且最後一根不是今天，動態追加最後一根即時 K 棒
+    # 6. 即時動態拼接與更新：交易時段有即時行情時，動態更新或追加今日即時 K 棒
     is_appended = False
-    if live_quote and kline_bars:
-        last_date_str = kline_bars[-1].date
-        today_date = date.today()
-        today_label = today_date.strftime("%m/%d")
+    today_date = date.today()
+    is_weekday = today_date.weekday() < 5
+    now_hour = datetime.now().hour
 
-        # 只要歷史最新一筆不是今天，且今日報價有有效開盤價與成交價
+    if live_quote and kline_bars and is_weekday and now_hour >= 9:
+        today_label = today_date.strftime("%m/%d")
+        last_date_str = kline_bars[-1].date
+
         cur_open = live_quote.get("open") or live_quote.get("last")
         cur_close = live_quote.get("last")
         cur_high = live_quote.get("high") or cur_close
@@ -300,25 +422,20 @@ def parse_stock_report(code: str, live_quote: Optional[dict] = None) -> Optional
         cur_vol = float(live_quote.get("totalVolume") or 0)
 
         if cur_open and cur_close and cur_open > 0 and cur_close > 0:
-            if last_date_str != today_label:
-                # 動態估算今日 MA5 / MA10 / MA20
-                all_closes = [b.close for b in kline_bars] + [cur_close]
-                new_ma5 = round(sum(all_closes[-5:]) / 5, 2) if len(all_closes) >= 5 else None
-                new_ma10 = round(sum(all_closes[-10:]) / 10, 2) if len(all_closes) >= 10 else None
-                new_ma20 = round(sum(all_closes[-20:]) / 20, 2) if len(all_closes) >= 20 else None
-                new_ma60 = round(sum(all_closes[-60:]) / 60, 2) if len(all_closes) >= 60 else None
-
-                # 動態布林估算 (基於20日均線與標準差)
-                boll_u, boll_m, boll_d = None, None, None
-                if len(all_closes) >= 20:
-                    sub_c = all_closes[-20:]
-                    avg = sum(sub_c) / 20
-                    var = sum((x - avg) ** 2 for x in sub_c) / 20
-                    std = var ** 0.5
-                    boll_m = round(avg, 2)
-                    boll_u = round(avg + 2 * std, 2)
-                    boll_d = round(avg - 2 * std, 2)
-
+            if last_date_str == today_label:
+                # 今日 K 棒已存在（例如 StockCenter 今日已產生過或 yfinance 已有），更新其現價與極值
+                last_bar = kline_bars[-1]
+                if not last_bar.open or last_bar.open <= 0:
+                    last_bar.open = cur_open
+                last_bar.high = max(last_bar.high, cur_high)
+                last_bar.low = min(last_bar.low, cur_low)
+                last_bar.close = cur_close
+                if cur_vol > 0:
+                    last_bar.volume = cur_vol
+                recalculate_indicators(kline_bars)
+                is_appended = True
+            else:
+                # 今日尚未在 K 線中，追加今日即時 K 棒
                 today_bar = KlineBar(
                     date=today_label,
                     open=cur_open,
@@ -326,23 +443,9 @@ def parse_stock_report(code: str, live_quote: Optional[dict] = None) -> Optional
                     low=cur_low,
                     close=cur_close,
                     volume=cur_vol,
-                    ma5=new_ma5,
-                    ma10=new_ma10,
-                    ma20=new_ma20,
-                    ma60=new_ma60,
-                    boll_up=boll_u,
-                    boll_mid=boll_m,
-                    boll_down=boll_d,
                 )
                 kline_bars.append(today_bar)
-                is_appended = True
-            else:
-                # 若最後一筆正是今天，更新其最新最高、最低、收盤與成交量
-                last_bar = kline_bars[-1]
-                last_bar.high = max(last_bar.high, cur_high)
-                last_bar.low = min(last_bar.low, cur_low)
-                last_bar.close = cur_close
-                last_bar.volume = cur_vol
+                recalculate_indicators(kline_bars)
                 is_appended = True
 
     return StockAnalysisChartData(
@@ -357,14 +460,17 @@ def parse_stock_report(code: str, live_quote: Optional[dict] = None) -> Optional
         isAppendedToday=is_appended,
     )
 
-_ma_cache: dict[str, dict] = {}
+_ma_cache: dict[str, tuple[float, dict]] = {}
 
 def get_stock_ma_summary(code: str) -> Optional[dict]:
-    """獲取個股 MA5, MA10, MA20 與近 19 日收盤價快取，供即時均線指標比對"""
+    """獲取個股 MA5, MA10, MA20 與近 19 日收盤價快取，供即時均線指標比對 (快取 60 秒)"""
     if is_etf_or_bond(code):
         return None
+    now_ts = time.time()
     if code in _ma_cache:
-        return _ma_cache[code]
+        cached_ts, cached_val = _ma_cache[code]
+        if now_ts - cached_ts < 60:
+            return cached_val
 
     chart_data = parse_stock_report(code)
     if not chart_data or not chart_data.kline:
@@ -383,7 +489,7 @@ def get_stock_ma_summary(code: str) -> Optional[dict]:
         "lastClose": last_bar.close,
         "recentCloses": recent_closes,
     }
-    _ma_cache[code] = summary
+    _ma_cache[code] = (now_ts, summary)
     return summary
 
 def get_multiple_stocks_ma_summary(codes: list[str]) -> dict[str, dict]:

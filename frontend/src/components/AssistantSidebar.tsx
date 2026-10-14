@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import type { StockPosition, QuoteState, WealthSummary } from '../types';
-import { submitOrder } from '../services/api';
+import React, { useState, useEffect } from 'react';
+import type { StockPosition, QuoteState, WealthSummary, OrderItem } from '../types';
+import { submitOrder, fetchOrders, cancelOrder, updateOrder } from '../services/api';
 
 interface AssistantSidebarProps {
   isOpen: boolean;
@@ -13,6 +13,7 @@ interface AssistantSidebarProps {
   dirtyCodes: Set<string>;
   initialOrderCode?: string;
   onLock?: () => void;
+  orderedCodes?: string[];
 }
 
 function calcPositionMetrics(
@@ -61,6 +62,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   dirtyCodes,
   initialOrderCode,
   onLock,
+  orderedCodes = [],
 }) => {
   // 下單頁面 (財神筆) 狀態
   const [orderAction, setOrderAction] = useState<'buy' | 'sell'>('buy');
@@ -73,8 +75,51 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   const [orderNoticeType, setOrderNoticeType] = useState<'success' | 'error' | 'info'>('info');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // 委託單列表狀態
+  const [orders, setOrders] = useState<OrderItem[]>([]);
+  const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+  const [orderSubTab, setOrderSubTab] = useState<'form' | 'orders'>('form');
+  const [orderFilter, setOrderFilter] = useState<'all' | 'active' | 'filled' | 'cancelled'>('all');
+
+  // 改價彈窗狀態
+  const [editingPriceOrder, setEditingPriceOrder] = useState<OrderItem | null>(null);
+  const [newPriceInput, setNewPriceInput] = useState<string>('');
+  const [isUpdatingPrice, setIsUpdatingPrice] = useState(false);
+
+  // 改量彈窗狀態
+  const [editingQtyOrder, setEditingQtyOrder] = useState<OrderItem | null>(null);
+  const [newQtyInput, setNewQtyInput] = useState<number>(1);
+  const [isUpdatingQty, setIsUpdatingQty] = useState(false);
+
+  // 撤單確認狀態
+  const [cancellingOrder, setCancellingOrder] = useState<OrderItem | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+
+  const loadOrders = async () => {
+    try {
+      setIsLoadingOrders(true);
+      const data = await fetchOrders();
+      setOrders(data);
+    } catch (err: any) {
+      console.error('Failed to fetch orders:', err);
+    } finally {
+      setIsLoadingOrders(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen && activeTab === 'order') {
+      loadOrders();
+      const timer = setInterval(loadOrders, 4000);
+      return () => clearInterval(timer);
+    }
+  }, [isOpen, activeTab]);
+
+  const activeOrdersCount = orders.filter((o) => o.canCancel).length;
+  const currentStockActiveOrders = orders.filter((o) => o.code === stockCode && o.canCancel);
+
   // 當 initialOrderCode 變更時同步更新
-  React.useEffect(() => {
+  useEffect(() => {
     if (initialOrderCode) {
       setStockCode(initialOrderCode);
     }
@@ -82,7 +127,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
   // 當選定個股時，若尚未輸入價格則帶入現價或昨收
   const currentQuote = quotes[stockCode];
-  React.useEffect(() => {
+  useEffect(() => {
     if (currentQuote && currentQuote.last && currentQuote.last > 0 && !orderPrice) {
       setOrderPrice(currentQuote.last.toFixed(2));
     }
@@ -90,8 +135,18 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
   if (!isOpen) return null;
 
-  // 排序持股：依損益金額遞減
+  // 財神庫排序模式：'custom' (依照自選排序，預設) 或 'pnl' (依損益金額排序)
+  const [vaultSortMode, setVaultSortMode] = useState<'custom' | 'pnl'>('custom');
+
+  // 排序持股：預設依自選順序 (與財神簿相同)，亦可切換為損益排行
   const sortedPositions = [...positions].sort((a, b) => {
+    if (vaultSortMode === 'custom' && orderedCodes && orderedCodes.length > 0) {
+      const idxA = orderedCodes.indexOf(a.code);
+      const idxB = orderedCodes.indexOf(b.code);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+    }
     const qA = quotes[a.code];
     const qB = quotes[b.code];
     const priceA = (qA?.last && qA.last > 0) ? qA.last : (a.initialLast && a.initialLast > 0 ? a.initialLast : a.costPrice);
@@ -179,6 +234,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
       if (res.success) {
         setOrderNoticeType('success');
         setOrderNotice(`✔ 委託已成功送出！單號: ${res.orderId || '已確認'} | ${res.message}`);
+        await loadOrders();
+        setOrderSubTab('orders');
       } else {
         setOrderNoticeType('error');
         setOrderNotice(`❌ 委託未成立: ${res.message || res.detail || '交易所退單'}`);
@@ -193,6 +250,88 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
       }, 8000);
     }
   };
+
+  const handleConfirmCancel = async () => {
+    if (!cancellingOrder) return;
+    try {
+      setIsCancelling(true);
+      const res = await cancelOrder(cancellingOrder.id);
+      setOrderNoticeType('success');
+      setOrderNotice(`✔ 撤單成功：${res.message || '委託已撤銷'}`);
+      setCancellingOrder(null);
+      await loadOrders();
+    } catch (err: any) {
+      setOrderNoticeType('error');
+      setOrderNotice(`❌ 撤單失敗: ${err.message || '撤單異常'}`);
+    } finally {
+      setIsCancelling(false);
+      setTimeout(() => setOrderNotice(null), 8000);
+    }
+  };
+
+  const handleStartEditPrice = (order: OrderItem) => {
+    setEditingPriceOrder(order);
+    setNewPriceInput(order.price.toString());
+  };
+
+  const handleConfirmUpdatePrice = async () => {
+    if (!editingPriceOrder) return;
+    const p = parseFloat(newPriceInput);
+    if (isNaN(p) || p <= 0) {
+      alert('請輸入大於 0 的有效價格');
+      return;
+    }
+    try {
+      setIsUpdatingPrice(true);
+      const res = await updateOrder(editingPriceOrder.id, { newPrice: p });
+      setOrderNoticeType('success');
+      setOrderNotice(`✔ ${res.message || '改價成功'}`);
+      setEditingPriceOrder(null);
+      await loadOrders();
+    } catch (err: any) {
+      setOrderNoticeType('error');
+      setOrderNotice(`❌ 改價失敗: ${err.message || '改價異常'}`);
+    } finally {
+      setIsUpdatingPrice(false);
+      setTimeout(() => setOrderNotice(null), 8000);
+    }
+  };
+
+  const handleStartEditQty = (order: OrderItem) => {
+    setEditingQtyOrder(order);
+    setNewQtyInput(Math.max(1, order.qty - (order.orderLot === 'Common' ? 1 : 100)));
+  };
+
+  const handleConfirmUpdateQty = async () => {
+    if (!editingQtyOrder) return;
+    const q = newQtyInput;
+    if (isNaN(q) || q <= 0 || q >= editingQtyOrder.qty) {
+      alert(`新數量必須大於 0 且小於目前剩餘數量 ${editingQtyOrder.qty}`);
+      return;
+    }
+    try {
+      setIsUpdatingQty(true);
+      const res = await updateOrder(editingQtyOrder.id, { newQty: q });
+      setOrderNoticeType('success');
+      setOrderNotice(`✔ ${res.message || '改量成功'}`);
+      setEditingQtyOrder(null);
+      await loadOrders();
+    } catch (err: any) {
+      setOrderNoticeType('error');
+      setOrderNotice(`❌ 改量失敗: ${err.message || '改量異常'}`);
+    } finally {
+      setIsUpdatingQty(false);
+      setTimeout(() => setOrderNotice(null), 8000);
+    }
+  };
+
+  // 篩選委託單列表
+  const filteredOrders = orders.filter((o) => {
+    if (orderFilter === 'active') return o.canCancel;
+    if (orderFilter === 'filled') return o.status === 'Filled';
+    if (orderFilter === 'cancelled') return o.status === 'Cancelled';
+    return true;
+  });
 
   return (
     <aside
@@ -214,10 +353,19 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
           <button
             className={`sidebar-tab-btn ${activeTab === 'order' ? 'active' : ''}`}
             onClick={() => onChangeTab('order')}
-            title="分頁二：財神筆（快速下單委託雛形）"
+            title="分頁二：財神筆（快速下單與委託管理）"
           >
             <span className="sidebar-tab-icon">✍️</span>
             <span className="sidebar-tab-title">財神筆</span>
+            {activeOrdersCount > 0 ? (
+              <span className="sidebar-tab-badge badge-active-orders" title={`目前有 ${activeOrdersCount} 筆掛單待撮合`}>
+                {activeOrdersCount}
+              </span>
+            ) : orders.length > 0 ? (
+              <span className="sidebar-tab-badge" title={`今日共 ${orders.length} 筆委託紀錄`}>
+                {orders.length}
+              </span>
+            ) : null}
           </button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -289,6 +437,28 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                 </div>
               ) : (
                 <>
+                  <div className="vault-sort-bar">
+                    <span className="vault-sort-title">持股列表</span>
+                    <div className="vault-sort-btn-group">
+                      <button
+                        type="button"
+                        className={`vault-sort-pill ${vaultSortMode === 'custom' ? 'active' : ''}`}
+                        onClick={() => setVaultSortMode('custom')}
+                        title="與財神簿自訂排序完全一致 (ETF、債、虎航在後)"
+                      >
+                        📌 自訂排序
+                      </button>
+                      <button
+                        type="button"
+                        className={`vault-sort-pill ${vaultSortMode === 'pnl' ? 'active' : ''}`}
+                        onClick={() => setVaultSortMode('pnl')}
+                        title="依未實現損益高低排序"
+                      >
+                        💰 損益排行
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="sidebar-vault-col-header">
                     <span className="col-h-stock">商品</span>
                     <span className="col-h-qty">股數</span>
@@ -381,7 +551,51 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
               </div>
             )}
 
-            <form className="order-form" onSubmit={handleSubmitOrder}>
+            {/* 財神筆子分頁切換列：下單委託 vs 今日交易單 */}
+            <div className="order-subnav-bar">
+              <button
+                type="button"
+                className={`subnav-btn ${orderSubTab === 'form' ? 'active' : ''}`}
+                onClick={() => setOrderSubTab('form')}
+              >
+                <span>✍️ 快速下單委託</span>
+              </button>
+              <button
+                type="button"
+                className={`subnav-btn ${orderSubTab === 'orders' ? 'active' : ''}`}
+                onClick={() => {
+                  setOrderSubTab('orders');
+                  loadOrders();
+                }}
+              >
+                <span>📋 今日交易單</span>
+                {activeOrdersCount > 0 && (
+                  <span className="subnav-badge pulse">{activeOrdersCount}</span>
+                )}
+              </button>
+            </div>
+
+            {orderSubTab === 'form' ? (
+              <>
+                {currentStockActiveOrders.length > 0 && (
+                  <div className="current-stock-orders-banner">
+                    <div className="banner-text">
+                      <span className="banner-icon">⚠️</span>
+                      <span>
+                        目前【{stockCode}】有 <strong>{currentStockActiveOrders.length}</strong> 筆有效掛單中
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-view-orders-link"
+                      onClick={() => setOrderSubTab('orders')}
+                    >
+                      查看交易單 ↗
+                    </button>
+                  </div>
+                )}
+
+                <form className="order-form" onSubmit={handleSubmitOrder}>
               {/* 1. 買賣方向區 (紅/綠高對比警示) */}
               <div className={`order-section-action action-${orderAction}`}>
                 <div className="action-toggle-group">
@@ -679,7 +893,483 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     : `🟢 確認賣出【${stockCode || '---'}】(入帳 NT$ ${estimatedTotal.toLocaleString()})`
                 )}
               </button>
-            </form>
+                </form>
+              </>
+            ) : (
+              /* ==================== 今日交易單檢視區 ==================== */
+              <div className="orders-management-view">
+                <div className="orders-mgmt-header">
+                  <div className="orders-mgmt-title">
+                    <span>今日委託單紀錄</span>
+                    <span className="orders-count-tag">共 {orders.length} 筆</span>
+                  </div>
+                  <button
+                    type="button"
+                    className={`btn-reload-orders ${isLoadingOrders ? 'loading' : ''}`}
+                    onClick={loadOrders}
+                    disabled={isLoadingOrders}
+                    title="立即更新委託單狀態"
+                  >
+                    {isLoadingOrders ? '🔄 更新中...' : '🔄 整理'}
+                  </button>
+                </div>
+
+                {/* 篩選標籤 */}
+                <div className="orders-filter-chips">
+                  <button
+                    type="button"
+                    className={`filter-chip ${orderFilter === 'all' ? 'active' : ''}`}
+                    onClick={() => setOrderFilter('all')}
+                  >
+                    全部 ({orders.length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`filter-chip ${orderFilter === 'active' ? 'active' : ''}`}
+                    onClick={() => setOrderFilter('active')}
+                  >
+                    委託中 ({orders.filter((o) => o.canCancel).length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`filter-chip ${orderFilter === 'filled' ? 'active' : ''}`}
+                    onClick={() => setOrderFilter('filled')}
+                  >
+                    已成交 ({orders.filter((o) => o.status === 'Filled').length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`filter-chip ${orderFilter === 'cancelled' ? 'active' : ''}`}
+                    onClick={() => setOrderFilter('cancelled')}
+                  >
+                    已取消 ({orders.filter((o) => o.status === 'Cancelled' || o.status === 'Failed').length})
+                  </button>
+                </div>
+
+                {/* 委託單列表卡片 */}
+                <div className="orders-cards-list">
+                  {filteredOrders.length === 0 ? (
+                    <div className="orders-empty-state">
+                      <div className="empty-icon">📭</div>
+                      <div className="empty-text">今日尚無符合條件的委託單</div>
+                      <button
+                        type="button"
+                        className="btn-goto-order"
+                        onClick={() => setOrderSubTab('form')}
+                      >
+                        ✍️ 前往下單
+                      </button>
+                    </div>
+                  ) : (
+                    filteredOrders.map((order) => {
+                      const isOdd = order.orderLot === 'IntradayOdd';
+                      const unitStr = isOdd ? '股' : '張';
+                      const hasModifiedPrice = !!(order.modifiedPrice && order.modifiedPrice !== order.price);
+
+                      return (
+                        <div
+                          key={order.id}
+                          className={`order-item-card action-${order.action.toLowerCase()} status-${order.status.toLowerCase()}`}
+                        >
+                          <div className="order-card-top">
+                            <div className="order-card-stock">
+                              <span className={`order-action-pill pill-${order.action.toLowerCase()}`}>
+                                {order.action === 'Buy' ? '買進' : '賣出'}
+                              </span>
+                              <span className="order-stock-code">{order.code}</span>
+                              <span className="order-stock-name">{order.name}</span>
+                              <span className="order-lot-tag">{isOdd ? '零股' : '整張'}</span>
+                            </div>
+                            <div className="order-status-badge">
+                              <span className={`status-pill pill-${order.status.toLowerCase()}`}>
+                                {order.status === 'Submitted' && '掛單中'}
+                                {order.status === 'PartFilled' && '部分成交'}
+                                {order.status === 'Filled' && '全部成交'}
+                                {order.status === 'Cancelled' && '已取消'}
+                                {order.status === 'Failed' && '委託失敗'}
+                                {order.status === 'PendingSubmit' && '傳送中'}
+                                {order.status === 'PreSubmitted' && '預約單'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="order-card-details">
+                            <div className="detail-item">
+                              <span className="detail-label">委託價格</span>
+                              <span className="detail-val price-val">
+                                NT$ {order.price.toFixed(2)}
+                                {hasModifiedPrice && (
+                                  <span className="modified-price-badge">
+                                    (改: {order.modifiedPrice?.toFixed(2)})
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                            <div className="detail-item">
+                              <span className="detail-label">委託量 / 已成交</span>
+                              <span className="detail-val">
+                                {order.qty.toLocaleString()} {unitStr}
+                                {order.dealQty > 0 && (
+                                  <span className="filled-qty-badge">
+                                    (成 {order.dealQty.toLocaleString()} {unitStr})
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                            <div className="detail-item full-row">
+                              <span className="detail-label">委託時間 / 書號</span>
+                              <span className="detail-val meta-val">
+                                {order.time ? order.time.slice(11, 19) : '--:--:--'}
+                                {order.ordno ? ` #${order.ordno}` : ''}
+                                <span className="order-id-sub"> ({order.id.slice(0, 8)})</span>
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* 動作按鈕：僅在可撤單/委託中狀態顯示 */}
+                          {order.canCancel && (
+                            <div className="order-card-actions">
+                              <button
+                                type="button"
+                                className="btn-card-action btn-edit-price"
+                                onClick={() => handleStartEditPrice(order)}
+                                title="修改此筆委託價格"
+                              >
+                                ✏️ 改價
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-card-action btn-edit-qty"
+                                onClick={() => handleStartEditQty(order)}
+                                title="減少委託數量"
+                              >
+                                ✂️ 改量
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-card-action btn-cancel-order"
+                                onClick={() => setCancellingOrder(order)}
+                                title="撤銷此筆委託"
+                              >
+                                🗑️ 撤單
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ==================== 撤單確認彈窗 (Modal) ==================== */}
+            {cancellingOrder && (
+              <div className="order-modal-overlay" onClick={() => !isCancelling && setCancellingOrder(null)}>
+                <div className="order-modal-card" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <span className="modal-title">🗑️ 確認撤銷委託單</span>
+                    <button
+                      type="button"
+                      className="btn-modal-close"
+                      disabled={isCancelling}
+                      onClick={() => setCancellingOrder(null)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="modal-body">
+                    <p className="modal-desc">您即將向券商申請撤銷此筆掛單：</p>
+                    <div className="modal-summary-box">
+                      <div className="summary-row">
+                        <span className="label">標的商品：</span>
+                        <span className="val bold">{cancellingOrder.code} {cancellingOrder.name}</span>
+                      </div>
+                      <div className="summary-row">
+                        <span className="label">買賣方向：</span>
+                        <span className={`val bold ${cancellingOrder.action === 'Buy' ? 'color-up' : 'color-down'}`}>
+                          {cancellingOrder.action === 'Buy' ? '🔴 買進' : '🟢 賣出'}
+                        </span>
+                      </div>
+                      <div className="summary-row">
+                        <span className="label">委託規格：</span>
+                        <span className="val">
+                          {cancellingOrder.orderLot === 'Common' ? '整張' : '盤中零股'} @ NT$ {cancellingOrder.price.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="summary-row">
+                        <span className="label">剩餘委託量：</span>
+                        <span className="val bold">
+                          {cancellingOrder.qty.toLocaleString()} {cancellingOrder.orderLot === 'Common' ? '張' : '股'}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="modal-warning-text">⚠️ 撤單確認後將自市場撤回剩餘委託量，無法復原。</p>
+                  </div>
+                  <div className="modal-footer">
+                    <button
+                      type="button"
+                      className="btn-modal-cancel"
+                      disabled={isCancelling}
+                      onClick={() => setCancellingOrder(null)}
+                    >
+                      返回
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-modal-confirm confirm-danger"
+                      disabled={isCancelling}
+                      onClick={handleConfirmCancel}
+                    >
+                      {isCancelling ? '撤單處理中...' : '確認撤銷委託'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ==================== 改價彈窗 (Modal) ==================== */}
+            {editingPriceOrder && (
+              <div className="order-modal-overlay" onClick={() => !isUpdatingPrice && setEditingPriceOrder(null)}>
+                <div className="order-modal-card" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <span className="modal-title">✏️ 修改委託價格</span>
+                    <button
+                      type="button"
+                      className="btn-modal-close"
+                      disabled={isUpdatingPrice}
+                      onClick={() => setEditingPriceOrder(null)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="modal-body">
+                    <div className="modal-summary-box">
+                      <div className="summary-row">
+                        <span className="label">標的：</span>
+                        <span className="val bold">{editingPriceOrder.code} {editingPriceOrder.name}</span>
+                      </div>
+                      <div className="summary-row">
+                        <span className="label">委託類別：</span>
+                        <span className="val">
+                          {editingPriceOrder.orderLot === 'Common' ? '整張' : '盤中零股'} / {editingPriceOrder.qty.toLocaleString()} {editingPriceOrder.orderLot === 'Common' ? '張' : '股'}
+                        </span>
+                      </div>
+                      <div className="summary-row">
+                        <span className="label">目前委託價：</span>
+                        <span className="val bold">NT$ {editingPriceOrder.price.toFixed(2)}</span>
+                      </div>
+                    </div>
+
+                    {editingPriceOrder.orderLot === 'IntradayOdd' && (
+                      <div className="modal-info-tip">
+                        💡 盤中零股依法規無法直接改價，系統將以智慧模式自動「撤單並重下新價」。
+                      </div>
+                    )}
+
+                    <div className="modal-input-section">
+                      <label className="input-label">請輸入新價格 (TWD)</label>
+                      <div className="order-price-control">
+                        <button
+                          type="button"
+                          className="btn-step"
+                          onClick={() => {
+                            const curr = parseFloat(newPriceInput) || editingPriceOrder.price;
+                            const step = curr < 10 ? 0.01 : curr < 50 ? 0.05 : curr < 100 ? 0.1 : curr < 500 ? 0.5 : 1.0;
+                            setNewPriceInput(Math.max(0.01, curr - step).toFixed(2));
+                          }}
+                        >
+                          -
+                        </button>
+                        <input
+                          type="number"
+                          step="any"
+                          className="form-input price-input"
+                          value={newPriceInput}
+                          onChange={(e) => setNewPriceInput(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="btn-step"
+                          onClick={() => {
+                            const curr = parseFloat(newPriceInput) || editingPriceOrder.price;
+                            const step = curr < 10 ? 0.01 : curr < 50 ? 0.05 : curr < 100 ? 0.1 : curr < 500 ? 0.5 : 1.0;
+                            setNewPriceInput((curr + step).toFixed(2));
+                          }}
+                        >
+                          +
+                        </button>
+                      </div>
+
+                      {quotes[editingPriceOrder.code] && (
+                        <div className="quick-price-chips modal-chips">
+                          {quotes[editingPriceOrder.code].last && quotes[editingPriceOrder.code].last! > 0 && (
+                            <button
+                              type="button"
+                              className="chip-btn chip-last"
+                              onClick={() => setNewPriceInput(quotes[editingPriceOrder.code].last!.toFixed(2))}
+                            >
+                              現價 {quotes[editingPriceOrder.code].last!.toFixed(2)}
+                            </button>
+                          )}
+                          {quotes[editingPriceOrder.code].previousClose && (
+                            <button
+                              type="button"
+                              className="chip-btn chip-prev"
+                              onClick={() => setNewPriceInput(quotes[editingPriceOrder.code].previousClose!.toFixed(2))}
+                            >
+                              平盤 {quotes[editingPriceOrder.code].previousClose!.toFixed(2)}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="modal-footer">
+                    <button
+                      type="button"
+                      className="btn-modal-cancel"
+                      disabled={isUpdatingPrice}
+                      onClick={() => setEditingPriceOrder(null)}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-modal-confirm confirm-primary"
+                      disabled={isUpdatingPrice}
+                      onClick={handleConfirmUpdatePrice}
+                    >
+                      {isUpdatingPrice ? '改價處理中...' : '確認修改價格'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ==================== 改量(減量)彈窗 (Modal) ==================== */}
+            {editingQtyOrder && (
+              <div className="order-modal-overlay" onClick={() => !isUpdatingQty && setEditingQtyOrder(null)}>
+                <div className="order-modal-card" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <span className="modal-title">✂️ 修改委託數量 (減量)</span>
+                    <button
+                      type="button"
+                      className="btn-modal-close"
+                      disabled={isUpdatingQty}
+                      onClick={() => setEditingQtyOrder(null)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="modal-body">
+                    <div className="modal-summary-box">
+                      <div className="summary-row">
+                        <span className="label">標的：</span>
+                        <span className="val bold">{editingQtyOrder.code} {editingQtyOrder.name}</span>
+                      </div>
+                      <div className="summary-row">
+                        <span className="label">目前委託量：</span>
+                        <span className="val bold">
+                          {editingQtyOrder.qty.toLocaleString()} {editingQtyOrder.orderLot === 'Common' ? '張' : '股'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="modal-warning-box">
+                      ⚠️ 依交易所規範，委託單僅支援「減量」（減少剩餘委託量），無法增加數量。如需增量請另外新增委託單。
+                    </div>
+
+                    <div className="modal-input-section">
+                      <label className="input-label">
+                        變更後的新委託數量 ({editingQtyOrder.orderLot === 'Common' ? '張' : '股'})
+                      </label>
+                      <div className="order-qty-control">
+                        <button
+                          type="button"
+                          className="btn-step"
+                          onClick={() => setNewQtyInput((q) => Math.max(1, q - 1))}
+                        >
+                          -
+                        </button>
+                        <input
+                          type="number"
+                          min="1"
+                          max={editingQtyOrder.qty - 1}
+                          className="form-input qty-input"
+                          value={newQtyInput}
+                          onChange={(e) => setNewQtyInput(Math.max(1, parseInt(e.target.value) || 1))}
+                        />
+                        <button
+                          type="button"
+                          className="btn-step"
+                          onClick={() => setNewQtyInput((q) => Math.min(editingQtyOrder.qty - 1, q + 1))}
+                        >
+                          +
+                        </button>
+                      </div>
+
+                      <div className="quick-qty-chips modal-chips">
+                        {editingQtyOrder.orderLot === 'Common' ? (
+                          editingQtyOrder.qty > 2 && (
+                            <button
+                              type="button"
+                              className="chip-btn"
+                              onClick={() => setNewQtyInput(Math.max(1, Math.floor(editingQtyOrder.qty / 2)))}
+                            >
+                              減半至 {Math.max(1, Math.floor(editingQtyOrder.qty / 2))} 張
+                            </button>
+                          )
+                        ) : (
+                          <>
+                            {editingQtyOrder.qty > 200 && (
+                              <button
+                                type="button"
+                                className="chip-btn"
+                                onClick={() => setNewQtyInput(Math.max(1, Math.floor(editingQtyOrder.qty / 2)))}
+                              >
+                                減半至 {Math.max(1, Math.floor(editingQtyOrder.qty / 2))} 股
+                              </button>
+                            )}
+                            {editingQtyOrder.qty > 100 && (
+                              <button
+                                type="button"
+                                className="chip-btn"
+                                onClick={() => setNewQtyInput(Math.max(1, editingQtyOrder.qty - 100))}
+                              >
+                                減 100 股 (剩 {editingQtyOrder.qty - 100} 股)
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+
+                      <div className="reduction-preview">
+                        本次將自市場減少委託：<strong>{(editingQtyOrder.qty - newQtyInput).toLocaleString()}</strong> {editingQtyOrder.orderLot === 'Common' ? '張' : '股'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="modal-footer">
+                    <button
+                      type="button"
+                      className="btn-modal-cancel"
+                      disabled={isUpdatingQty}
+                      onClick={() => setEditingQtyOrder(null)}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-modal-confirm confirm-warning"
+                      disabled={isUpdatingQty || newQtyInput >= editingQtyOrder.qty || newQtyInput <= 0}
+                      onClick={handleConfirmUpdateQty}
+                    >
+                      {isUpdatingQty ? '減量處理中...' : '確認減少數量'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

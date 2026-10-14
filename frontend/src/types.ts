@@ -218,3 +218,33 @@ export interface StockChartData {
   isAppendedToday: boolean;
 }
 
+export interface OrderItem {
+  id: string;
+  ordno: string;
+  code: string;
+  name: string;
+  action: 'Buy' | 'Sell' | string;
+  price: number;
+  originalPrice: number;
+  modifiedPrice: number;
+  priceType: string;
+  qty: number;
+  originalQty: number;
+  dealQty: number;
+  cancelQty: number;
+  orderLot: 'Common' | 'IntradayOdd' | string;
+  status: string;
+  statusCode: string;
+  msg: string;
+  time: string;
+  canCancel: boolean;
+  canUpdatePrice: boolean;
+  canUpdateQty: boolean;
+}
+
+export interface UpdateOrderParams {
+  newPrice?: number;
+  newQty?: number;
+}
+
+

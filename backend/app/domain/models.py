@@ -110,3 +110,30 @@ class PlaceOrderRequest(BaseModel):
     price_type: str = "limit"
     price: float = 0.0
 
+class OrderItem(BaseModel):
+    id: str
+    ordno: str = ""
+    code: str
+    name: str = ""
+    action: str
+    price: float
+    originalPrice: float
+    modifiedPrice: float = 0.0
+    priceType: str = "LMT"
+    qty: int
+    originalQty: int
+    dealQty: int = 0
+    cancelQty: int = 0
+    orderLot: str = "Common"
+    status: str
+    statusCode: str = ""
+    msg: str = ""
+    time: str = ""
+    canCancel: bool = False
+    canUpdatePrice: bool = False
+    canUpdateQty: bool = False
+
+class UpdateOrderRequest(BaseModel):
+    newPrice: Optional[float] = None
+    newQty: Optional[int] = None
+

@@ -123,6 +123,39 @@ export async function submitOrder(params: PlaceOrderParams): Promise<PlaceOrderR
   return res.json();
 }
 
+export async function fetchOrders(): Promise<import('../types').OrderItem[]> {
+  const res = await fetch(`${API_BASE}/api/v1/orders`);
+  if (!res.ok) {
+    throw new Error('無法取得今日委託列表');
+  }
+  return res.json();
+}
+
+export async function cancelOrder(orderId: string): Promise<{ success: boolean; message: string }> {
+  const res = await fetch(`${API_BASE}/api/v1/orders/${encodeURIComponent(orderId)}/cancel`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || '撤單失敗');
+  }
+  return res.json();
+}
+
+export async function updateOrder(orderId: string, params: { newPrice?: number; newQty?: number }): Promise<{ success: boolean; message: string; orderId?: string }> {
+  const res = await fetch(`${API_BASE}/api/v1/orders/${encodeURIComponent(orderId)}/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || '修改委託失敗');
+  }
+  return res.json();
+}
+
+
 
 
 

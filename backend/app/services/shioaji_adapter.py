@@ -264,6 +264,7 @@ class ShioajiAdapter:
         self._last_morning_sync_date: Optional[str] = None
         self.stock_account: Any = None
         self.ca_activated: bool = False
+        self._order_modified_prices: dict[str, float] = {}
 
     async def _fetch_and_apply_closing_odd_lots(self) -> bool:
         """非同步向 TWSE / TPEx 抓取最新盤後零股行情並更新進 quote_store"""
@@ -1181,6 +1182,241 @@ class ShioajiAdapter:
             "statusCode": status_code or "00",
             "message": f"委託成功送出！【{trade.order.action} {code}】{quantity}{unit_str} @ {price_str}"
         }
+
+    def fetch_orders(self) -> list[dict[str, Any]]:
+        """取得今日所有證券委託單與成交狀態"""
+        if not self.api or not self.is_logged_in:
+            return []
+        account = getattr(self, "stock_account", None)
+        if not account and hasattr(self.api, "stock_account"):
+            account = self.api.stock_account
+        if not account:
+            return []
+        
+        try:
+            self.api.update_status(account=account)
+        except Exception as e:
+            logger.warning(f"Error calling update_status: {e}")
+
+        orders: list[dict[str, Any]] = []
+        try:
+            trades = self.api.list_trades()
+            for t in trades:
+                order_id = getattr(t.order, "id", "")
+                if not order_id:
+                    continue
+
+                code = getattr(t.contract, "code", "")
+                name = self.contracts_cache.get(code, {}).get("name", "")
+                if not name and hasattr(self.api, "Contracts") and hasattr(self.api.Contracts, "Stocks"):
+                    try:
+                        c_obj = self.api.Contracts.Stocks.get(code)
+                        if c_obj:
+                            name = getattr(c_obj, "name", "")
+                    except Exception:
+                        pass
+
+                action_raw = getattr(t.order, "action", "Buy")
+                action_str = getattr(action_raw, "value", str(action_raw)).replace("Action.", "")
+
+                order_lot_raw = getattr(t.order, "order_lot", "Common")
+                order_lot_str = getattr(order_lot_raw, "value", str(order_lot_raw)).replace("StockOrderLot.", "")
+
+                price_type_raw = getattr(t.order, "price_type", "LMT")
+                price_type_str = getattr(price_type_raw, "value", str(price_type_raw)).replace("StockPriceType.", "").replace("PriceType.", "")
+
+                status_raw = getattr(t.status, "status", "Pending")
+                status_str = getattr(status_raw, "value", str(status_raw)).replace("OrderStatus.", "")
+
+                order_dt = getattr(t.status, "order_datetime", None)
+                if isinstance(order_dt, datetime):
+                    time_str = order_dt.strftime("%H:%M:%S")
+                else:
+                    time_str = "--:--:--"
+
+                orig_qty = safe_int(getattr(t.order, "quantity", 0)) or 0
+                deal_qty = safe_int(getattr(t.status, "deal_quantity", 0)) or 0
+                cancel_qty = safe_int(getattr(t.status, "cancel_quantity", 0)) or 0
+
+                is_active = status_str in ("Submitted", "PendingSubmit", "PreSubmitted", "PartFilled")
+                active_qty = max(0, orig_qty - cancel_qty - deal_qty) if is_active else 0
+                if not is_active and status_str == "Filled":
+                    active_qty = 0
+
+                orig_price = safe_float(getattr(t.order, "price", 0.0)) or 0.0
+                mod_price = safe_float(getattr(t.status, "modified_price", 0.0)) or 0.0
+                if getattr(self, "_order_modified_prices", None) and order_id in self._order_modified_prices:
+                    mod_price = self._order_modified_prices[order_id]
+                display_price = mod_price if mod_price > 0 else orig_price
+
+                can_cancel = is_active and active_qty > 0
+                can_update_price = can_cancel and price_type_str == "LMT"
+                can_update_qty = can_cancel and active_qty > 1
+
+                orders.append({
+                    "id": order_id,
+                    "ordno": getattr(t.order, "ordno", "") or "",
+                    "code": code,
+                    "name": name or code,
+                    "action": action_str,
+                    "price": display_price,
+                    "originalPrice": orig_price,
+                    "modifiedPrice": mod_price,
+                    "priceType": price_type_str,
+                    "qty": active_qty if is_active else orig_qty,
+                    "originalQty": orig_qty,
+                    "dealQty": deal_qty,
+                    "cancelQty": cancel_qty,
+                    "orderLot": order_lot_str,
+                    "status": status_str,
+                    "statusCode": getattr(t.status, "status_code", "") or "",
+                    "msg": getattr(t.status, "msg", "") or "",
+                    "time": time_str,
+                    "canCancel": can_cancel,
+                    "canUpdatePrice": can_update_price,
+                    "canUpdateQty": can_update_qty,
+                })
+        except Exception as e:
+            logger.error(f"Error fetching orders from Shioaji: {e}", exc_info=True)
+
+        orders.sort(key=lambda x: x["time"], reverse=True)
+        return orders
+
+    def cancel_order(self, order_id: str) -> dict[str, Any]:
+        """取消特定委託單"""
+        if not self.api or not self.is_logged_in:
+            raise RuntimeError("Shioaji 尚未連線或未登入")
+        account = getattr(self, "stock_account", None)
+        if not account and hasattr(self.api, "stock_account"):
+            account = self.api.stock_account
+        if not account:
+            raise RuntimeError("找不到可用的台股證券帳號！")
+
+        self.api.update_status(account=account)
+        trades = self.api.list_trades()
+        target_trade = next((t for t in trades if getattr(t.order, "id", "") == order_id), None)
+        if not target_trade:
+            raise ValueError(f"找不到委託單號 {order_id}")
+
+        code = getattr(target_trade.contract, "code", "")
+        name = self.contracts_cache.get(code, {}).get("name", code)
+        self.api.cancel_order(trade=target_trade)
+        try:
+            self.api.update_status(account=account)
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "orderId": order_id,
+            "message": f"已成功送出撤單委託【{code} {name}】"
+        }
+
+    def update_order(self, order_id: str, new_price: Optional[float] = None, new_qty: Optional[int] = None) -> dict[str, Any]:
+        """修改委託價格或減量"""
+        if not self.api or not self.is_logged_in:
+            raise RuntimeError("Shioaji 尚未連線或未登入")
+        account = getattr(self, "stock_account", None)
+        if not account and hasattr(self.api, "stock_account"):
+            account = self.api.stock_account
+        if not account:
+            raise RuntimeError("找不到可用的台股證券帳號！")
+
+        self.api.update_status(account=account)
+        trades = self.api.list_trades()
+        target_trade = next((t for t in trades if getattr(t.order, "id", "") == order_id), None)
+        if not target_trade:
+            raise ValueError(f"找不到委託單號 {order_id}")
+
+        order_lot_raw = getattr(target_trade.order, "order_lot", "Common")
+        order_lot_str = getattr(order_lot_raw, "value", str(order_lot_raw)).replace("StockOrderLot.", "")
+
+        orig_qty = safe_int(getattr(target_trade.order, "quantity", 0)) or 0
+        cancel_qty = safe_int(getattr(target_trade.status, "cancel_quantity", 0)) or 0
+        deal_qty = safe_int(getattr(target_trade.status, "deal_quantity", 0)) or 0
+        current_active_qty = max(0, orig_qty - cancel_qty - deal_qty)
+
+        code = getattr(target_trade.contract, "code", "")
+        name = self.contracts_cache.get(code, {}).get("name", code)
+
+        if not hasattr(self, "_order_modified_prices"):
+            self._order_modified_prices = {}
+
+        kwargs = {"trade": target_trade}
+
+        # 1. 處理改量 (依交易所法規只能減少，不能增加)
+        if new_qty is not None:
+            if new_qty >= current_active_qty:
+                raise ValueError(f"改量依法規只能減少！目前剩餘數量為 {current_active_qty}，請輸入小於該值的數量。")
+            if new_qty <= 0:
+                raise ValueError("修改後數量必須大於 0！若欲全數取消請直接使用「撤單」。")
+            qty_to_reduce = current_active_qty - new_qty
+            kwargs["qty"] = qty_to_reduce
+
+        # 2. 處理改價
+        if new_price is not None:
+            if new_price <= 0:
+                raise ValueError("委託價格必須大於 0")
+            if "Common" in order_lot_str:
+                kwargs["price"] = float(new_price)
+            else:
+                # 零股依法規不可直接改價，執行背景智慧撤單重下
+                self.api.cancel_order(trade=target_trade)
+                target_qty = new_qty if new_qty is not None else current_active_qty
+                contract = None
+                if code in self.contracts_cache:
+                    contract = self.contracts_cache[code].get("contract")
+                if not contract:
+                    contract = target_trade.contract
+                
+                new_order = sj.StockOrder(
+                    action=target_trade.order.action,
+                    price=float(new_price),
+                    quantity=int(target_qty),
+                    price_type=sj.StockPriceType.LMT,
+                    order_type=sj.OrderType.ROD,
+                    order_lot=target_trade.order.order_lot,
+                    order_cond=sj.StockOrderCond.Cash,
+                    account=account
+                )
+                new_trade = self.api.place_order(contract, new_order)
+                try:
+                    self.api.update_status(account=account)
+                except Exception:
+                    pass
+                new_id = getattr(new_trade.order, "id", "")
+                self._order_modified_prices[order_id] = float(new_price)
+                if new_id:
+                    self._order_modified_prices[new_id] = float(new_price)
+                return {
+                    "success": True,
+                    "type": "smart_replace",
+                    "orderId": new_id or order_id,
+                    "message": f"零股已成功撤單重下：【{code} {name}】改價為 ${new_price}，新單號: {new_id}"
+                }
+
+        # 送出直接改單 (整張改價/減量，或零股直接減量)
+        if "price" in kwargs or "qty" in kwargs:
+            self.api.update_order(**kwargs)
+            try:
+                self.api.update_status(account=account)
+            except Exception:
+                pass
+            if new_price is not None:
+                self._order_modified_prices[order_id] = float(new_price)
+            
+            changes = []
+            if new_price is not None:
+                changes.append(f"改價為 ${new_price}")
+            if new_qty is not None:
+                changes.append(f"數量減少為 {new_qty}")
+            return {
+                "success": True,
+                "orderId": order_id,
+                "message": f"委託修改成功：【{code} {name}】" + "，".join(changes)
+            }
+
+        raise ValueError("未指定任何修改項目 (請輸入新價格或新數量)")
 
 shioaji_adapter = ShioajiAdapter()
 
