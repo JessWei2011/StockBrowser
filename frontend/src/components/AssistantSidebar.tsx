@@ -77,6 +77,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   // 下單前二次防護確認視窗狀態
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [confirmPin, setConfirmPin] = useState<string>('');
 
   // 委託單列表狀態
   const [orders, setOrders] = useState<OrderItem[]>([]);
@@ -212,6 +213,9 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     ? estimatedAmount + estimatedFee
     : Math.max(0, estimatedAmount - estimatedFee - estimatedTax);
 
+  // 買入金額 >= 30 萬強烈防護條件
+  const isHighValueBuy = orderAction === 'buy' && estimatedTotal >= 300000;
+
   // 1. 表單提交：前置檢查通過後，彈出二次防護確認視窗
   const handleSubmitOrder = (e: React.FormEvent) => {
     e.preventDefault();
@@ -232,12 +236,17 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
       return;
     }
 
-    // 通過前置驗證，彈出二次防護確認視窗
+    // 重置密碼輸入並彈出二次防護確認視窗
+    setConfirmPin('');
     setIsConfirmModalOpen(true);
   };
 
   // 2. 於防護確認視窗按下確認後，實際送出委託
   const handleExecuteOrder = async () => {
+    // 若為 >=30 萬買入委託，必須驗證 1030 密碼方可放行
+    if (isHighValueBuy && confirmPin !== '1030') {
+      return;
+    }
     setIsConfirmModalOpen(false);
     const targetPrice = orderType === 'market' ? 0 : (parseFloat(orderPrice) || 0);
 
@@ -1412,14 +1421,18 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                   {/* 超大視覺焦點：買入 / 賣出 頂部橫幅 */}
                   <div className={`order-confirm-hero hero-${orderAction}`}>
                     <div className="hero-alert-badge">
-                      <span>⚠️ 下單安全防護確認</span>
+                      <span>
+                        {isHighValueBuy ? '🚨 大額交易安全強烈防護 (買入 ≥ 30萬)' : '⚠️ 下單安全防護確認'}
+                      </span>
                     </div>
                     <div className="hero-action-headline">
                       {orderAction === 'buy' ? '買　入' : '賣　出'}
                     </div>
                     <div className="hero-action-sub">
                       {orderAction === 'buy'
-                        ? '🔴 即將送出【買進】委託，成交後將自銀行交割戶扣款！'
+                        ? (isHighValueBuy
+                            ? '🚨 本筆買入委託金額高達 30 萬元以上！請審慎確認標的與金額無誤！'
+                            : '🔴 即將送出【買進】委託，成交後將自銀行交割戶扣款！')
                         : '🟢 即將送出【賣出】委託，成交後將扣除稅費並匯入交割帳戶！'}
                     </div>
                   </div>
@@ -1456,20 +1469,60 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                           <strong>{orderQty.toLocaleString()}</strong> {orderUnit === 'lot' ? '張 (1,000股)' : '股'}
                         </span>
                       </div>
-                      <div className="confirm-detail-row total-row">
+                      <div className={`confirm-detail-row total-row ${isHighValueBuy ? 'total-row-high-value' : ''}`}>
                         <span className="detail-label">
                           預估{orderAction === 'buy' ? '交割扣款' : '交割入帳'}
                         </span>
-                        <span className={`detail-value total-highlight ${orderAction === 'buy' ? 'color-up' : 'color-down'}`}>
+                        <span className={`detail-value total-highlight ${orderAction === 'buy' ? 'color-up' : 'color-down'} ${isHighValueBuy ? 'critical-amount-flashing' : ''}`}>
                           NT$ {estimatedTotal.toLocaleString()} 元
+                          {isHighValueBuy && <span className="huge-amount-badge">🚨 ≥30萬大額</span>}
                         </span>
                       </div>
                     </div>
 
-                    <div className={`confirm-attention-box alert-${orderAction}`}>
-                      <strong>注意：</strong>
-                      請確認委託方向為【<span className={`bold-action ${orderAction}`}>{orderAction === 'buy' ? '買入' : '賣出'}</span>】，避免操作錯誤。
-                    </div>
+                    {isHighValueBuy ? (
+                      <div className="confirm-huge-amount-alert">
+                        <div className="huge-alert-title">
+                          <span className="huge-alert-icon">🚨</span>
+                          <span>大額買入強烈防護警示（金額達 NT$ {estimatedTotal.toLocaleString()} 元）</span>
+                        </div>
+                        <div className="huge-alert-msg">
+                          ⚠️ 本筆買入金額已達 <strong>30 萬元</strong>！為防止手滑下錯單，必須輸入確認密碼【<strong>1030</strong>】方可解鎖送出委託。
+                        </div>
+                        <div className="huge-alert-pin-input-wrap">
+                          <label className="pin-input-label" htmlFor="high-value-pin-input">
+                            🔑 請輸入確認密碼：
+                          </label>
+                          <input
+                            id="high-value-pin-input"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength={4}
+                            className={`pin-confirm-input ${confirmPin === '1030' ? 'pin-valid' : ''}`}
+                            placeholder="1030"
+                            value={confirmPin}
+                            onChange={(e) => setConfirmPin(e.target.value.trim())}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && confirmPin === '1030' && !isSubmitting) {
+                                handleExecuteOrder();
+                              }
+                            }}
+                            autoFocus
+                          />
+                          {confirmPin === '1030' ? (
+                            <span className="pin-status pin-pass">✅ 密碼正確已解鎖</span>
+                          ) : (
+                            <span className="pin-status pin-pending">⚠️ 請輸入 1030 解鎖</span>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className={`confirm-attention-box alert-${orderAction}`}>
+                        <strong>注意：</strong>
+                        請確認委託方向為【<span className={`bold-action ${orderAction}`}>{orderAction === 'buy' ? '買入' : '賣出'}</span>】，避免操作錯誤。
+                      </div>
+                    )}
                   </div>
 
                   <div className="modal-footer confirm-modal-footer">
@@ -1483,17 +1536,19 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     </button>
                     <button
                       type="button"
-                      className={`btn-modal-confirm ${orderAction === 'buy' ? 'btn-confirm-buy' : 'btn-confirm-sell'}`}
-                      disabled={isSubmitting}
+                      className={`btn-modal-confirm ${orderAction === 'buy' ? 'btn-confirm-buy' : 'btn-confirm-sell'} ${isHighValueBuy && confirmPin !== '1030' ? 'btn-confirm-locked' : ''}`}
+                      disabled={isSubmitting || (isHighValueBuy && confirmPin !== '1030')}
                       onClick={handleExecuteOrder}
-                      autoFocus
+                      autoFocus={!isHighValueBuy}
                     >
                       {isSubmitting ? (
                         '⏳ 委託送出中...'
+                      ) : isHighValueBuy && confirmPin !== '1030' ? (
+                        '🔒 請輸入 1030 密碼解鎖'
+                      ) : orderAction === 'buy' ? (
+                        `🔴 確認【買入】${stockCode}`
                       ) : (
-                        orderAction === 'buy'
-                          ? `🔴 確認【買入】${stockCode}`
-                          : `🟢 確認【賣出】${stockCode}`
+                        `🟢 確認【賣出】${stockCode}`
                       )}
                     </button>
                   </div>

@@ -3936,4 +3936,175 @@ body {
   transform: translateY(-1px);
 }
 
+/* ==================== 大額買入 (≥30萬) 強烈防護與金額閃爍 ==================== */
+@keyframes criticalAmountPulseFlash {
+  0%, 100% {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    text-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+    border-color: #ef4444;
+    transform: scale(1);
+  }
+  50% {
+    background-color: #dc2626;
+    color: #ffffff;
+    text-shadow: 0 0 16px rgba(255, 255, 255, 0.95);
+    border-color: #ffffff;
+    transform: scale(1.06);
+    box-shadow: 0 0 24px rgba(220, 38, 38, 0.85);
+  }
+}
+
+.critical-amount-flashing {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px !important;
+  border-radius: 8px;
+  border: 2px solid #ef4444;
+  animation: criticalAmountPulseFlash 0.75s infinite ease-in-out !important;
+  font-size: 20px !important;
+  font-weight: 900 !important;
+}
+
+.huge-amount-badge {
+  font-size: 11px;
+  font-weight: 800;
+  background: #fef08a;
+  color: #854d0e;
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  border: 1px solid #eab308;
+}
+
+.total-row-high-value {
+  background: rgba(239, 68, 68, 0.08) !important;
+  border: 1.5px solid rgba(239, 68, 68, 0.4) !important;
+}
+
+.confirm-huge-amount-alert {
+  background: rgba(220, 38, 38, 0.12);
+  border: 2px solid #dc2626;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 0 16px rgba(220, 38, 38, 0.25);
+  animation: shakeAlert 0.4s ease-in-out;
+}
+
+@keyframes shakeAlert {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+
+.huge-alert-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14.5px;
+  font-weight: 900;
+  color: #dc2626;
+  letter-spacing: 0.5px;
+}
+
+.huge-alert-title .huge-alert-icon {
+  font-size: 18px;
+  animation: alertBounce 1s infinite;
+}
+
+@keyframes alertBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+.huge-alert-msg {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-main);
+}
+
+.huge-alert-msg strong {
+  color: #dc2626;
+  font-weight: 800;
+}
+
+.huge-alert-pin-input-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--bg-card);
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1.5px solid rgba(220, 38, 38, 0.5);
+}
+
+.pin-input-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #dc2626;
+  white-space: nowrap;
+}
+
+.pin-confirm-input {
+  width: 110px;
+  font-size: 18px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  letter-spacing: 5px;
+  text-align: center;
+  padding: 6px 8px;
+  border: 2px solid #dc2626;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-main);
+  outline: none;
+  transition: all 0.2s;
+}
+
+.pin-confirm-input:focus {
+  border-color: #b91c1c;
+  box-shadow: 0 0 12px rgba(220, 38, 38, 0.5);
+}
+
+.pin-confirm-input.pin-valid {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+}
+
+.pin-status {
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pin-status.pin-pass {
+  color: #10b981;
+}
+
+.pin-status.pin-pending {
+  color: #dc2626;
+  animation: pinPendingBlink 1.2s infinite;
+}
+
+@keyframes pinPendingBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.btn-confirm-locked {
+  background: #64748b !important;
+  color: #e2e8f0 !important;
+  box-shadow: none !important;
+  cursor: not-allowed !important;
+  opacity: 0.75;
+}
+
+
 
