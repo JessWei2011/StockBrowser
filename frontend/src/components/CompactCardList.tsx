@@ -41,6 +41,10 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
 
   const formatVolume = (val: number | null | undefined): string => {
     if (val === null || val === undefined || isNaN(val)) return '—';
+    if (val >= 10000) {
+      const w = val / 10000;
+      return (w >= 100 ? w.toFixed(0) : w.toFixed(1)) + '萬';
+    }
     return val.toLocaleString();
   };
 
@@ -117,20 +121,22 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
                   const isOtc = ((item.exchange || q?.exchange || '').toUpperCase() === 'OTC');
                   const isEtfOrBond = item.code.startsWith('00') || ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase());
                   return (
-                    <span
-                      className={isEtfOrBond ? 'stock-plain' : 'stock-clickable'}
-                      onClick={!isEtfOrBond && onSelectStock ? () => onSelectStock(item.code) : undefined}
-                      title={!isEtfOrBond ? '點擊開啟個股動態技術走勢圖 (K線/均線/布林/籌碼/大戶)' : undefined}
-                    >
+                    <div className="flat-id-row">
                       <span
-                        className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
-                        title={isOtc ? '上櫃股票' : '上市股票'}
+                        className={isEtfOrBond ? 'stock-plain' : 'stock-clickable'}
+                        onClick={!isEtfOrBond && onSelectStock ? () => onSelectStock(item.code) : undefined}
+                        title={!isEtfOrBond ? '點擊開啟個股動態技術走勢圖 (K線/均線/布林/籌碼/大戶)' : undefined}
                       >
-                        {isOtc ? '櫃' : '市'}
+                        <span
+                          className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
+                          title={isOtc ? '上櫃股票' : '上市股票'}
+                        >
+                          {isOtc ? '櫃' : '市'}
+                        </span>
+                        <span className={`flat-code ${isOtc ? 'code-otc' : 'code-tse'}`}>{item.code}</span>
+                        <span className="flat-name">{item.name || q?.name || ''}</span>
                       </span>
-                      <span className={`flat-code ${isOtc ? 'code-otc' : 'code-tse'}`}>{item.code}</span>
-                      <span className="flat-name">{item.name || q?.name || ''}</span>
-                    </span>
+                    </div>
                   );
                 })()}
                 {(() => {
@@ -158,8 +164,11 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
                   // 6. 最新自結營收標籤
                   const revAnn = stockAnns.find((a) => a.category === 'revenue');
 
+                  const hasAny = hasDisp || hasAtt || revAnn || earnAnn || newsAnn || exdivAnn;
+                  if (!hasAny) return null;
+
                   return (
-                    <>
+                    <div className="flat-id-badges">
                       {hasDisp && (
                         <span className="stock-badge badge-disposition" title={dispTitle}>
                           [{dispLabel}]
@@ -190,7 +199,7 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
                           [{exdivAnn.tag}]
                         </span>
                       )}
-                    </>
+                    </div>
                   );
                 })()}
               </div>
@@ -252,35 +261,38 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
             {/* 下半行：扁平網格數值 (最高、最低、總量、昨收、開盤) + 極簡操作按鈕 */}
             <div className="flat-row-secondary">
               <div className="flat-grid">
-                <div className="flat-col flat-col-stagger-high">
+                <div className="flat-col">
                   <span className="flat-label">最高</span>
                   <span className={`flat-val ${getPriceClass(q?.high, prev)}`}>
                     {formatPrice(q?.high)}
                   </span>
                 </div>
 
-                <div className="flat-col flat-col-stagger-low">
+                <div className="flat-col">
                   <span className="flat-label">最低</span>
                   <span className={`flat-val ${getPriceClass(q?.low, prev)}`}>
                     {formatPrice(q?.low)}
                   </span>
                 </div>
 
-                <div className="flat-col flat-col-stagger-high">
+                <div className="flat-col">
                   <span className="flat-label">總量</span>
-                  <span className="flat-val flat-vol-val">
+                  <span
+                    className="flat-val flat-vol-val"
+                    title={q?.totalVolume ? `總成交量: ${q.totalVolume.toLocaleString()} 張` : undefined}
+                  >
                     {formatVolume(q?.totalVolume)}
                   </span>
                 </div>
 
-                <div className="flat-col flat-col-stagger-low">
+                <div className="flat-col">
                   <span className="flat-label">昨收</span>
                   <span className="flat-val flat-ref-val">
                     {formatPrice(prev)}
                   </span>
                 </div>
 
-                <div className="flat-col flat-col-stagger-high">
+                <div className="flat-col">
                   <span className="flat-label">開盤</span>
                   <span className="flat-val flat-open-val">
                     {formatPrice(q?.open)}
