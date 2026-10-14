@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { WatchlistGroup, QuoteState, UpstreamStatus, WebSocketMessage, StockPosition, StockAnnouncement } from './types';
+import type { WatchlistGroup, QuoteState, UpstreamStatus, WebSocketMessage, StockPosition, StockAnnouncement, MarketIndexState, StockMaSummary } from './types';
 import {
   fetchBootstrap,
   createGroup,
@@ -17,6 +17,8 @@ import { CompactCardList } from './components/CompactCardList';
 import { AssistantSidebar } from './components/AssistantSidebar';
 import { GroupModal } from './components/GroupModal';
 import { VaultPasswordModal, isVaultAuthenticated, clearVaultAuthenticated } from './components/VaultPasswordModal';
+import { StockChartDrawer } from './components/StockChartDrawer';
+import { MarketIndexTrend } from './components/MarketIndexTrend';
 import './App.css';
 
 export const App: React.FC = () => {
@@ -28,6 +30,7 @@ export const App: React.FC = () => {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<'vault' | 'order'>('vault');
   const [isVaultPasswordModalOpen, setIsVaultPasswordModalOpen] = useState(false);
+  const [selectedChartCode, setSelectedChartCode] = useState<string | null>(null);
   const [upstream, setUpstream] = useState<UpstreamStatus>({
     connected: false,
     loggedIn: false,
@@ -48,13 +51,8 @@ export const App: React.FC = () => {
     totalMarketValue: number;
     returnPercent: number;
   } | null>(null);
-  const [marketIndices, setMarketIndices] = useState<Record<string, {
-    code: string;
-    name: string;
-    price: number;
-    change: number;
-    changePercent: number;
-  }> | null>(null);
+  const [marketIndices, setMarketIndices] = useState<Record<string, MarketIndexState> | null>(null);
+  const [indicators, setIndicators] = useState<Record<string, StockMaSummary>>({});
 
   const [announcements, setAnnouncements] = useState<Record<string, StockAnnouncement[]>>({});
 
@@ -106,6 +104,9 @@ export const App: React.FC = () => {
       }
       if (data.marketIndices) {
         setMarketIndices(data.marketIndices);
+      }
+      if (data.indicators) {
+        setIndicators(data.indicators);
       }
       setActiveGroupId((prev) => {
         if (prev && prev !== 'g-vault' && data.groups.some((g) => g.id === prev && g.name !== '財神庫')) return prev;
@@ -381,6 +382,12 @@ export const App: React.FC = () => {
                       ({marketIndices.TSE.changePercent > 0 ? '+' : ''}
                       {marketIndices.TSE.changePercent.toFixed(2)}%)
                     </span>
+                    {marketIndices.TSE.volumeText && (
+                      <span className="index-vol" title="加權指數累積成交金額">
+                        成交量 {marketIndices.TSE.volumeText}
+                      </span>
+                    )}
+                    <MarketIndexTrend quote={marketIndices.TSE} />
                   </div>
                 )}
                 {marketIndices.OTC && (
@@ -415,6 +422,12 @@ export const App: React.FC = () => {
                       ({marketIndices.OTC.changePercent > 0 ? '+' : ''}
                       {marketIndices.OTC.changePercent.toFixed(2)}%)
                     </span>
+                    {marketIndices.OTC.volumeText && (
+                      <span className="index-vol" title="櫃買指數累積成交金額">
+                        成交量 {marketIndices.OTC.volumeText}
+                      </span>
+                    )}
+                    <MarketIndexTrend quote={marketIndices.OTC} />
                   </div>
                 )}
               </div>
@@ -428,10 +441,12 @@ export const App: React.FC = () => {
                 isWealthGroup={isSystemGroup}
                 quotes={quotes}
                 announcements={announcements}
+                indicators={indicators}
                 dirtyCodes={dirtyCodes}
                 onRemoveItem={handleRemoveStock}
                 onMoveItem={handleMoveStock}
                 onReorderItems={handleReorderItems}
+                onSelectStock={(code) => setSelectedChartCode(code)}
               />
             ) : (
               <CompactCardList
@@ -439,9 +454,11 @@ export const App: React.FC = () => {
                 isWealthGroup={isSystemGroup}
                 quotes={quotes}
                 announcements={announcements}
+                indicators={indicators}
                 dirtyCodes={dirtyCodes}
                 onRemoveItem={handleRemoveStock}
                 onMoveItem={handleMoveStock}
+                onSelectStock={(code) => setSelectedChartCode(code)}
               />
             )}
           </main>
@@ -489,6 +506,15 @@ export const App: React.FC = () => {
           setDrawerTab('vault');
           setIsDrawerOpen(true);
         }}
+      />
+
+      <StockChartDrawer
+        code={selectedChartCode}
+        isOpen={Boolean(selectedChartCode)}
+        onClose={() => setSelectedChartCode(null)}
+        theme={theme}
+        currentPrice={selectedChartCode && quotes[selectedChartCode]?.last ? quotes[selectedChartCode].last : null}
+        changePercent={selectedChartCode && quotes[selectedChartCode]?.changePercent ? quotes[selectedChartCode].changePercent : null}
       />
     </div>
   );

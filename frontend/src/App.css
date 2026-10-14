@@ -518,6 +518,129 @@ body {
   font-feature-settings: 'tnum';
 }
 
+.index-vol {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background-color: var(--badge-bg);
+  padding: 1px 7px;
+  border-radius: 10px;
+  margin-left: 2px;
+  font-feature-settings: 'tnum';
+  white-space: nowrap;
+}
+
+/* ── 大盤市場脈動微型走勢元件 ── */
+.index-trend-widget {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1.5px 6px;
+  margin-left: 3px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-radius: 6px;
+  user-select: none;
+  cursor: default;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+  line-height: 1;
+}
+
+.index-trend-widget:hover {
+  background: rgba(15, 23, 42, 0.75);
+  border-color: rgba(56, 189, 248, 0.5);
+}
+
+[data-theme='light'] .index-trend-widget {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+[data-theme='light'] .index-trend-widget:hover {
+  background: #ffffff;
+  border-color: #94a3b8;
+}
+
+.index-trend-badge {
+  font-size: 9.5px;
+  font-weight: 800;
+  padding: 1px 4.5px;
+  border-radius: 3px;
+  line-height: 1.2;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+.index-trend-badge.badge-up {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ff5964;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+}
+
+.index-trend-badge.badge-down {
+  background: rgba(34, 197, 94, 0.18);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.45);
+}
+
+.index-trend-badge.badge-flat {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.index-trend-body {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.index-trend-spark {
+  display: block;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.index-trend-labels {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 22px;
+  font-size: 9px;
+  line-height: 1.1;
+  font-feature-settings: 'tnum';
+}
+
+.index-trend-lbl {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-family: 'JetBrains Mono', -apple-system, BlinkMacSystemFont, monospace;
+  font-size: 8.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.index-trend-lbl .lbl-tag {
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.index-trend-lbl.high .lbl-val,
+.index-trend-lbl.low .lbl-val {
+  color: var(--text-main);
+}
+
+@media (max-width: 600px) {
+  .index-trend-labels {
+    display: none;
+  }
+  .index-trend-widget {
+    padding: 1px 4px;
+    gap: 3px;
+  }
+}
+
 .pnl-summary-item {
   font-size: 13px;
   color: var(--text-sub);
@@ -618,6 +741,18 @@ body {
   background-color: var(--bg-hover);
 }
 
+/* 長期持有標的暗色處理 (財神簿內 ETF、債券 ETF、虎航 6757) */
+.quote-row.row-dimmed td {
+  opacity: 0.52;
+  filter: saturate(0.75);
+  transition: opacity 0.2s ease, filter 0.2s ease;
+}
+
+.quote-row.row-dimmed:hover td {
+  opacity: 1;
+  filter: saturate(1);
+}
+
 /* 拖曳與排序欄位樣式 */
 .th-reorder, .td-reorder {
   text-align: center;
@@ -710,15 +845,49 @@ body {
   background-color: var(--bg-hover);
 }
 
+.stock-clickable {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin: -2px 0;
+  transition: all 0.15s ease;
+}
+
+.stock-plain {
+  cursor: default;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 4px;
+  margin: -2px 0;
+  user-select: none;
+}
+
+.stock-clickable:hover {
+  background-color: rgba(56, 189, 248, 0.12);
+}
+
+.stock-clickable:hover .stock-code {
+  color: #38bdf8 !important;
+  text-decoration: underline;
+}
+
+.stock-clickable:hover .stock-name {
+  color: var(--text-main);
+}
+
 .stock-code {
   font-weight: 700;
   color: var(--text-main);
   margin-right: 8px;
+  transition: color 0.15s ease;
 }
 
 .stock-name {
   color: var(--text-sub);
   font-weight: 500;
+  transition: color 0.15s ease;
 }
 
 /* ========================================================
@@ -924,7 +1093,71 @@ body {
 
 .th-action, .td-action {
   text-align: center;
-  width: 50px;
+  width: 160px;
+  min-width: 160px;
+}
+
+.action-cell-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.ma-tag-group {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.ma-tag-group-card {
+  margin-left: 6px;
+}
+
+.ma-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-feature-settings: 'tnum';
+  user-select: none;
+  cursor: default;
+  transition: transform 0.15s ease, background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.ma-tag:hover {
+  transform: scale(1.1);
+}
+
+/* 衝破 / 站上均線：亮紅燈 (台股紅漲) */
+.ma-tag.tag-up {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.65);
+  box-shadow: 0 0 3px rgba(239, 68, 68, 0.25);
+}
+
+/* 跌破均線：亮綠燈 (台股綠跌) */
+.ma-tag.tag-down {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.65);
+  box-shadow: 0 0 3px rgba(16, 185, 129, 0.25);
+}
+
+/* 均線資料未獲取或載入中 */
+.ma-tag.tag-neutral {
+  background-color: var(--badge-bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+}
+
+.ma-empty {
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 .btn-cell-delete {
@@ -1011,6 +1244,20 @@ body {
 
 .flat-stock-item:hover {
   background-color: var(--bg-hover);
+}
+
+/* 長期持有標的暗色處理 (卡片模式與側邊欄) */
+.flat-stock-item.card-dimmed,
+.sidebar-stock-card.card-dimmed {
+  opacity: 0.52;
+  filter: saturate(0.75);
+  transition: opacity 0.2s ease, filter 0.2s ease, background-color 0.15s ease;
+}
+
+.flat-stock-item.card-dimmed:hover,
+.sidebar-stock-card.card-dimmed:hover {
+  opacity: 1;
+  filter: saturate(1);
 }
 
 /* 上半行：商品名稱 + 大字現價 + 漲跌幅 (純平 2D 對比排版，絕不折行) */
@@ -1962,7 +2209,32 @@ body {
   border-radius: 6px;
   font-size: 12.5px;
   line-height: 1.5;
+  font-weight: 600;
 }
+
+.sidebar-order-notice.notice-error {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  color: #ef4444;
+}
+
+.sidebar-order-notice.notice-success {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  color: #10b981;
+}
+
+.sidebar-order-notice.notice-info {
+  background: rgba(14, 165, 233, 0.15);
+  border: 1px solid rgba(14, 165, 233, 0.45);
+  color: #0284c7;
+}
+
+.btn-order-submit.submitting {
+  opacity: 0.65;
+  cursor: wait;
+}
+
 
 @media (max-width: 768px) {
   .app-workspace.sidebar-open {
@@ -2430,3 +2702,241 @@ body {
 .btn-order-submit:active {
   transform: translateY(0);
 }
+
+/* ========================================================
+   個股動態技術分析走勢圖右側滑出抽屜 (StockChartDrawer)
+   ======================================================== */
+.chart-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 1200;
+  display: flex;
+  justify-content: flex-end;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.chart-drawer-panel {
+  width: 760px;
+  max-width: 95vw;
+  height: 100%;
+  background-color: var(--bg-card);
+  border-left: 1px solid var(--border-color);
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  animation: slideDrawerIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideDrawerIn {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.chart-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-color);
+  background-color: var(--bg-secondary);
+}
+
+.chart-drawer-title-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.chart-stock-code {
+  font-size: 18px;
+  font-weight: 800;
+  color: #38bdf8;
+  font-feature-settings: 'tnum';
+}
+
+.chart-stock-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.chart-live-price {
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+}
+
+.chart-live-badge {
+  font-size: 11px;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 2px 7px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.btn-drawer-close {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-drawer-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.chart-drawer-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  background-color: var(--bg-main);
+}
+
+.chart-loading-state,
+.chart-error-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-sub);
+  font-size: 14px;
+  padding: 20px;
+  text-align: center;
+}
+
+.chart-loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border-color);
+  border-top-color: #38bdf8;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 12px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.chart-container-main {
+  position: relative;
+  width: 100%;
+  height: 58%;
+  min-height: 280px;
+}
+
+/* TradingView 風格右側 Y 軸彩色防重疊數值膠囊標籤 */
+.echart-right-price-badges {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 78px;
+  pointer-events: none;
+  z-index: 6;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  user-select: none;
+}
+
+.echart-price-badge-item {
+  position: absolute;
+  right: 1px;
+  width: 74px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  box-sizing: border-box;
+  padding: 0 4px 0 5px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: #ffffff;
+  border-radius: 3px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  transition: top 0.08s ease-out;
+  white-space: nowrap;
+}
+
+.echart-price-badge-item .badge-tag {
+  display: inline-block;
+  width: 18px;
+  min-width: 18px;
+  font-size: 9.5px;
+  opacity: 0.92;
+  font-weight: 700;
+  text-align: left;
+  line-height: 1;
+}
+
+.echart-price-badge-item .badge-text {
+  flex: 1;
+  text-align: right;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  padding-right: 1px;
+}
+
+.chart-sub-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.sub-tab-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sub-tab-btn:hover {
+  color: var(--text-main);
+  background-color: var(--bg-hover);
+}
+
+.sub-tab-btn.active {
+  background-color: var(--bg-card);
+  color: #38bdf8;
+  font-weight: 700;
+  border-color: var(--border-color);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.chart-container-sub {
+  width: 100%;
+  height: 42%;
+  min-height: 180px;
+}
+

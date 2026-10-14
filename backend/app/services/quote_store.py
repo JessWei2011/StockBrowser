@@ -16,18 +16,19 @@ CACHE_DIR = BASE_DIR / "data"
 ODD_CACHE_FILE = CACHE_DIR / "odd_quotes_cache.json"
 
 class QuoteStore:
-    def __init__(self):
+    def __init__(self, cache_file: Optional[Path] = None):
         self._lock = threading.Lock()
         self._quotes: dict[str, QuoteState] = {}
         self._dirty_codes: set[str] = set()
         self._server_version: int = 0
         self._odd_cache: dict[str, float] = {}
+        self._cache_file = cache_file or ODD_CACHE_FILE
         self._load_odd_cache()
 
     def _load_odd_cache(self):
         try:
-            if ODD_CACHE_FILE.exists():
-                with open(ODD_CACHE_FILE, "r", encoding="utf-8") as f:
+            if self._cache_file.exists():
+                with open(self._cache_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     if isinstance(data, dict):
                         self._odd_cache = {str(k): float(v) for k, v in data.items() if v is not None}
@@ -37,11 +38,11 @@ class QuoteStore:
 
     def _save_odd_cache_locked(self):
         try:
-            CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            temp_file = CACHE_DIR / "odd_quotes_cache.json.tmp"
+            self._cache_file.parent.mkdir(parents=True, exist_ok=True)
+            temp_file = self._cache_file.with_suffix(".tmp")
             with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(self._odd_cache, f)
-            temp_file.replace(ODD_CACHE_FILE)
+            temp_file.replace(self._cache_file)
         except Exception as e:
             logger.warning(f"Failed to save odd quotes cache: {e}")
 
@@ -116,6 +117,7 @@ class QuoteStore:
         total_volume: Optional[int] = None,
         previous_close: Optional[float] = None,
         source_ts: Optional[str] = None,
+        odd_lot_source_ts: Optional[str] = None,
         data_status: Optional[DataStatus] = None,
         is_simulated: Optional[bool] = None,
         is_attention: Optional[bool] = None,
@@ -135,67 +137,82 @@ class QuoteStore:
                     securityType=security_type or "STOCK",
                     receivedAt=now_iso(),
                     dataStatus="initializing",
-                    revision=0
+                    revision=0,
+                    oddLotLast=self._odd_cache.get(code)
                 )
                 self._quotes[code] = current
 
-            # 檢查 source_ts 防回溯
-            if source_ts and current.sourceTs and source_ts < current.sourceTs:
+            # 檢查整股防回溯
+            round_lot_stale = bool(source_ts and current.sourceTs and source_ts < current.sourceTs)
+            # 檢查零股獨立防回溯
+            odd_lot_stale = bool(odd_lot_source_ts and current.oddLotSourceTs and odd_lot_source_ts < current.oddLotSourceTs)
+
+            if round_lot_stale and (odd_lot_last is None or odd_lot_stale):
                 return False
 
             changed = False
 
-            if name is not None and name != current.name:
-                current.name = name
-                changed = True
-            if exchange is not None and exchange != current.exchange:
-                current.exchange = exchange
-                changed = True
-            if security_type is not None and security_type != current.securityType:
-                current.securityType = security_type
-                changed = True
+            if not round_lot_stale:
+                if name is not None and name != current.name:
+                    current.name = name
+                    changed = True
+                if exchange is not None and exchange != current.exchange:
+                    current.exchange = exchange
+                    changed = True
+                if security_type is not None and security_type != current.securityType:
+                    current.securityType = security_type
+                    changed = True
 
-            if previous_close is not None and previous_close > 0 and previous_close != current.previousClose:
-                current.previousClose = previous_close
-                changed = True
+                if previous_close is not None and previous_close > 0 and previous_close != current.previousClose:
+                    current.previousClose = previous_close
+                    changed = True
 
-            if last is not None and last > 0 and last != current.last:
-                current.last = last
-                changed = True
+                if last is not None and last > 0 and last != current.last:
+                    current.last = last
+                    changed = True
 
-            if odd_lot_last is not None and odd_lot_last > 0 and odd_lot_last != current.oddLotLast:
-                current.oddLotLast = odd_lot_last
-                self._odd_cache[code] = odd_lot_last
-                self._save_odd_cache_locked()
-                changed = True
+                if bid is not None and bid != current.bid:
+                    current.bid = bid
+                    changed = True
 
-            if bid is not None and bid != current.bid:
-                current.bid = bid
-                changed = True
+                if ask is not None and ask != current.ask:
+                    current.ask = ask
+                    changed = True
 
-            if ask is not None and ask != current.ask:
-                current.ask = ask
-                changed = True
+                if open_price is not None and open_price > 0 and open_price != current.open:
+                    current.open = open_price
+                    changed = True
 
-            if open_price is not None and open_price > 0 and open_price != current.open:
-                current.open = open_price
-                changed = True
+                if high is not None and high > 0 and high != current.high:
+                    current.high = high
+                    changed = True
 
-            if high is not None and high > 0 and high != current.high:
-                current.high = high
-                changed = True
+                if low is not None and low > 0 and low != current.low:
+                    current.low = low
+                    changed = True
 
-            if low is not None and low > 0 and low != current.low:
-                current.low = low
-                changed = True
+                if total_volume is not None and total_volume != current.totalVolume:
+                    current.totalVolume = total_volume
+                    changed = True
 
-            if total_volume is not None and total_volume != current.totalVolume:
-                current.totalVolume = total_volume
-                changed = True
+                if data_status is not None and data_status != current.dataStatus:
+                    current.dataStatus = data_status
+                    changed = True
 
-            if data_status is not None and data_status != current.dataStatus:
-                current.dataStatus = data_status
-                changed = True
+                if source_ts is not None and source_ts != current.sourceTs:
+                    current.sourceTs = source_ts
+                    changed = True
+
+            if not odd_lot_stale:
+                if odd_lot_last is not None and odd_lot_last > 0 and odd_lot_last != current.oddLotLast:
+                    current.oddLotLast = odd_lot_last
+                    self._odd_cache[code] = odd_lot_last
+                    self._save_odd_cache_locked()
+                    changed = True
+
+                if odd_lot_source_ts is not None and odd_lot_source_ts != current.oddLotSourceTs:
+                    current.oddLotSourceTs = odd_lot_source_ts
+                    changed = True
 
             # 計算漲跌與漲幅 (只有當昨收與現價皆有效且大於 0 時才計算)
             if current.last is not None and current.last > 0 and current.previousClose is not None and current.previousClose > 0:
@@ -207,10 +224,6 @@ class QuoteStore:
                 if new_pct != current.changePercent:
                     current.changePercent = new_pct
                     changed = True
-
-            if source_ts is not None and source_ts != current.sourceTs:
-                current.sourceTs = source_ts
-                changed = True
 
             if is_simulated is not None and is_simulated != current.isSimulated:
                 current.isSimulated = is_simulated

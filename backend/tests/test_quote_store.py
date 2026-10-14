@@ -52,8 +52,9 @@ def test_quote_store_null_not_coerced_to_zero():
     assert q.ask is None
     assert q.change is None
 
-def test_quote_store_odd_lot_caching_and_batch():
-    store = QuoteStore()
+def test_quote_store_odd_lot_caching_and_batch(tmp_path):
+    cache_file = tmp_path / "test_odd_quotes.json"
+    store = QuoteStore(cache_file=cache_file)
     # 批次更新零股
     store.update_odd_lot_batch({"2330": 2545.0, "0050": 114.9})
     
@@ -64,3 +65,29 @@ def test_quote_store_odd_lot_caching_and_batch():
     # 單筆 update_quote 更新零股
     store.update_quote("2330", odd_lot_last=2550.0)
     assert store.get_all_quotes()[1]["2330"].oddLotLast == 2550.0
+
+def test_quote_store_odd_lot_independent_anti_rollback(tmp_path):
+    cache_file = tmp_path / "test_odd_quotes.json"
+    store = QuoteStore(cache_file=cache_file)
+    # 先收到整股較新的時間戳記
+    store.update_quote("2330", last=1000.0, source_ts="2026-10-11T09:10:00Z")
+    
+    # 零股時間戳記較早，但不應被整股的 source_ts 擋掉
+    updated = store.update_quote(
+        "2330",
+        odd_lot_last=999.0,
+        odd_lot_source_ts="2026-10-11T09:05:00Z"
+    )
+    assert updated is True
+    _, quotes = store.get_all_quotes()
+    assert quotes["2330"].oddLotLast == 999.0
+    assert quotes["2330"].last == 1000.0
+
+    # 零股若收到更舊的時間戳記，才應該被零股防回溯擋掉
+    updated_stale = store.update_quote(
+        "2330",
+        odd_lot_last=990.0,
+        odd_lot_source_ts="2026-10-11T09:04:00Z"
+    )
+    assert updated_stale is False
+    assert store.get_all_quotes()[1]["2330"].oddLotLast == 999.0

@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+from pathlib import Path
 import random
 import re
 import urllib.request
@@ -133,17 +135,19 @@ def fetch_disposition_periods() -> dict[str, dict[str, Any]]:
 
     return results
 
-def fetch_closing_odd_lots() -> dict[str, float]:
+def fetch_closing_odd_lots() -> tuple[dict[str, float], Optional[str]]:
     """向 TWSE 與 TPEx 官方公開管道撈取盤中零股收盤成交價"""
     results: dict[str, float] = {}
+    twse_date: Optional[str] = None
     headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'}
 
     # 1. TWSE 上市盤中零股行情 (TWTC7U)
     try:
         url = 'https://www.twse.com.tw/rwd/zh/afterTrading/TWTC7U?response=json'
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=6) as resp:
+        with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read().decode('utf-8'))
+            twse_date = str(data.get('date', '')).strip() or None
             rows = data.get('data', [])
             for r in rows:
                 if len(r) > 6:
@@ -162,7 +166,7 @@ def fetch_closing_odd_lots() -> dict[str, float]:
     try:
         url = 'https://www.tpex.org.tw/openapi/v1/tpex_odd_stock'
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=6) as resp:
+        with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read().decode('utf-8'))
             for item in data:
                 code = str(item.get('SecuritiesCompanyCode', '')).strip()
@@ -176,7 +180,7 @@ def fetch_closing_odd_lots() -> dict[str, float]:
     except Exception as e:
         logger.warning(f"Failed to fetch TPEx odd lots: {e}")
 
-    return results
+    return results, twse_date
 
 def safe_float(val) -> Optional[float]:
     if val is None or val == "" or val == "-":
@@ -211,6 +215,26 @@ def calc_position_net_pnl(code: str, price: float, qty: float, cost: float, init
     net_mv = mv - tax - fee
     return round(net_mv - cost, 2)
 
+def format_index_amount(raw_amount: Optional[float]) -> tuple[Optional[float], Optional[str]]:
+    """
+    將大盤成交金額轉換為 (以億為單位的浮點數, 格式化文字如 '3,842億')
+    台股加權指數每日成交額通常在 1,000 ~ 8,000 億元
+    """
+    if raw_amount is None or raw_amount <= 0:
+        return None, None
+    if raw_amount >= 10_000_000_000:
+        val_in_yi = raw_amount / 100_000_000.0
+    elif raw_amount >= 100_000:
+        val_in_yi = raw_amount / 100.0
+    elif raw_amount >= 10_000:
+        val_in_yi = raw_amount / 100_000.0
+    else:
+        val_in_yi = raw_amount
+
+    val_in_yi_rounded = round(val_in_yi, 1)
+    text = f"{int(round(val_in_yi)):,}億"
+    return val_in_yi_rounded, text
+
 class ShioajiAdapter:
     def __init__(self):
         self.api: Optional[sj.Shioaji] = None
@@ -221,8 +245,8 @@ class ShioajiAdapter:
         self.contracts_cache: dict[str, dict] = {}
         self.disposition_dates_cache: dict[str, dict[str, Any]] = {}
         self.market_indices: dict[str, dict[str, Any]] = {
-            "TSE": {"code": "IX0001", "name": "加權指數", "price": 0.0, "change": 0.0, "changePercent": 0.0},
-            "OTC": {"code": "IX0043", "name": "櫃買指數", "price": 0.0, "change": 0.0, "changePercent": 0.0},
+            "TSE": {"code": "IX0001", "name": "加權指數", "price": 0.0, "change": 0.0, "changePercent": 0.0, "reference": None, "open": None, "high": None, "low": None, "volumeText": None, "volumeAmount": None},
+            "OTC": {"code": "IX0043", "name": "櫃買指數", "price": 0.0, "change": 0.0, "changePercent": 0.0, "reference": None, "open": None, "high": None, "low": None, "volumeText": None, "volumeAmount": None},
         }
         self.indices_dirty = False
         self.stock_positions_detail: list[dict[str, Any]] = []
@@ -233,19 +257,93 @@ class ShioajiAdapter:
             "returnPercent": 0.0,
         }
         self._mock_task: Optional[asyncio.Task] = None
+        self._odd_lots_scheduler_task: Optional[asyncio.Task] = None
+        self._morning_sync_scheduler_task: Optional[asyncio.Task] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._last_odd_fetch_date: Optional[str] = None
+        self._last_morning_sync_date: Optional[str] = None
+        self.stock_account: Any = None
+        self.ca_activated: bool = False
 
-    async def _fetch_and_apply_closing_odd_lots(self):
+    async def _fetch_and_apply_closing_odd_lots(self) -> bool:
         """非同步向 TWSE / TPEx 抓取最新盤後零股行情並更新進 quote_store"""
         try:
             loop = asyncio.get_running_loop()
-            odd_data = await loop.run_in_executor(None, fetch_closing_odd_lots)
+            odd_data, twse_date = await loop.run_in_executor(None, fetch_closing_odd_lots)
             if odd_data:
                 quote_store.update_odd_lot_batch(odd_data)
-                logger.info(f"Loaded {len(odd_data)} closing odd lot quotes into quote_store.")
+                logger.info(f"Loaded {len(odd_data)} closing odd lot quotes (TWSE date: {twse_date}) into quote_store.")
+                
+                tz_tw = timezone(timedelta(hours=8))
+                now_tw = datetime.now(tz_tw)
+                today_tw = now_tw.strftime("%Y%m%d")
+                if twse_date and twse_date == today_tw:
+                    self._last_odd_fetch_date = now_tw.strftime("%Y-%m-%d")
+                    logger.info(f"Successfully synchronized today's closing odd lots for {self._last_odd_fetch_date}.")
+                return True
         except Exception as e:
             logger.warning(f"Error updating closing odd lots: {e}")
+        return False
+
+    async def _odd_lots_scheduler_loop(self):
+        """盤後自動排程：營業日 13:35 後定期確保抓取今日最新盤後零股行情"""
+        logger.info("Odd lots scheduler loop started.")
+        while True:
+            try:
+                await asyncio.sleep(60.0)
+                tz_tw = timezone(timedelta(hours=8))
+                now_tw = datetime.now(tz_tw)
+                today_str = now_tw.strftime("%Y-%m-%d")
+
+                is_weekday = (now_tw.weekday() < 5)
+                is_after_market = (now_tw.hour * 60 + now_tw.minute >= 13 * 60 + 35)
+
+                if is_weekday and is_after_market and self._last_odd_fetch_date != today_str:
+                    logger.info(f"Triggering scheduled closing odd lots fetch for {today_str}...")
+                    await self._fetch_and_apply_closing_odd_lots()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"Error in odd lots scheduler loop: {e}")
+
+    def refresh_contracts_and_snapshots(self):
+        """重新向 Shioaji 刷新最新合約快取與今日 snapshot (適用於開盤前或跨日自動重載)"""
+        if not self.api or not self.is_logged_in:
+            return
+        try:
+            logger.info("Rebuilding contracts cache with latest market data...")
+            self._build_contracts_cache()
+            if self.subscribed_codes:
+                logger.info(f"Refreshing snapshots for {len(self.subscribed_codes)} subscribed codes...")
+                self._fetch_snapshots(list(self.subscribed_codes))
+            self._init_and_subscribe_indices()
+            logger.info("Contracts, snapshots, and indices refreshed successfully.")
+        except Exception as e:
+            logger.error(f"Failed to refresh contracts and snapshots: {e}", exc_info=True)
+
+    async def _morning_sync_scheduler_loop(self):
+        """營業日開盤前自動排程：08:35 ~ 08:50 自動更新今日合約、基準昨收與快照"""
+        logger.info("Morning sync scheduler loop started.")
+        while True:
+            try:
+                await asyncio.sleep(30.0)
+                tz_tw = timezone(timedelta(hours=8))
+                now_tw = datetime.now(tz_tw)
+                today_str = now_tw.strftime("%Y-%m-%d")
+
+                is_weekday = (now_tw.weekday() < 5)
+                current_minutes = now_tw.hour * 60 + now_tw.minute
+                is_morning_window = (8 * 60 + 30 <= current_minutes <= 8 * 60 + 55)
+
+                if is_weekday and is_morning_window and self._last_morning_sync_date != today_str:
+                    logger.info(f"Triggering scheduled morning contracts & snapshots refresh for {today_str}...")
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, self.refresh_contracts_and_snapshots)
+                    self._last_morning_sync_date = today_str
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"Error in morning sync scheduler loop: {e}")
 
     def start(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
@@ -258,12 +356,45 @@ class ShioajiAdapter:
                 accounts = self.api.login(
                     api_key=settings.SJ_API_KEY,
                     secret_key=settings.SJ_SECRET_KEY,
-                    subscribe_trade=False
+                    subscribe_trade=True
                 )
                 self.is_logged_in = True
                 self.is_connected = True
                 logger.info(f"Shioaji login succeeded. Accounts: {len(accounts)}")
-                
+
+                # 鎖定台股證券帳號
+                stock_accounts = [
+                    acc for acc in accounts
+                    if getattr(acc, "account_type", None) == sj.AccountType.Stock
+                    or str(getattr(acc, "account_type", "")).lower() == "stock"
+                    or getattr(acc, "account_type", None) == "H"
+                ]
+                self.stock_account = stock_accounts[0] if stock_accounts else (accounts[0] if accounts else None)
+                if self.stock_account:
+                    logger.info(f"Locked stock trading account: {self.stock_account.broker_id}-{self.stock_account.account_id}")
+
+                # 啟用 CA 交易憑證
+                ca_path = settings.SJ_CA_PATH
+                if not ca_path or not os.path.exists(ca_path):
+                    candidates = [
+                        Path(__file__).resolve().parent.parent.parent.parent / "Sinopac.pfx",
+                        Path("/Users/jess/Desktop/Python/永豐下單/Sinopac.pfx"),
+                    ]
+                    for c in candidates:
+                        if c.exists():
+                            ca_path = str(c)
+                            break
+
+                ca_passwd = settings.SJ_CA_PASSWD
+                person_id = settings.SJ_PERSON_ID or ca_passwd
+                if ca_path and os.path.exists(ca_path) and ca_passwd:
+                    try:
+                        res = self.api.activate_ca(ca_path=ca_path, ca_passwd=ca_passwd, person_id=person_id)
+                        self.ca_activated = bool(res)
+                        logger.info(f"Shioaji CA activated successfully: {self.ca_activated} (path: {ca_path})")
+                    except Exception as e:
+                        logger.warning(f"Failed to activate Shioaji CA: {e}")
+
                 # 建立合約快取以供搜尋
                 self._build_contracts_cache()
                 
@@ -282,8 +413,12 @@ class ShioajiAdapter:
             self.is_connected = False
             self.is_logged_in = False
 
-        # 啟動非同步盤後零股補抓任務
+        # 啟動非同步盤後零股定時排程任務與初次補抓任務
+        self._odd_lots_scheduler_task = asyncio.create_task(self._odd_lots_scheduler_loop())
         asyncio.create_task(self._fetch_and_apply_closing_odd_lots())
+
+        # 啟動開盤前自動更新合約與快照排程
+        self._morning_sync_scheduler_task = asyncio.create_task(self._morning_sync_scheduler_loop())
 
         # 如果開啟非盤中模擬跳動或處於測試模式，啟動輔助跳動背景任務
         if settings.ENABLE_OFFHOURS_MOCK_TICKS:
@@ -337,6 +472,10 @@ class ShioajiAdapter:
             self._reconnecting = False
 
     def stop(self):
+        if self._odd_lots_scheduler_task:
+            self._odd_lots_scheduler_task.cancel()
+        if self._morning_sync_scheduler_task:
+            self._morning_sync_scheduler_task.cancel()
         if self._mock_task:
             self._mock_task.cancel()
         if self.api and self.is_logged_in:
@@ -383,6 +522,12 @@ class ShioajiAdapter:
                     }
                     count += 1
             logger.info(f"Contracts cache built with {count} symbols.")
+
+            # 若已有訂閱中的股票，同步校正其昨收基準價
+            for code in self.subscribed_codes:
+                info = self.contracts_cache.get(code)
+                if info and info.get("reference"):
+                    quote_store.update_quote(code=code, previous_close=info["reference"])
         except Exception as e:
             logger.error(f"Failed to build contracts cache: {e}", exc_info=True)
 
@@ -546,13 +691,46 @@ class ShioajiAdapter:
                 for s in snaps:
                     code = str(getattr(s, "code", ""))
                     close_p = safe_float(getattr(s, "close", None))
+                    ref_p = safe_float(getattr(s, "reference", None))
+                    open_p = safe_float(getattr(s, "open", None))
+                    high_p = safe_float(getattr(s, "high", None))
+                    low_p = safe_float(getattr(s, "low", None))
                     chg_p = safe_float(getattr(s, "change_price", None))
                     chg_pct = safe_float(getattr(s, "change_rate", None))
+
+                    idx_contract = tse_idx if code == "IX0001" else (otc_idx if code == "IX0043" else None)
+                    contract_ref = safe_float(getattr(idx_contract, "reference", None)) if idx_contract else None
+                    if (ref_p is None or ref_p <= 0) and contract_ref:
+                        ref_p = contract_ref
+                    if (ref_p is None or ref_p <= 0) and close_p is not None and chg_p is not None:
+                        ref_p = close_p - chg_p
+                    
+                    if ref_p is not None and ref_p > 0 and close_p is not None:
+                        chg_p = close_p - ref_p
+                        chg_pct = (chg_p / ref_p) * 100
+                    elif chg_p is not None and close_p is not None and chg_pct is None:
+                        ref = close_p - chg_p
+                        chg_pct = (chg_p / ref) * 100 if ref > 0 else 0.0
+
                     target_key = "TSE" if code == "IX0001" else ("OTC" if code == "IX0043" else None)
                     if target_key and close_p is not None:
                         self.market_indices[target_key]["price"] = round(close_p, 2)
                         self.market_indices[target_key]["change"] = round(chg_p or 0.0, 2)
                         self.market_indices[target_key]["changePercent"] = round(chg_pct or 0.0, 2)
+                        if ref_p and ref_p > 0:
+                            self.market_indices[target_key]["reference"] = round(ref_p, 2)
+                        if open_p and open_p > 0:
+                            self.market_indices[target_key]["open"] = round(open_p, 2)
+                        if high_p and high_p > 0:
+                            self.market_indices[target_key]["high"] = round(high_p, 2)
+                        if low_p and low_p > 0:
+                            self.market_indices[target_key]["low"] = round(low_p, 2)
+                        raw_amt = safe_float(getattr(s, "total_amount", None)) or safe_float(getattr(s, "amount", None))
+                        if raw_amt and raw_amt > 0:
+                            amt_val, amt_str = format_index_amount(raw_amt)
+                            if amt_str:
+                                self.market_indices[target_key]["volumeText"] = amt_str
+                                self.market_indices[target_key]["volumeAmount"] = amt_val
                 logger.info(f"Initialized market indices snapshots: {self.market_indices}")
 
             # 訂閱指數即時行情
@@ -572,21 +750,52 @@ class ShioajiAdapter:
             logger.error(f"Error in _init_and_subscribe_indices: {e}", exc_info=True)
 
     def _on_index_quote_callback(self, quote):
-        """大盤與櫃買指數即時回呼"""
+        """大盤與櫃買指數即時回呼 (Shioaji QuoteIdxV1: 提供 close, reference, open, high, low, amount_sum)"""
         try:
             code = getattr(quote, "code", None)
             close_p = safe_float(getattr(quote, "close", None))
+            ref_p = safe_float(getattr(quote, "reference", None))
+            open_p = safe_float(getattr(quote, "open", None))
+            high_p = safe_float(getattr(quote, "high", None))
+            low_p = safe_float(getattr(quote, "low", None))
             chg_p = safe_float(getattr(quote, "change_price", None))
             if chg_p is None:
                 chg_p = safe_float(getattr(quote, "change", None))
+
             target_key = "TSE" if code == "IX0001" else ("OTC" if code == "IX0043" else None)
             if target_key and close_p is not None:
                 self.market_indices[target_key]["price"] = round(close_p, 2)
-                if chg_p is not None:
+                if open_p and open_p > 0:
+                    self.market_indices[target_key]["open"] = round(open_p, 2)
+                if high_p and high_p > 0:
+                    self.market_indices[target_key]["high"] = round(high_p, 2)
+                if low_p and low_p > 0:
+                    self.market_indices[target_key]["low"] = round(low_p, 2)
+
+                # 優先使用 QuoteIdxV1 的 reference (昨收) 即時精確計算跌點與跌幅
+                stored_ref = self.market_indices[target_key].get("reference")
+                effective_ref = ref_p if (ref_p is not None and ref_p > 0) else stored_ref
+
+                if effective_ref is not None and effective_ref > 0:
+                    real_chg = close_p - effective_ref
+                    real_pct = (real_chg / effective_ref) * 100
+                    self.market_indices[target_key]["change"] = round(real_chg, 2)
+                    self.market_indices[target_key]["changePercent"] = round(real_pct, 2)
+                    self.market_indices[target_key]["reference"] = round(effective_ref, 2)
+                elif chg_p is not None:
                     self.market_indices[target_key]["change"] = round(chg_p, 2)
                     ref = close_p - chg_p
                     if ref > 0:
                         self.market_indices[target_key]["changePercent"] = round((chg_p / ref) * 100, 2)
+                        self.market_indices[target_key]["reference"] = round(ref, 2)
+
+                raw_amt = safe_float(getattr(quote, "amount_sum", None)) or safe_float(getattr(quote, "amount", None))
+                if raw_amt and raw_amt > 0:
+                    amt_val, amt_str = format_index_amount(raw_amt)
+                    if amt_str:
+                        self.market_indices[target_key]["volumeText"] = amt_str
+                        self.market_indices[target_key]["volumeAmount"] = amt_val
+
                 self.indices_dirty = True
         except Exception as e:
             logger.debug(f"Error parsing index quote callback: {e}")
@@ -629,6 +838,15 @@ class ShioajiAdapter:
             source_ts = dt.isoformat() if isinstance(dt, datetime) else None
             self.last_quote_time = source_ts or datetime.now(timezone.utc).isoformat()
 
+            # 取得即時漲跌與計算昨收參考價 (重要：動態自我校正過期昨收)
+            chg_price = safe_float(getattr(quote, "price_chg", None))
+            if chg_price is None:
+                chg_price = safe_float(getattr(quote, "diff_price", None))
+
+            ref_close = None
+            if last_price is not None and chg_price is not None:
+                ref_close = round(last_price - chg_price, 2)
+
             quote_store.update_quote(
                 code=code,
                 last=last_price,
@@ -638,6 +856,7 @@ class ShioajiAdapter:
                 high=high_price,
                 low=low_price,
                 total_volume=tot_vol,
+                previous_close=ref_close,
                 is_simulated=is_sim,
                 source_ts=source_ts,
                 data_status="live"
@@ -662,7 +881,7 @@ class ShioajiAdapter:
                 quote_store.update_quote(
                     code=code,
                     odd_lot_last=close_p,
-                    source_ts=source_ts
+                    odd_lot_source_ts=source_ts
                 )
         except Exception as e:
             logger.debug(f"Error parsing odd lot tick callback: {e}")
@@ -836,14 +1055,6 @@ class ShioajiAdapter:
         while True:
             try:
                 await asyncio.sleep(2.0)
-                # 盤後自動確保有最新零股行情 (每日盤後 13:35 後確認一次)
-                tz_tw = timezone(timedelta(hours=8))
-                now_tw = datetime.now(tz_tw)
-                today_str = now_tw.strftime("%Y-%m-%d")
-                if not is_taiwan_trading_or_trial_day_hours() and self._last_odd_fetch_date != today_str:
-                    self._last_odd_fetch_date = today_str
-                    asyncio.create_task(self._fetch_and_apply_closing_odd_lots())
-
                 # 營業日時段 (08:30~13:35) 絕對不進行任何模擬
                 if is_taiwan_trading_or_trial_day_hours():
                     continue
@@ -880,4 +1091,96 @@ class ShioajiAdapter:
             except Exception as e:
                 logger.debug(f"Error in mock loop: {e}")
 
+    def place_order(
+        self,
+        code: str,
+        action: str,
+        quantity: int,
+        unit: str = "lot",
+        price_type: str = "limit",
+        price: float = 0.0,
+    ) -> dict[str, Any]:
+        """送出委託單至永豐金證券"""
+        if not self.api or not self.is_logged_in:
+            raise RuntimeError("Shioaji 尚未連線或未登入")
+
+        code = code.strip().upper()
+        contract = None
+        if code in self.contracts_cache:
+            contract = self.contracts_cache[code].get("contract")
+
+        if not contract:
+            try:
+                if hasattr(self.api.Contracts, "Stocks"):
+                    contract = getattr(self.api.Contracts.Stocks, "TSE", {}).get(code) or getattr(self.api.Contracts.Stocks, "OTC", {}).get(code)
+            except Exception:
+                pass
+
+        if not contract:
+            try:
+                contract = self.api.Contracts.Stocks[code]
+            except Exception:
+                pass
+
+        if not contract:
+            raise ValueError(f"找不到商品代碼 {code} 之證券合約")
+
+        act = sj.Action.Buy if action.lower() == "buy" else sj.Action.Sell
+        is_odd = (unit.lower() == "share")
+        order_lot = sj.StockOrderLot.IntradayOdd if is_odd else sj.StockOrderLot.Common
+
+        is_mkt = (price_type.lower() == "market")
+        p_type = sj.StockPriceType.MKT if is_mkt else sj.StockPriceType.LMT
+        order_price = 0.0 if is_mkt else float(price)
+
+        account = getattr(self, "stock_account", None)
+        if not account and hasattr(self.api, "stock_account"):
+            account = self.api.stock_account
+
+        if not account:
+            raise RuntimeError("找不到可用的台股證券帳號！")
+
+        order = self.api.Order(
+            action=act,
+            price=order_price,
+            quantity=int(quantity),
+            price_type=p_type,
+            order_type=sj.OrderType.ROD,
+            order_lot=order_lot,
+            order_cond=sj.StockOrderCond.Cash,
+            account=account
+        )
+
+        logger.info(f"Submitting Shioaji order: code={code}, action={action}, qty={quantity}, unit={unit}, price={order_price}, price_type={price_type}")
+        trade = self.api.place_order(contract, order)
+
+        try:
+            self.api.update_status(account=account)
+        except Exception:
+            pass
+
+        status_code = getattr(trade.status, "status_code", "")
+        status_str = str(getattr(trade.status, "status", ""))
+        op_msg = getattr(trade.status, "msg", "")
+
+        if status_code and status_code != "00":
+            return {
+                "success": False,
+                "orderId": getattr(trade.order, "id", ""),
+                "status": status_str,
+                "statusCode": status_code,
+                "message": op_msg or f"交易所退單 (代碼 {status_code})：集保不足或委託條件不符"
+            }
+
+        unit_str = "張" if unit == "lot" else "股"
+        price_str = "市價" if is_mkt else f"${order_price}"
+        return {
+            "success": True,
+            "orderId": getattr(trade.order, "id", ""),
+            "status": status_str or "Submitted",
+            "statusCode": status_code or "00",
+            "message": f"委託成功送出！【{trade.order.action} {code}】{quantity}{unit_str} @ {price_str}"
+        }
+
 shioaji_adapter = ShioajiAdapter()
+

@@ -79,3 +79,50 @@ export async function fetchAnnouncements(): Promise<Record<string, StockAnnounce
   return res.json();
 }
 
+export async function fetchStockChart(code: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/v1/charts/${encodeURIComponent(code)}`);
+  if (!res.ok) throw new Error(`Chart data not found: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchStockIndicators(codes?: string[]): Promise<Record<string, any>> {
+  const q = codes && codes.length > 0 ? `?codes=${encodeURIComponent(codes.join(','))}` : '';
+  const res = await fetch(`${API_BASE}/api/v1/indicators${q}`);
+  if (!res.ok) throw new Error('Failed to fetch stock indicators');
+  return res.json();
+}
+
+export interface PlaceOrderParams {
+  code: string;
+  action: 'buy' | 'sell';
+  quantity: number;
+  unit: 'lot' | 'share';
+  price_type: 'limit' | 'market';
+  price: number;
+}
+
+export interface PlaceOrderResult {
+  success: boolean;
+  message: string;
+  orderId?: string;
+  status?: string;
+  statusCode?: string;
+  detail?: string;
+}
+
+export async function submitOrder(params: PlaceOrderParams): Promise<PlaceOrderResult> {
+  const res = await fetch(`${API_BASE}/api/v1/orders/place`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || '委託送出失敗');
+  }
+  return res.json();
+}
+
+
+
+

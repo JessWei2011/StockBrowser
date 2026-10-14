@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { StockPosition, QuoteState, WealthSummary } from '../types';
+import { submitOrder } from '../services/api';
 
 interface AssistantSidebarProps {
   isOpen: boolean;
@@ -69,6 +70,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   const [orderPrice, setOrderPrice] = useState<string>('');
   const [orderQty, setOrderQty] = useState<number>(1);
   const [orderNotice, setOrderNotice] = useState<string | null>(null);
+  const [orderNoticeType, setOrderNoticeType] = useState<'success' | 'error' | 'info'>('info');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // 當 initialOrderCode 變更時同步更新
   React.useEffect(() => {
@@ -140,12 +143,55 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     ? estimatedAmount + estimatedFee
     : Math.max(0, estimatedAmount - estimatedFee - estimatedTax);
 
-  const handleSubmitOrder = (e: React.FormEvent) => {
+  const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    setOrderNotice(`【委託雛形展示】已建立「${orderAction === 'buy' ? '買進' : '賣出'}」${stockCode} 價格: ${orderPrice || '市價'} 數量: ${orderQty} ${orderUnit === 'lot' ? '張' : '股'}，預估款項: ${estimatedTotal.toLocaleString()} 元。待後續下單 API 串接完成。`);
-    setTimeout(() => {
-      setOrderNotice(null);
-    }, 4500);
+    if (!stockCode.trim()) {
+      setOrderNoticeType('error');
+      setOrderNotice('請輸入或選擇股票代號');
+      return;
+    }
+    const targetPrice = orderType === 'market' ? 0 : (parseFloat(orderPrice) || 0);
+    if (orderType === 'limit' && targetPrice <= 0) {
+      setOrderNoticeType('error');
+      setOrderNotice('限價委託請輸入大於 0 的價格');
+      return;
+    }
+    if (orderQty <= 0) {
+      setOrderNoticeType('error');
+      setOrderNotice('委託數量必須大於 0');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setOrderNoticeType('info');
+    setOrderNotice(`正在送出【${orderAction === 'buy' ? '買進' : '賣出'}】委託至永豐金證券 (${stockCode} ${orderQty}${orderUnit === 'lot' ? '張' : '股'})...`);
+
+    try {
+      const res = await submitOrder({
+        code: stockCode.trim(),
+        action: orderAction,
+        quantity: orderQty,
+        unit: orderUnit,
+        price_type: orderType,
+        price: targetPrice,
+      });
+
+      if (res.success) {
+        setOrderNoticeType('success');
+        setOrderNotice(`✔ 委託已成功送出！單號: ${res.orderId || '已確認'} | ${res.message}`);
+      } else {
+        setOrderNoticeType('error');
+        setOrderNotice(`❌ 委託未成立: ${res.message || res.detail || '交易所退單'}`);
+      }
+    } catch (err: any) {
+      setOrderNoticeType('error');
+      setOrderNotice(`❌ 下單失敗: ${err.message || '連線或委託異常'}`);
+    } finally {
+      setIsSubmitting(false);
+      setTimeout(() => {
+        setOrderNotice(null);
+      }, 8000);
+    }
   };
 
   return (
@@ -271,11 +317,17 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
                     const pnlClass = pnl > 0 ? 'color-up' : pnl < 0 ? 'color-down' : 'color-neutral';
                     const roiClass = roi > 0 ? 'color-up' : roi < 0 ? 'color-down' : 'color-neutral';
+                    const isDimmed = Boolean(
+                      pos.code.startsWith('00') ||
+                      pos.code.includes('B') ||
+                      ['ETF', 'BOND'].includes((q?.securityType || '').toUpperCase()) ||
+                      pos.code === '6757'
+                    );
 
                     return (
                       <div
                         key={pos.code}
-                        className={`sidebar-stock-card flat-card ${isDirty ? 'card-flash' : ''}`}
+                        className={`sidebar-stock-card flat-card ${isDimmed ? 'card-dimmed' : ''} ${isDirty ? 'card-flash' : ''}`}
                       >
                         <div className="flat-card-stock">
                           <span
@@ -324,7 +376,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
           /* ==================== 分頁二：財神筆 ==================== */
           <div className="sidebar-order-content">
             {orderNotice && (
-              <div className="sidebar-order-notice">
+              <div className={`sidebar-order-notice notice-${orderNoticeType}`}>
                 {orderNotice}
               </div>
             )}
@@ -616,11 +668,16 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
               {/* 7. 送出委託按鈕 */}
               <button
                 type="submit"
-                className={`btn-order-submit ${orderAction === 'buy' ? 'submit-buy' : 'submit-sell'}`}
+                disabled={isSubmitting}
+                className={`btn-order-submit ${orderAction === 'buy' ? 'submit-buy' : 'submit-sell'} ${isSubmitting ? 'submitting' : ''}`}
               >
-                {orderAction === 'buy'
-                  ? `🔴 確認買進【${stockCode || '---'}】(扣款 NT$ ${estimatedTotal.toLocaleString()})`
-                  : `🟢 確認賣出【${stockCode || '---'}】(入帳 NT$ ${estimatedTotal.toLocaleString()})`}
+                {isSubmitting ? (
+                  <span>⏳ 正在送出委託至券商...</span>
+                ) : (
+                  orderAction === 'buy'
+                    ? `🔴 確認買進【${stockCode || '---'}】(扣款 NT$ ${estimatedTotal.toLocaleString()})`
+                    : `🟢 確認賣出【${stockCode || '---'}】(入帳 NT$ ${estimatedTotal.toLocaleString()})`
+                )}
               </button>
             </form>
           </div>

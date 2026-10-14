@@ -9,6 +9,9 @@ load_dotenv(BASE_DIR / ".env")
 class Settings:
     SJ_API_KEY: str = os.getenv("SJ_API_KEY", "")
     SJ_SECRET_KEY: str = os.getenv("SJ_SECRET_KEY", "")
+    SJ_CA_PATH: str = os.getenv("SJ_CA_PATH", "")
+    SJ_CA_PASSWD: str = os.getenv("SJ_CA_PASSWD", "")
+    SJ_PERSON_ID: str = os.getenv("SJ_PERSON_ID", "")
     SJ_SIMULATION: bool = os.getenv("SJ_SIMULATION", "false").lower() in ("true", "1", "t")
     
     HOST: str = os.getenv("HOST", "0.0.0.0")

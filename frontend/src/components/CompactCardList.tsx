@@ -1,14 +1,16 @@
 import React from 'react';
-import type { QuoteState, WatchlistItem, StockAnnouncement } from '../types';
+import type { QuoteState, WatchlistItem, StockAnnouncement, StockMaSummary } from '../types';
 
 interface CompactCardListProps {
   items: WatchlistItem[];
   isWealthGroup?: boolean;
   quotes: Record<string, QuoteState>;
   announcements?: Record<string, StockAnnouncement[]>;
+  indicators?: Record<string, StockMaSummary>;
   dirtyCodes: Set<string>;
   onRemoveItem: (code: string) => Promise<void>;
   onMoveItem: (index: number, direction: 'up' | 'down') => Promise<void>;
+  onSelectStock?: (code: string) => void;
 }
 
 export const CompactCardList: React.FC<CompactCardListProps> = ({
@@ -16,8 +18,10 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
   isWealthGroup,
   quotes,
   announcements = {},
+  indicators = {},
   onRemoveItem,
   onMoveItem,
+  onSelectStock,
 }) => {
   const formatPrice = (val: number | null | undefined, isSim?: boolean): React.ReactNode => {
     if (val === null || val === undefined || isNaN(val) || val <= 0) return '—';
@@ -94,15 +98,28 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
         const dispPrefix = lvlStr ? `處置${lvlStr}` : '處置';
         const dispText = dispositionPeriod ? `${dispPrefix} ${dispositionPeriod}` : dispPrefix;
 
+        const isDimmed = Boolean(
+          isWealthGroup && (
+            item.code.startsWith('00') ||
+            ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase()) ||
+            item.code === '6757'
+          )
+        );
+
         return (
-          <div key={item.id} className="flat-stock-item">
+          <div key={item.id} className={`flat-stock-item ${isDimmed ? 'card-dimmed' : ''}`}>
             {/* 上半行：商品識別 (左) + 核心即時現價與漲跌 (右) */}
             <div className="flat-row-primary">
               <div className="flat-stock-id">
                 {(() => {
                   const isOtc = ((item.exchange || q?.exchange || '').toUpperCase() === 'OTC');
+                  const isEtfOrBond = item.code.startsWith('00') || ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase());
                   return (
-                    <>
+                    <span
+                      className={isEtfOrBond ? 'stock-plain' : 'stock-clickable'}
+                      onClick={!isEtfOrBond && onSelectStock ? () => onSelectStock(item.code) : undefined}
+                      title={!isEtfOrBond ? '點擊開啟個股動態技術走勢圖 (K線/均線/布林/籌碼/大戶)' : undefined}
+                    >
                       <span
                         className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
                         title={isOtc ? '上櫃股票' : '上市股票'}
@@ -111,7 +128,7 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
                       </span>
                       <span className={`flat-code ${isOtc ? 'code-otc' : 'code-tse'}`}>{item.code}</span>
                       <span className="flat-name">{item.name || q?.name || ''}</span>
-                    </>
+                    </span>
                   );
                 })()}
                 {(() => {
@@ -271,15 +288,56 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
                 >
                   ↓
                 </button>
-                <button
-                  className="btn-flat-action btn-flat-delete"
-                  disabled={isWealthGroup}
-                  onClick={() => !isWealthGroup && onRemoveItem(item.code)}
-                  title={isWealthGroup ? '『財神簿』由永豐 API 持股自動同步，無法手動刪除' : '刪除'}
-                  style={isWealthGroup ? { opacity: 0.25, cursor: 'not-allowed' } : undefined}
-                >
-                  ✕
-                </button>
+                {/* 均線標籤：個股顯示，ETF與債券不用 */}
+                {(() => {
+                  const isEtfOrBond = item.code.startsWith('00') || ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase());
+                  if (isEtfOrBond) return null;
+
+                  const ind = indicators[item.code];
+                  const currP = (q?.last && q.last > 0) ? q.last : ((prev && prev > 0) ? prev : null);
+
+                  const ma5 = ind?.ma5;
+                  const ma10 = ind?.ma10;
+                  const ma20 = ind?.ma20;
+
+                  const is5Up = (ma5 !== null && ma5 !== undefined && currP !== null) ? currP >= ma5 : null;
+                  const is10Up = (ma10 !== null && ma10 !== undefined && currP !== null) ? currP >= ma10 : null;
+                  const is20Up = (ma20 !== null && ma20 !== undefined && currP !== null) ? currP >= ma20 : null;
+
+                  return (
+                    <div className="ma-tag-group ma-tag-group-card">
+                      <span
+                        className={`ma-tag ${is5Up === true ? 'tag-up' : (is5Up === false ? 'tag-down' : 'tag-neutral')}`}
+                        title={ma5 !== null && ma5 !== undefined ? `5MA: ${ma5.toFixed(2)}${currP !== null ? ` (現價 ${currP.toFixed(2)} ${is5Up ? '衝破/站上' : '跌破'})` : ''}` : '5MA 資料計算中'}
+                      >
+                        5MA
+                      </span>
+                      <span
+                        className={`ma-tag ${is10Up === true ? 'tag-up' : (is10Up === false ? 'tag-down' : 'tag-neutral')}`}
+                        title={ma10 !== null && ma10 !== undefined ? `10MA: ${ma10.toFixed(2)}${currP !== null ? ` (現價 ${currP.toFixed(2)} ${is10Up ? '衝破/站上' : '跌破'})` : ''}` : '10MA 資料計算中'}
+                      >
+                        10MA
+                      </span>
+                      <span
+                        className={`ma-tag ${is20Up === true ? 'tag-up' : (is20Up === false ? 'tag-down' : 'tag-neutral')}`}
+                        title={ma20 !== null && ma20 !== undefined ? `20MA: ${ma20.toFixed(2)}${currP !== null ? ` (現價 ${currP.toFixed(2)} ${is20Up ? '衝破/站上' : '跌破'})` : ''}` : '20MA 資料計算中'}
+                      >
+                        20MA
+                      </span>
+                    </div>
+                  );
+                })()}
+
+                {/* 刪除按鈕 (非財神簿群組保留刪除鍵) */}
+                {!isWealthGroup && (
+                  <button
+                    className="btn-flat-action btn-flat-delete"
+                    onClick={() => onRemoveItem(item.code)}
+                    title="刪除"
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
             </div>
           </div>

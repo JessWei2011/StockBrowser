@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
-import type { QuoteState, WatchlistItem, StockAnnouncement } from '../types';
+import type { QuoteState, WatchlistItem, StockAnnouncement, StockMaSummary } from '../types';
 
 interface QuoteTableProps {
   items: WatchlistItem[];
   isWealthGroup?: boolean;
   quotes: Record<string, QuoteState>;
   announcements?: Record<string, StockAnnouncement[]>;
+  indicators?: Record<string, StockMaSummary>;
   dirtyCodes: Set<string>;
   onRemoveItem: (code: string) => Promise<void>;
   onMoveItem: (index: number, direction: 'up' | 'down') => Promise<void>;
   onReorderItems: (fromIndex: number, toIndex: number) => Promise<void>;
+  onSelectStock?: (code: string) => void;
 }
 
 export const QuoteTable: React.FC<QuoteTableProps> = ({
@@ -17,9 +19,11 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
   isWealthGroup,
   quotes,
   announcements = {},
+  indicators = {},
   onRemoveItem,
   onMoveItem,
   onReorderItems,
+  onSelectStock,
 }) => {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -96,7 +100,7 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
             <th>總量</th>
             <th>昨收</th>
             <th>開盤價</th>
-            <th className="th-action">刪除</th>
+            <th className="th-action">{isWealthGroup ? '均線' : '均線 / 刪除'}</th>
           </tr>
         </thead>
         <tbody>
@@ -148,10 +152,18 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
               const dispPrefix = lvlStr ? `處置${lvlStr}` : '處置';
               const dispText = dispositionPeriod ? `${dispPrefix} ${dispositionPeriod}` : dispPrefix;
 
+              const isDimmed = Boolean(
+                isWealthGroup && (
+                  item.code.startsWith('00') ||
+                  ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase()) ||
+                  item.code === '6757'
+                )
+              );
+
               return (
                 <tr
                   key={item.id}
-                  className={`quote-row ${isDragging ? 'row-dragging' : ''} ${
+                  className={`quote-row ${isDimmed ? 'row-dimmed' : ''} ${isDragging ? 'row-dragging' : ''} ${
                     isDropTarget ? 'row-drop-target' : ''
                   }`}
                   draggable
@@ -193,8 +205,13 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                   <td className="td-sticky-stock">
                     {(() => {
                       const isOtc = ((item.exchange || q?.exchange || '').toUpperCase() === 'OTC');
+                      const isEtfOrBond = item.code.startsWith('00') || ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase());
                       return (
-                        <>
+                        <span
+                          className={isEtfOrBond ? 'stock-plain' : 'stock-clickable'}
+                          onClick={!isEtfOrBond && onSelectStock ? () => onSelectStock(item.code) : undefined}
+                          title={!isEtfOrBond ? '點擊開啟個股動態技術走勢圖 (K線/均線/布林/籌碼/大戶)' : undefined}
+                        >
                           <span
                             className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
                             title={isOtc ? '上櫃股票' : '上市股票'}
@@ -203,7 +220,7 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                           </span>
                           <span className={`stock-code ${isOtc ? 'code-otc' : 'code-tse'}`}>{item.code}</span>
                           <span className="stock-name">{item.name || q?.name || ''}</span>
-                        </>
+                        </span>
                       );
                     })()}
                     {(() => {
@@ -331,17 +348,62 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                     {formatPrice(q?.open)}
                   </td>
 
-                  {/* 刪除 */}
+                  {/* 均線燈號與操作欄位 (個股顯示 5MA/10MA/20MA 燈號，ETF與債券不用；非財神簿保留刪除鍵) */}
                   <td className="td-action">
-                    <button
-                      className="btn-cell-delete"
-                      disabled={isWealthGroup}
-                      title={isWealthGroup ? '『財神簿』由永豐 API 持股自動同步，無法手動刪除' : '從此群組移除'}
-                      onClick={() => !isWealthGroup && onRemoveItem(item.code)}
-                      style={isWealthGroup ? { opacity: 0.25, cursor: 'not-allowed' } : undefined}
-                    >
-                      ✕
-                    </button>
+                    {(() => {
+                      const isEtfOrBond = item.code.startsWith('00') || ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase());
+                      const ind = indicators[item.code];
+                      const currP = (q?.last && q.last > 0) ? q.last : ((prev && prev > 0) ? prev : null);
+
+                      const ma5 = ind?.ma5;
+                      const ma10 = ind?.ma10;
+                      const ma20 = ind?.ma20;
+
+                      const is5Up = (ma5 !== null && ma5 !== undefined && currP !== null) ? currP >= ma5 : null;
+                      const is10Up = (ma10 !== null && ma10 !== undefined && currP !== null) ? currP >= ma10 : null;
+                      const is20Up = (ma20 !== null && ma20 !== undefined && currP !== null) ? currP >= ma20 : null;
+
+                      return (
+                        <div className="action-cell-content">
+                          {/* 均線標籤：個股顯示，ETF與債券不用 */}
+                          {!isEtfOrBond ? (
+                            <div className="ma-tag-group">
+                              <span
+                                className={`ma-tag ${is5Up === true ? 'tag-up' : (is5Up === false ? 'tag-down' : 'tag-neutral')}`}
+                                title={ma5 !== null && ma5 !== undefined ? `5MA: ${ma5.toFixed(2)}${currP !== null ? ` (現價 ${currP.toFixed(2)} ${is5Up ? '衝破/站上' : '跌破'})` : ''}` : '5MA 資料計算中'}
+                              >
+                                5MA
+                              </span>
+                              <span
+                                className={`ma-tag ${is10Up === true ? 'tag-up' : (is10Up === false ? 'tag-down' : 'tag-neutral')}`}
+                                title={ma10 !== null && ma10 !== undefined ? `10MA: ${ma10.toFixed(2)}${currP !== null ? ` (現價 ${currP.toFixed(2)} ${is10Up ? '衝破/站上' : '跌破'})` : ''}` : '10MA 資料計算中'}
+                              >
+                                10MA
+                              </span>
+                              <span
+                                className={`ma-tag ${is20Up === true ? 'tag-up' : (is20Up === false ? 'tag-down' : 'tag-neutral')}`}
+                                title={ma20 !== null && ma20 !== undefined ? `20MA: ${ma20.toFixed(2)}${currP !== null ? ` (現價 ${currP.toFixed(2)} ${is20Up ? '衝破/站上' : '跌破'})` : ''}` : '20MA 資料計算中'}
+                              >
+                                20MA
+                              </span>
+                            </div>
+                          ) : isWealthGroup ? (
+                            <span className="color-neutral ma-empty">—</span>
+                          ) : null}
+
+                          {/* 刪除鍵：財神簿外之群組保留刪除功能 */}
+                          {!isWealthGroup && (
+                            <button
+                              className="btn-cell-delete"
+                              title="從此群組移除"
+                              onClick={() => onRemoveItem(item.code)}
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                 </tr>
               );

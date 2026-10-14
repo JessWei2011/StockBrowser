@@ -20,6 +20,7 @@ class QuoteState(BaseModel):
     change: Optional[float] = None
     changePercent: Optional[float] = None
     sourceTs: Optional[str] = None
+    oddLotSourceTs: Optional[str] = None
     receivedAt: str = ""
     dataStatus: DataStatus = "initializing"
     revision: int = 0
@@ -34,6 +35,12 @@ class MarketIndexQuote(BaseModel):
     price: Optional[float] = None
     change: Optional[float] = None
     changePercent: Optional[float] = None
+    reference: Optional[float] = None
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    volumeText: Optional[str] = None
+    volumeAmount: Optional[float] = None
 
 class StockPositionItem(BaseModel):
     code: str
@@ -94,3 +101,12 @@ class StockAnnouncementItem(BaseModel):
     detail: Optional[str] = None
     category: str
     updatedAt: Optional[str] = None
+
+class PlaceOrderRequest(BaseModel):
+    code: str
+    action: str = "sell"
+    quantity: int = 1
+    unit: str = "lot"
+    price_type: str = "limit"
+    price: float = 0.0
+

@@ -21,6 +21,7 @@ export interface QuoteState {
   dispositionLevel?: number;
   dispositionPeriod?: string | null;
   sourceTs: string | null;
+  oddLotSourceTs?: string | null;
   receivedAt: string;
   dataStatus: DataStatus;
   revision: number;
@@ -69,6 +70,12 @@ export interface MarketIndexState {
   price: number;
   change: number;
   changePercent: number;
+  reference?: number | null;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  volumeText?: string | null;
+  volumeAmount?: number | null;
 }
 
 export interface StockPosition {
@@ -92,6 +99,16 @@ export interface StockAnnouncement {
   updatedAt?: string | null;
 }
 
+export interface StockMaSummary {
+  code: string;
+  name?: string;
+  ma5?: number | null;
+  ma10?: number | null;
+  ma20?: number | null;
+  lastClose?: number | null;
+  recentCloses?: number[];
+}
+
 export interface BootstrapResponse {
   groups: WatchlistGroup[];
   quotes: Record<string, QuoteState>;
@@ -99,6 +116,7 @@ export interface BootstrapResponse {
   positions?: StockPosition[];
   wealthSummary?: WealthSummary;
   marketIndices?: Record<string, MarketIndexState>;
+  indicators?: Record<string, StockMaSummary>;
   serverVersion: number;
   upstream: UpstreamStatus;
 }
@@ -141,3 +159,62 @@ export type WebSocketMessage =
       type: 'pong';
       ts: string;
     };
+
+export interface KlineBar {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  ma5?: number | null;
+  ma10?: number | null;
+  ma20?: number | null;
+  ma60?: number | null;
+  boll_up?: number | null;
+  boll_mid?: number | null;
+  boll_down?: number | null;
+  rsi?: number | null;
+  macd_hist?: number | null;
+  k?: number | null;
+  d?: number | null;
+}
+
+export interface InstitutionalFlowItem {
+  date: string;
+  foreign: number;
+  trust: number;
+  dealer: number;
+  total: number;
+}
+
+export interface MarginFlowItem {
+  date: string;
+  margin_balance: number;
+  margin_change: number;
+  short_balance: number;
+  short_change: number;
+}
+
+export interface HolderFlowItem {
+  date: string;
+  over400_pct: number;
+  over600_pct: number;
+  over800_pct: number;
+  over1000_pct: number;
+  retail_pct: number;
+  total_holders: number;
+}
+
+export interface StockChartData {
+  code: string;
+  name: string;
+  title: string;
+  lastUpdate: string;
+  kline: KlineBar[];
+  institutional: InstitutionalFlowItem[];
+  margin: MarginFlowItem[];
+  holders: HolderFlowItem[];
+  isAppendedToday: boolean;
+}
+

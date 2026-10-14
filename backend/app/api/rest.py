@@ -9,6 +9,7 @@ from backend.app.domain.models import (
     AddItemRequest,
     ReorderItemsRequest,
     InstrumentSearchResult,
+    PlaceOrderRequest,
 )
 
 router = APIRouter(prefix="/api/v1")
@@ -95,4 +96,63 @@ async def refresh_announcements():
     from backend.app.services.announcement_service import announcement_service
     res = await announcement_service.refresh_all_announcements(reason="manual_api")
     return {"status": "ok", "totalStocks": len(res)}
+
+@router.post("/system/refresh")
+async def refresh_system_quotes():
+    """手動重新校正合約快取與今日快照"""
+    shioaji_adapter.refresh_contracts_and_snapshots()
+    return {"status": "ok", "message": "Contracts, snapshots, and indices refreshed"}
+
+@router.get("/charts/{code}")
+async def get_stock_chart(code: str):
+    from backend.app.services.stock_chart_service import parse_stock_report
+    # 嘗試從即時記憶體快取中獲取當日即時報價
+    live_quote = None
+    try:
+        from backend.app.services.quote_store import quote_store
+        with quote_store._lock:
+            quote_obj = quote_store._quotes.get(code)
+            if quote_obj:
+                live_quote = {
+                    "open": quote_obj.open,
+                    "high": quote_obj.high,
+                    "low": quote_obj.low,
+                    "last": quote_obj.last,
+                    "totalVolume": quote_obj.totalVolume,
+                }
+    except Exception:
+        pass
+
+    chart_data = parse_stock_report(code, live_quote)
+    if not chart_data:
+        raise HTTPException(status_code=404, detail=f"Stock {code} report not found in StockCenter")
+    return chart_data
+
+@router.get("/indicators")
+async def get_stock_indicators(codes: str = Query("")):
+    from backend.app.services.stock_chart_service import get_multiple_stocks_ma_summary
+    code_list = [c.strip() for c in codes.split(",") if c.strip()]
+    if not code_list:
+        from backend.app.repositories.db import get_all_groups
+        groups = await get_all_groups()
+        code_list = list({it.code for g in groups for it in g.items})
+    return get_multiple_stocks_ma_summary(code_list)
+
+@router.post("/orders/place")
+async def place_order(body: PlaceOrderRequest):
+    try:
+        res = shioaji_adapter.place_order(
+            code=body.code,
+            action=body.action,
+            quantity=body.quantity,
+            unit=body.unit,
+            price_type=body.price_type,
+            price=body.price,
+        )
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+
 

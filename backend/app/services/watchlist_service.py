@@ -65,8 +65,11 @@ class WatchlistService:
 
     async def get_bootstrap_data(self) -> dict:
         from backend.app.services.announcement_service import announcement_service
+        from backend.app.services.stock_chart_service import get_multiple_stocks_ma_summary
         groups = await db.get_all_groups()
         server_ver, all_quotes = quote_store.get_all_quotes()
+        all_codes = list({it.code for g in groups for it in g.items})
+        indicators = get_multiple_stocks_ma_summary(all_codes)
         return {
             "groups": [g.model_dump() for g in groups],
             "quotes": {k: v.model_dump() for k, v in all_quotes.items()},
@@ -74,6 +77,7 @@ class WatchlistService:
             "wealthSummary": shioaji_adapter.get_live_wealth_summary(),
             "positions": shioaji_adapter.get_positions_detail(),
             "marketIndices": shioaji_adapter.market_indices,
+            "indicators": indicators,
             "serverVersion": server_ver,
             "upstream": {
                 "connected": shioaji_adapter.is_connected,
