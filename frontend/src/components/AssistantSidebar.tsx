@@ -74,6 +74,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   const [orderNotice, setOrderNotice] = useState<string | null>(null);
   const [orderNoticeType, setOrderNoticeType] = useState<'success' | 'error' | 'info'>('info');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // 下單前二次防護確認視窗狀態
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
 
   // 委託單列表狀態
   const [orders, setOrders] = useState<OrderItem[]>([]);
@@ -132,6 +134,17 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
       setOrderPrice(currentQuote.last.toFixed(2));
     }
   }, [stockCode, currentQuote]);
+
+  // 監聽 Esc 鍵快速關閉下單確認視窗
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isConfirmModalOpen && !isSubmitting) {
+        setIsConfirmModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isConfirmModalOpen, isSubmitting]);
 
   if (!isOpen) return null;
 
@@ -198,7 +211,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     ? estimatedAmount + estimatedFee
     : Math.max(0, estimatedAmount - estimatedFee - estimatedTax);
 
-  const handleSubmitOrder = async (e: React.FormEvent) => {
+  // 1. 表單提交：前置檢查通過後，彈出二次防護確認視窗
+  const handleSubmitOrder = (e: React.FormEvent) => {
     e.preventDefault();
     if (!stockCode.trim()) {
       setOrderNoticeType('error');
@@ -216,6 +230,15 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
       setOrderNotice('委託數量必須大於 0');
       return;
     }
+
+    // 通過前置驗證，彈出二次防護確認視窗
+    setIsConfirmModalOpen(true);
+  };
+
+  // 2. 於防護確認視窗按下確認後，實際送出委託
+  const handleExecuteOrder = async () => {
+    setIsConfirmModalOpen(false);
+    const targetPrice = orderType === 'market' ? 0 : (parseFloat(orderPrice) || 0);
 
     setIsSubmitting(true);
     setOrderNoticeType('info');
@@ -1365,6 +1388,105 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                       onClick={handleConfirmUpdateQty}
                     >
                       {isUpdatingQty ? '減量處理中...' : '確認減少數量'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 4. 下單前雙重防護確認視窗 (超大字眼買入/賣出警示) */}
+            {isConfirmModalOpen && (
+              <div className="order-modal-overlay" onClick={() => !isSubmitting && setIsConfirmModalOpen(false)}>
+                <div
+                  className={`order-modal-card order-confirm-modal ${orderAction === 'buy' ? 'modal-theme-buy' : 'modal-theme-sell'}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* 超大視覺焦點：買入 / 賣出 頂部橫幅 */}
+                  <div className={`order-confirm-hero hero-${orderAction}`}>
+                    <div className="hero-alert-badge">
+                      <span>⚠️ 下單安全防護確認</span>
+                    </div>
+                    <div className="hero-action-headline">
+                      {orderAction === 'buy' ? '買　入' : '賣　出'}
+                    </div>
+                    <div className="hero-action-sub">
+                      {orderAction === 'buy'
+                        ? '🔴 即將送出【買進】委託，成交後將自銀行交割戶扣款！'
+                        : '🟢 即將送出【賣出】委託，成交後將扣除稅費並匯入交割帳戶！'}
+                    </div>
+                  </div>
+
+                  <div className="modal-body confirm-modal-body">
+                    <div className="confirm-details-table">
+                      <div className="confirm-detail-row">
+                        <span className="detail-label">委託商品</span>
+                        <span className="detail-value stock-name-highlight">
+                          <strong>{stockCode}</strong> {currentQuote?.name || currentPosition?.name || ''}
+                        </span>
+                      </div>
+                      <div className="confirm-detail-row">
+                        <span className="detail-label">交易方向</span>
+                        <span className={`detail-value action-tag-badge tag-${orderAction}`}>
+                          {orderAction === 'buy' ? '🔴 買入 (BUY)' : '🟢 賣出 (SELL)'}
+                        </span>
+                      </div>
+                      <div className="confirm-detail-row">
+                        <span className="detail-label">交易單位</span>
+                        <span className="detail-value">
+                          {orderUnit === 'lot' ? '現股整股 (張)' : '盤中零股 (股)'}
+                        </span>
+                      </div>
+                      <div className="confirm-detail-row">
+                        <span className="detail-label">委託價格</span>
+                        <span className="detail-value price-highlight">
+                          {orderType === 'market' ? '市價' : `NT$ ${(parseFloat(orderPrice) || 0).toFixed(2)}`}
+                        </span>
+                      </div>
+                      <div className="confirm-detail-row">
+                        <span className="detail-label">委託數量</span>
+                        <span className="detail-value qty-highlight">
+                          <strong>{orderQty.toLocaleString()}</strong> {orderUnit === 'lot' ? '張 (1,000股)' : '股'}
+                        </span>
+                      </div>
+                      <div className="confirm-detail-row total-row">
+                        <span className="detail-label">
+                          預估{orderAction === 'buy' ? '交割扣款' : '交割入帳'}
+                        </span>
+                        <span className={`detail-value total-highlight ${orderAction === 'buy' ? 'color-up' : 'color-down'}`}>
+                          NT$ {estimatedTotal.toLocaleString()} 元
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className={`confirm-attention-box alert-${orderAction}`}>
+                      <strong>注意：</strong>
+                      請確認委託方向為【<span className={`bold-action ${orderAction}`}>{orderAction === 'buy' ? '買入' : '賣出'}</span>】，避免操作錯誤。
+                    </div>
+                  </div>
+
+                  <div className="modal-footer confirm-modal-footer">
+                    <button
+                      type="button"
+                      className="btn-modal-cancel"
+                      disabled={isSubmitting}
+                      onClick={() => setIsConfirmModalOpen(false)}
+                    >
+                      取消 (回上一步)
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn-modal-confirm ${orderAction === 'buy' ? 'btn-confirm-buy' : 'btn-confirm-sell'}`}
+                      disabled={isSubmitting}
+                      onClick={handleExecuteOrder}
+                      autoFocus
+                    >
+                      {isSubmitting ? (
+                        '⏳ 委託送出中...'
+                      ) : (
+                        orderAction === 'buy'
+                          ? `🔴 確認【買入】${stockCode}`
+                          : `🟢 確認【賣出】${stockCode}`
+                      )}
                     </button>
                   </div>
                 </div>

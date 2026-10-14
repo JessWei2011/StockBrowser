@@ -3672,3 +3672,244 @@ body {
   min-height: 180px;
 }
 
+/* ==================== 財神筆：下單前二次防護確認視窗 (Super Prominent) ==================== */
+.order-confirm-modal {
+  max-width: 480px;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+}
+
+.order-confirm-modal.modal-theme-buy {
+  border-color: #ef4444;
+  box-shadow: 0 20px 50px rgba(239, 68, 68, 0.35);
+}
+
+.order-confirm-modal.modal-theme-sell {
+  border-color: #10b981;
+  box-shadow: 0 20px 50px rgba(16, 185, 129, 0.35);
+}
+
+.order-confirm-hero {
+  padding: 26px 20px 20px;
+  text-align: center;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.order-confirm-hero.hero-buy {
+  background: linear-gradient(135deg, #991b1b 0%, #dc2626 50%, #ef4444 100%);
+  color: #ffffff;
+}
+
+.order-confirm-hero.hero-sell {
+  background: linear-gradient(135deg, #064e3b 0%, #059669 50%, #10b981 100%);
+  color: #ffffff;
+}
+
+.hero-alert-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  padding: 4px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(4px);
+  margin-bottom: 10px;
+}
+
+.hero-action-headline {
+  font-size: 48px;
+  font-weight: 900;
+  letter-spacing: 12px;
+  line-height: 1.1;
+  margin: 6px 0 10px;
+  text-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  transform: scale(1.08);
+}
+
+.hero-action-sub {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.95;
+  line-height: 1.45;
+  max-width: 400px;
+}
+
+.confirm-modal-body {
+  padding: 20px 24px 14px;
+}
+
+.confirm-details-table {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.confirm-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 13.5px;
+}
+
+.confirm-detail-row:last-child {
+  border-bottom: none;
+}
+
+.confirm-detail-row .detail-label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.confirm-detail-row .detail-value {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.confirm-detail-row .stock-name-highlight {
+  font-size: 15px;
+  color: var(--text-main);
+}
+
+.confirm-detail-row .action-tag-badge {
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.confirm-detail-row .action-tag-badge.tag-buy {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.confirm-detail-row .action-tag-badge.tag-sell {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.confirm-detail-row .price-highlight {
+  font-family: var(--font-mono);
+  font-size: 14.5px;
+  font-weight: 700;
+}
+
+.confirm-detail-row .qty-highlight {
+  font-size: 14.5px;
+}
+
+.confirm-detail-row.total-row {
+  background: var(--bg-hover);
+  padding: 13px 16px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.confirm-detail-row.total-row .detail-label {
+  font-weight: 700;
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.confirm-detail-row.total-row .total-highlight {
+  font-size: 18px;
+  font-weight: 900;
+  font-family: var(--font-mono);
+}
+
+.confirm-attention-box {
+  padding: 11px 16px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.confirm-attention-box.alert-buy {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: var(--text-main);
+}
+
+.confirm-attention-box.alert-sell {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: var(--text-main);
+}
+
+.confirm-attention-box .bold-action.buy {
+  color: #ef4444;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.confirm-attention-box .bold-action.sell {
+  color: #10b981;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.confirm-modal-footer {
+  padding: 14px 24px 22px;
+  display: flex;
+  gap: 14px;
+}
+
+.confirm-modal-footer .btn-modal-cancel {
+  flex: 1;
+  padding: 13px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.confirm-modal-footer .btn-confirm-buy {
+  flex: 2;
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 800;
+  padding: 13px;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
+  transition: all 0.15s;
+}
+
+.confirm-modal-footer .btn-confirm-buy:hover {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+
+.confirm-modal-footer .btn-confirm-sell {
+  flex: 2;
+  background: linear-gradient(135deg, #059669, #10b981);
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 800;
+  padding: 13px;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.4);
+  transition: all 0.15s;
+}
+
+.confirm-modal-footer .btn-confirm-sell:hover {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+
+
