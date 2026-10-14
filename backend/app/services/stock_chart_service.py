@@ -248,7 +248,12 @@ def backfill_missing_kline_bars(code: str, kline_bars: list[KlineBar]) -> list[K
 
     return kline_bars
 
-def parse_stock_report(code: str, live_quote: Optional[dict] = None) -> Optional[StockAnalysisChartData]:
+def parse_stock_report(
+    code: str,
+    live_quote: Optional[dict] = None,
+    auto_generate: bool = True,
+    backfill: bool = True
+) -> Optional[StockAnalysisChartData]:
     """解析 StockCenter 既有的 HTML 分析報告，若過期或無報告則連動 StockCenter 現場生成並持久化存檔"""
     if is_etf_or_bond(code):
         logger.info(f"Stock {code} is ETF or Bond, skipping chart report.")
@@ -257,7 +262,7 @@ def parse_stock_report(code: str, live_quote: Optional[dict] = None) -> Optional
     filepath = find_stock_report_path(code)
     is_stale = is_report_stale(filepath) if (filepath and os.path.exists(filepath)) else True
 
-    if not filepath or not os.path.exists(filepath) or is_stale:
+    if auto_generate and (not filepath or not os.path.exists(filepath) or is_stale):
         now_ts = time.time()
         last_attempt = _last_generation_attempt.get(code, 0)
         # 5 分鐘冷卻防連環重複呼叫
@@ -335,7 +340,8 @@ def parse_stock_report(code: str, live_quote: Optional[dict] = None) -> Optional
             break
 
     # 執行缺日補齊與均線/布林指標全面計算
-    backfill_missing_kline_bars(code, kline_bars)
+    if backfill:
+        backfill_missing_kline_bars(code, kline_bars)
     recalculate_indicators(kline_bars)
 
     # 3. 解析三大法人 (近 20 日)
@@ -472,7 +478,7 @@ def get_stock_ma_summary(code: str) -> Optional[dict]:
         if now_ts - cached_ts < 60:
             return cached_val
 
-    chart_data = parse_stock_report(code)
+    chart_data = parse_stock_report(code, auto_generate=False, backfill=False)
     if not chart_data or not chart_data.kline:
         return None
 
