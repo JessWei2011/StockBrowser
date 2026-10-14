@@ -1100,6 +1100,7 @@ class ShioajiAdapter:
         unit: str = "lot",
         price_type: str = "limit",
         price: float = 0.0,
+        order_lot: Optional[str] = None,
     ) -> dict[str, Any]:
         """送出委託單至永豐金證券"""
         if not self.api or not self.is_logged_in:
@@ -1127,12 +1128,43 @@ class ShioajiAdapter:
             raise ValueError(f"找不到商品代碼 {code} 之證券合約")
 
         act = sj.Action.Buy if action.lower() == "buy" else sj.Action.Sell
-        is_odd = (unit.lower() == "share")
-        order_lot = sj.StockOrderLot.IntradayOdd if is_odd else sj.StockOrderLot.Common
 
-        is_mkt = (price_type.lower() == "market")
-        p_type = sj.StockPriceType.MKT if is_mkt else sj.StockPriceType.LMT
-        order_price = 0.0 if is_mkt else float(price)
+        # 決定委託類別 (StockOrderLot)
+        # 支援: Common(盤中整股), IntradayOdd(盤中零股), Fixing(盤後定價), Odd(盤後零股)
+        if order_lot:
+            lot_lower = str(order_lot).lower()
+            if "fixing" in lot_lower:
+                chosen_lot = sj.StockOrderLot.Fixing
+            elif "intraday" in lot_lower:
+                chosen_lot = sj.StockOrderLot.IntradayOdd
+            elif "odd" in lot_lower:
+                chosen_lot = sj.StockOrderLot.Odd
+            else:
+                chosen_lot = sj.StockOrderLot.Common
+        else:
+            unit_lower = unit.lower()
+            if unit_lower == "fixing":
+                chosen_lot = sj.StockOrderLot.Fixing
+            elif unit_lower == "odd":
+                chosen_lot = sj.StockOrderLot.Odd
+            elif unit_lower == "share":
+                chosen_lot = sj.StockOrderLot.IntradayOdd
+            else:
+                chosen_lot = sj.StockOrderLot.Common
+
+        # 若為盤後定價 (Fixing)，價格依交易所法規必須以今日收盤價申報
+        if chosen_lot == sj.StockOrderLot.Fixing:
+            p_type = sj.StockPriceType.LMT
+            if float(price) <= 0:
+                quote = getattr(self, "quotes_cache", {}).get(code, {})
+                ref_price = quote.get("close") or quote.get("last") or quote.get("previousClose") or 0.0
+                order_price = float(ref_price)
+            else:
+                order_price = float(price)
+        else:
+            is_mkt = (price_type.lower() == "market")
+            p_type = sj.StockPriceType.MKT if is_mkt else sj.StockPriceType.LMT
+            order_price = 0.0 if is_mkt else float(price)
 
         account = getattr(self, "stock_account", None)
         if not account and hasattr(self.api, "stock_account"):
@@ -1147,12 +1179,12 @@ class ShioajiAdapter:
             quantity=int(quantity),
             price_type=p_type,
             order_type=sj.OrderType.ROD,
-            order_lot=order_lot,
+            order_lot=chosen_lot,
             order_cond=sj.StockOrderCond.Cash,
             account=account
         )
 
-        logger.info(f"Submitting Shioaji order: code={code}, action={action}, qty={quantity}, unit={unit}, price={order_price}, price_type={price_type}")
+        logger.info(f"Submitting Shioaji order: code={code}, action={action}, qty={quantity}, unit={unit}, order_lot={chosen_lot}, price={order_price}, price_type={p_type}")
         trade = self.api.place_order(contract, order)
 
         try:

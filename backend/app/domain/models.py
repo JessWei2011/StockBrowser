@@ -109,6 +109,7 @@ class PlaceOrderRequest(BaseModel):
     unit: str = "lot"
     price_type: str = "limit"
     price: float = 0.0
+    order_lot: Optional[str] = None  # Common, IntradayOdd, Fixing, Odd
 
 class OrderItem(BaseModel):
     id: str

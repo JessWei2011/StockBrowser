@@ -99,6 +99,7 @@ export interface PlaceOrderParams {
   unit: 'lot' | 'share';
   price_type: 'limit' | 'market';
   price: number;
+  order_lot?: 'Common' | 'IntradayOdd' | 'Fixing' | 'Odd';
 }
 
 export interface PlaceOrderResult {

@@ -68,7 +68,14 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 }) => {
   // 下單頁面 (財神筆) 狀態
   const [orderAction, setOrderAction] = useState<'buy' | 'sell'>('buy');
+  // 交易時段：'normal' 盤中交易 (09:00~13:30) 或 'after_hours' 盤後交易 (13:40~14:30)
+  const [orderSession, setOrderSession] = useState<'normal' | 'after_hours'>(() => {
+    const now = new Date();
+    const minutes = now.getHours() * 60 + now.getMinutes();
+    return (minutes >= 13 * 60 + 35 && minutes <= 14 * 60 + 35) ? 'after_hours' : 'normal';
+  });
   const [orderUnit, setOrderUnit] = useState<'lot' | 'share'>('lot'); // lot: 整股(張), share: 零股(股)
+  const [afterHoursLot, setAfterHoursLot] = useState<'Fixing' | 'Odd'>('Fixing'); // 'Fixing' 盤後定價(張), 'Odd' 盤後零股(股)
   const [orderType, setOrderType] = useState<'limit' | 'market'>('limit');
   const [stockCode, setStockCode] = useState(initialOrderCode || (positions[0]?.code || '2330'));
   const [orderPrice, setOrderPrice] = useState<string>('');
@@ -130,13 +137,17 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     }
   }, [initialOrderCode]);
 
-  // 當選定個股時，若尚未輸入價格則帶入現價或昨收
+  // 當選定個股時，若尚未輸入價格則帶入現價或昨收；若為盤後定價則鎖定為收盤價
   const currentQuote = quotes[stockCode];
+  const closingPriceVal = currentQuote?.last || currentQuote?.previousClose || 0;
+
   useEffect(() => {
-    if (currentQuote && currentQuote.last && currentQuote.last > 0 && !orderPrice) {
+    if (orderSession === 'after_hours' && afterHoursLot === 'Fixing' && closingPriceVal > 0) {
+      setOrderPrice(closingPriceVal.toFixed(2));
+    } else if (currentQuote && currentQuote.last && currentQuote.last > 0 && !orderPrice) {
       setOrderPrice(currentQuote.last.toFixed(2));
     }
-  }, [stockCode, currentQuote]);
+  }, [stockCode, currentQuote, orderSession, afterHoursLot, closingPriceVal]);
 
   // 監聽 Esc 鍵快速關閉下單確認視窗
   useEffect(() => {
@@ -202,9 +213,24 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   // 查詢當前輸入代號之庫存資訊
   const currentPosition = positions.find((p) => p.code === stockCode);
 
+  // 依交易時段與規格決定有效單位、委託別與價格
+  const effectiveUnit: 'lot' | 'share' = orderSession === 'after_hours'
+    ? (afterHoursLot === 'Fixing' ? 'lot' : 'share')
+    : orderUnit;
+
+  const effectiveOrderLot: 'Common' | 'IntradayOdd' | 'Fixing' | 'Odd' = orderSession === 'after_hours'
+    ? afterHoursLot
+    : (orderUnit === 'lot' ? 'Common' : 'IntradayOdd');
+
+  const effectivePriceType: 'limit' | 'market' = orderSession === 'after_hours' ? 'limit' : orderType;
+
+  const effectivePrice = (orderSession === 'after_hours' && afterHoursLot === 'Fixing')
+    ? (closingPriceVal > 0 ? closingPriceVal.toFixed(2) : orderPrice)
+    : orderPrice;
+
   // 試算金額 (含手續費 0.1425% 與賣出證交稅 0.3%/0.1%)
-  const numPrice = parseFloat(orderPrice) || (lastPrice && lastPrice > 0 ? lastPrice : 0);
-  const totalShares = orderUnit === 'lot' ? orderQty * 1000 : orderQty;
+  const numPrice = parseFloat(effectivePrice) || (lastPrice && lastPrice > 0 ? lastPrice : 0);
+  const totalShares = effectiveUnit === 'lot' ? orderQty * 1000 : orderQty;
   const estimatedAmount = Math.round(numPrice * totalShares);
   const estimatedFee = Math.max(20, Math.round(estimatedAmount * 0.001425));
   const isEtf = stockCode.startsWith('00');
@@ -226,10 +252,12 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
       setOrderNotice('請輸入或選擇股票代號');
       return;
     }
-    const targetPrice = orderType === 'market' ? 0 : (parseFloat(orderPrice) || 0);
-    if (orderType === 'limit' && targetPrice <= 0) {
+    const targetPrice = effectivePriceType === 'market' ? 0 : (parseFloat(effectivePrice) || 0);
+    if (effectivePriceType === 'limit' && targetPrice <= 0) {
       setOrderNoticeType('error');
-      setOrderNotice('限價委託請輸入大於 0 的價格');
+      setOrderNotice(orderSession === 'after_hours' && afterHoursLot === 'Fixing'
+        ? '尚未取得今日收盤價，請手動確認價格'
+        : '限價委託請輸入大於 0 的價格');
       return;
     }
     if (orderQty <= 0) {
@@ -250,20 +278,24 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
       return;
     }
     setIsConfirmModalOpen(false);
-    const targetPrice = orderType === 'market' ? 0 : (parseFloat(orderPrice) || 0);
+    const targetPrice = effectivePriceType === 'market' ? 0 : (parseFloat(effectivePrice) || 0);
 
     setIsSubmitting(true);
     setOrderNoticeType('info');
-    setOrderNotice(`正在送出【${orderAction === 'buy' ? '買進' : '賣出'}】委託至永豐金證券 (${stockCode} ${orderQty}${orderUnit === 'lot' ? '張' : '股'})...`);
+    const lotLabel = orderSession === 'after_hours'
+      ? (afterHoursLot === 'Fixing' ? '盤後定價' : '盤後零股')
+      : (orderUnit === 'lot' ? '整股' : '零股');
+    setOrderNotice(`正在送出【${orderAction === 'buy' ? '買進' : '賣出'}】${lotLabel}委託至永豐金證券 (${stockCode} ${orderQty}${effectiveUnit === 'lot' ? '張' : '股'})...`);
 
     try {
       const res = await submitOrder({
         code: stockCode.trim(),
         action: orderAction,
         quantity: orderQty,
-        unit: orderUnit,
-        price_type: orderType,
+        unit: effectiveUnit,
+        price_type: effectivePriceType,
         price: targetPrice,
+        order_lot: effectiveOrderLot,
       });
 
       if (res.success) {
@@ -695,56 +727,129 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                 <div className="section-header">
                   <div className="section-title-wrap">
                     <span className="section-badge badge-specs">規格</span>
-                    <span className="section-title">交易單位與委託種類</span>
+                    <span className="section-title">交易時段與委託規格</span>
                   </div>
                 </div>
-                <div className="specs-grid">
-                  <div className="specs-col">
-                    <span className="specs-label">單位</span>
-                    <div className="pill-toggle-group">
-                      <button
-                        type="button"
-                        className={`pill-toggle ${orderUnit === 'lot' ? 'active' : ''}`}
-                        onClick={() => setOrderUnit('lot')}
-                      >
-                        {orderUnit === 'lot' && <span className="pill-check-icon">✓</span>}
-                        <span>現股整股 (張)</span>
-                      </button>
-                      <button
-                        type="button"
-                        className={`pill-toggle ${orderUnit === 'share' ? 'active' : ''}`}
-                        onClick={() => setOrderUnit('share')}
-                      >
-                        {orderUnit === 'share' && <span className="pill-check-icon">✓</span>}
-                        <span>盤中零股 (股)</span>
-                      </button>
-                    </div>
-                  </div>
-                  <div className="specs-col">
-                    <span className="specs-label">條件</span>
-                    <div className="pill-toggle-group">
-                      <button
-                        type="button"
-                        className={`pill-toggle ${orderType === 'limit' ? 'active' : ''}`}
-                        onClick={() => setOrderType('limit')}
-                      >
-                        {orderType === 'limit' && <span className="pill-check-icon">✓</span>}
-                        <span>限價 (ROD)</span>
-                      </button>
-                      <button
-                        type="button"
-                        className={`pill-toggle ${orderType === 'market' ? 'active' : ''}`}
-                        onClick={() => {
-                          setOrderType('market');
-                          setOrderPrice('');
-                        }}
-                      >
-                        {orderType === 'market' && <span className="pill-check-icon">✓</span>}
-                        <span>市價</span>
-                      </button>
-                    </div>
+
+                {/* 交易時段選擇：盤中 vs 盤後 */}
+                <div className="specs-session-row">
+                  <span className="specs-label">交易時段</span>
+                  <div className="pill-toggle-group session-toggle-group">
+                    <button
+                      type="button"
+                      className={`pill-toggle ${orderSession === 'normal' ? 'active' : ''}`}
+                      onClick={() => setOrderSession('normal')}
+                    >
+                      {orderSession === 'normal' && <span className="pill-check-icon">✓</span>}
+                      <span>☀️ 盤中委託 (09:00~13:30)</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`pill-toggle ${orderSession === 'after_hours' ? 'active active-after-hours' : ''}`}
+                      onClick={() => {
+                        setOrderSession('after_hours');
+                        if (afterHoursLot === 'Fixing' && closingPriceVal > 0) {
+                          setOrderPrice(closingPriceVal.toFixed(2));
+                        }
+                      }}
+                    >
+                      {orderSession === 'after_hours' && <span className="pill-check-icon">✓</span>}
+                      <span>🌙 盤後交易 (13:40~14:30)</span>
+                    </button>
                   </div>
                 </div>
+
+                {orderSession === 'normal' ? (
+                  /* 盤中規格：單位 (整張/零股) + 條件 (限價/市價) */
+                  <div className="specs-grid">
+                    <div className="specs-col">
+                      <span className="specs-label">單位</span>
+                      <div className="pill-toggle-group">
+                        <button
+                          type="button"
+                          className={`pill-toggle ${orderUnit === 'lot' ? 'active' : ''}`}
+                          onClick={() => setOrderUnit('lot')}
+                        >
+                          {orderUnit === 'lot' && <span className="pill-check-icon">✓</span>}
+                          <span>現股整股 (張)</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`pill-toggle ${orderUnit === 'share' ? 'active' : ''}`}
+                          onClick={() => setOrderUnit('share')}
+                        >
+                          {orderUnit === 'share' && <span className="pill-check-icon">✓</span>}
+                          <span>盤中零股 (股)</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="specs-col">
+                      <span className="specs-label">條件</span>
+                      <div className="pill-toggle-group">
+                        <button
+                          type="button"
+                          className={`pill-toggle ${orderType === 'limit' ? 'active' : ''}`}
+                          onClick={() => setOrderType('limit')}
+                        >
+                          {orderType === 'limit' && <span className="pill-check-icon">✓</span>}
+                          <span>限價 (ROD)</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`pill-toggle ${orderType === 'market' ? 'active' : ''}`}
+                          onClick={() => {
+                            setOrderType('market');
+                            setOrderPrice('');
+                          }}
+                        >
+                          {orderType === 'market' && <span className="pill-check-icon">✓</span>}
+                          <span>市價</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* 盤後規格：盤後定價(張) vs 盤後零股(股) */
+                  <div className="specs-after-hours-box">
+                    <div className="specs-col">
+                      <span className="specs-label">盤後委託種類</span>
+                      <div className="pill-toggle-group">
+                        <button
+                          type="button"
+                          className={`pill-toggle ${afterHoursLot === 'Fixing' ? 'active active-after-hours' : ''}`}
+                          onClick={() => {
+                            setAfterHoursLot('Fixing');
+                            if (closingPriceVal > 0) {
+                              setOrderPrice(closingPriceVal.toFixed(2));
+                            }
+                          }}
+                        >
+                          {afterHoursLot === 'Fixing' && <span className="pill-check-icon">✓</span>}
+                          <span>📌 盤後定價 (張)</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`pill-toggle ${afterHoursLot === 'Odd' ? 'active active-after-hours' : ''}`}
+                          onClick={() => setAfterHoursLot('Odd')}
+                        >
+                          {afterHoursLot === 'Odd' && <span className="pill-check-icon">✓</span>}
+                          <span>🪙 盤後零股 (股)</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="specs-after-hours-tip">
+                      {afterHoursLot === 'Fixing' ? (
+                        <span>
+                          💡 <strong>盤後定價交易</strong>：於 14:00~14:30 申報，14:30 依今日收盤價（NT$ {closingPriceVal > 0 ? closingPriceVal.toFixed(2) : '--'}）定價撮合，單位為「整張 (1,000股)」。
+                        </span>
+                      ) : (
+                        <span>
+                          💡 <strong>盤後零股交易</strong>：於 13:40~14:30 申報，14:30 進行集合競價撮合，單位為「股 (1~999股)」，依限價申報。
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* 4. 委託價格區 (金黃/琥珀色調區塊) */}
@@ -752,20 +857,33 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                 <div className="section-header">
                   <div className="section-title-wrap">
                     <span className="section-badge badge-price">價格</span>
-                    <span className="section-title">委託價格 (NT$)</span>
+                    <span className="section-title">
+                      {orderSession === 'after_hours' && afterHoursLot === 'Fixing'
+                        ? '今日收盤定盤價 (NT$)'
+                        : '委託價格 (NT$)'}
+                    </span>
                   </div>
+                  {orderSession === 'after_hours' && afterHoursLot === 'Fixing' && (
+                    <span className="price-fixed-badge">🔒 今日收盤價撮合</span>
+                  )}
                 </div>
                 <div className="order-price-control">
                   <input
                     type="number"
                     step="0.05"
-                    className="form-input"
-                    placeholder={orderType === 'market' ? '市價委託' : '輸入價格'}
-                    disabled={orderType === 'market'}
-                    value={orderPrice}
+                    className={`form-input ${orderSession === 'after_hours' && afterHoursLot === 'Fixing' ? 'input-price-fixed' : ''}`}
+                    placeholder={
+                      orderSession === 'after_hours' && afterHoursLot === 'Fixing'
+                        ? `定盤價 NT$ ${closingPriceVal > 0 ? closingPriceVal.toFixed(2) : '--'}`
+                        : effectivePriceType === 'market'
+                        ? '市價委託'
+                        : '輸入價格'
+                    }
+                    disabled={effectivePriceType === 'market' || (orderSession === 'after_hours' && afterHoursLot === 'Fixing')}
+                    value={effectivePrice}
                     onChange={(e) => setOrderPrice(e.target.value)}
                   />
-                  {orderType === 'limit' && (
+                  {effectivePriceType === 'limit' && !(orderSession === 'after_hours' && afterHoursLot === 'Fixing') && (
                     <div className="price-steppers">
                       <button
                         type="button"
@@ -791,7 +909,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                   )}
                 </div>
                 {/* 價格快捷鍵 */}
-                {orderType === 'limit' && (
+                {effectivePriceType === 'limit' && !(orderSession === 'after_hours' && afterHoursLot === 'Fixing') && (
                   <div className="quick-chips-row">
                     {limitDown && (
                       <button
@@ -839,7 +957,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                   <div className="section-title-wrap">
                     <span className="section-badge badge-qty">數量</span>
                     <span className="section-title">
-                      委託數量 ({orderUnit === 'lot' ? '張 (1,000股)' : '股'})
+                      委託數量 ({effectiveUnit === 'lot' ? '張 (1,000股)' : '股'})
                     </span>
                   </div>
                   {currentPosition && (
@@ -847,15 +965,14 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                       type="button"
                       className="btn-fill-holding"
                       onClick={() => {
-                        if (currentPosition.quantity >= 1000 && currentPosition.quantity % 1000 === 0) {
-                          setOrderUnit('lot');
-                          setOrderQty(Math.floor(currentPosition.quantity / 1000));
+                        if (effectiveUnit === 'lot') {
+                          setOrderQty(Math.max(1, Math.floor(currentPosition.quantity / 1000)));
                         } else {
-                          setOrderUnit('share');
-                          setOrderQty(currentPosition.quantity);
+                          const oddPart = currentPosition.quantity % 1000;
+                          setOrderQty(oddPart > 0 ? oddPart : Math.round(currentPosition.quantity));
                         }
                       }}
-                      title="帶入庫存全數"
+                      title="帶入庫存數量"
                     >
                       帶入庫存全數 ({Math.round(currentPosition.quantity).toLocaleString()} 股)
                     </button>
@@ -890,7 +1007,9 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
               <div className={`order-calc-card ${orderAction === 'buy' ? 'calc-buy' : 'calc-sell'}`}>
                 <div className="calc-card-header">
                   <span className="calc-card-title">
-                    {orderAction === 'buy' ? '🔴 買進交割扣款試算' : '🟢 賣出交割入帳試算'}
+                    {orderSession === 'after_hours'
+                      ? (orderAction === 'buy' ? '🌙 盤後買進交割扣款試算' : '🌙 盤後賣出交割入帳試算')
+                      : (orderAction === 'buy' ? '🔴 買進交割扣款試算' : '🟢 賣出交割入帳試算')}
                   </span>
                   <span className="calc-note">
                     {orderAction === 'buy' ? '由銀行交割戶扣款' : '匯入銀行交割戶'}
@@ -928,8 +1047,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                   <span>⏳ 正在送出委託至券商...</span>
                 ) : (
                   orderAction === 'buy'
-                    ? `🔴 確認買進【${stockCode || '---'}】(扣款 NT$ ${estimatedTotal.toLocaleString()})`
-                    : `🟢 確認賣出【${stockCode || '---'}】(入帳 NT$ ${estimatedTotal.toLocaleString()})`
+                    ? `🔴 確認${orderSession === 'after_hours' ? '【盤後買進】' : '買進'}【${stockCode || '---'}】(扣款 NT$ ${estimatedTotal.toLocaleString()})`
+                    : `🟢 確認${orderSession === 'after_hours' ? '【盤後賣出】' : '賣出'}【${stockCode || '---'}】(入帳 NT$ ${estimatedTotal.toLocaleString()})`
                 )}
               </button>
                 </form>
@@ -1001,7 +1120,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     </div>
                   ) : (
                     filteredOrders.map((order) => {
-                      const isOdd = order.orderLot === 'IntradayOdd';
+                      const isOdd = order.orderLot === 'IntradayOdd' || order.orderLot === 'Odd';
                       const unitStr = isOdd ? '股' : '張';
                       const hasModifiedPrice = !!(order.modifiedPrice && order.modifiedPrice !== order.price);
 
@@ -1017,7 +1136,15 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                               </span>
                               <span className="order-stock-code">{order.code}</span>
                               <span className="order-stock-name">{order.name}</span>
-                              <span className="order-lot-tag">{isOdd ? '零股' : '整張'}</span>
+                              <span className={`order-lot-tag tag-lot-${order.orderLot.toLowerCase()}`}>
+                                {order.orderLot === 'Fixing'
+                                  ? '🌙 盤後定價'
+                                  : order.orderLot === 'Odd'
+                                  ? '🌙 盤後零股'
+                                  : order.orderLot === 'IntradayOdd'
+                                  ? '盤中零股'
+                                  : '現股整張'}
+                              </span>
                             </div>
                             <div className="order-status-badge">
                               <span className={`status-pill pill-${order.status.toLowerCase()}`}>
@@ -1068,14 +1195,16 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                           {/* 動作按鈕：僅在可撤單/委託中狀態顯示 */}
                           {order.canCancel && (
                             <div className="order-card-actions">
-                              <button
-                                type="button"
-                                className="btn-card-action btn-edit-price"
-                                onClick={() => handleStartEditPrice(order)}
-                                title="修改此筆委託價格"
-                              >
-                                ✏️ 改價
-                              </button>
+                              {order.orderLot !== 'Fixing' && (
+                                <button
+                                  type="button"
+                                  className="btn-card-action btn-edit-price"
+                                  onClick={() => handleStartEditPrice(order)}
+                                  title="修改此筆委託價格"
+                                >
+                                  ✏️ 改價
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 className="btn-card-action btn-edit-qty"
@@ -1424,14 +1553,24 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                   <div className={`order-confirm-hero hero-${orderAction}`}>
                     <div className="hero-alert-badge">
                       <span>
-                        {isHighValueBuy ? '🚨 大額交易安全強烈防護 (買入 ≥ 30萬)' : '⚠️ 下單安全防護確認'}
+                        {orderSession === 'after_hours'
+                          ? '🌙 盤後交易安全防護確認 (14:30 撮合)'
+                          : isHighValueBuy
+                          ? '🚨 大額交易安全強烈防護 (買入 ≥ 30萬)'
+                          : '⚠️ 下單安全防護確認'}
                       </span>
                     </div>
                     <div className="hero-action-headline">
-                      {orderAction === 'buy' ? '買　入' : '賣　出'}
+                      {orderSession === 'after_hours'
+                        ? (orderAction === 'buy' ? '盤後買入' : '盤後賣出')
+                        : (orderAction === 'buy' ? '買　入' : '賣　出')}
                     </div>
                     <div className="hero-action-sub">
-                      {orderAction === 'buy'
+                      {orderSession === 'after_hours'
+                        ? (afterHoursLot === 'Fixing'
+                            ? `🌙 本筆為【盤後定價委託】，將依今日收盤價 NT$ ${closingPriceVal.toFixed(2)} 於 14:30 定價撮合！`
+                            : '🌙 本筆為【盤後零股委託】，將於 14:30 集合競價一次性撮合！')
+                        : orderAction === 'buy'
                         ? (isHighValueBuy
                             ? '🚨 本筆買入委託金額高達 30 萬元以上！請審慎確認標的與金額無誤！'
                             : '🔴 即將送出【買進】委託，成交後將自銀行交割戶扣款！')
@@ -1454,21 +1593,27 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                         </span>
                       </div>
                       <div className="confirm-detail-row">
-                        <span className="detail-label">交易單位</span>
+                        <span className="detail-label">交易類別</span>
                         <span className="detail-value">
-                          {orderUnit === 'lot' ? '現股整股 (張)' : '盤中零股 (股)'}
+                          {orderSession === 'after_hours'
+                            ? (afterHoursLot === 'Fixing' ? '🌙 盤後定價 (張)' : '🌙 盤後零股 (股)')
+                            : (orderUnit === 'lot' ? '盤中整股 (張)' : '盤中零股 (股)')}
                         </span>
                       </div>
                       <div className="confirm-detail-row">
                         <span className="detail-label">委託價格</span>
                         <span className="detail-value price-highlight">
-                          {orderType === 'market' ? '市價' : `NT$ ${(parseFloat(orderPrice) || 0).toFixed(2)}`}
+                          {orderSession === 'after_hours' && afterHoursLot === 'Fixing'
+                            ? `今日收盤定價 NT$ ${closingPriceVal.toFixed(2)}`
+                            : effectivePriceType === 'market'
+                            ? '市價'
+                            : `NT$ ${(parseFloat(effectivePrice) || 0).toFixed(2)}`}
                         </span>
                       </div>
                       <div className="confirm-detail-row">
                         <span className="detail-label">委託數量</span>
                         <span className="detail-value qty-highlight">
-                          <strong>{orderQty.toLocaleString()}</strong> {orderUnit === 'lot' ? '張 (1,000股)' : '股'}
+                          <strong>{orderQty.toLocaleString()}</strong> {effectiveUnit === 'lot' ? '張 (1,000股)' : '股'}
                         </span>
                       </div>
                       <div className={`confirm-detail-row total-row ${isHighValueBuy ? 'total-row-high-value' : ''}`}>
@@ -1523,7 +1668,9 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     ) : (
                       <div className={`confirm-attention-box alert-${orderAction}`}>
                         <strong>注意：</strong>
-                        請確認委託方向為【<span className={`bold-action ${orderAction}`}>{orderAction === 'buy' ? '買入' : '賣出'}</span>】，避免操作錯誤。
+                        {orderSession === 'after_hours'
+                          ? `本筆為【盤後委託單】，將於 14:30 進行一次性撮合。請確認標的、方向與數量無誤。`
+                          : <>請確認委託方向為【<span className={`bold-action ${orderAction}`}>{orderAction === 'buy' ? '買入' : '賣出'}</span>】，避免操作錯誤。</>}
                       </div>
                     )}
                   </div>
@@ -1549,9 +1696,9 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                       ) : isHighValueBuy && !isPinCorrect ? (
                         '🔒 請輸入安全密碼解鎖'
                       ) : orderAction === 'buy' ? (
-                        `🔴 確認【買入】${stockCode}`
+                        `🔴 確認【${orderSession === 'after_hours' ? '盤後買入' : '買入'}】${stockCode}`
                       ) : (
-                        `🟢 確認【賣出】${stockCode}`
+                        `🟢 確認【${orderSession === 'after_hours' ? '盤後賣出' : '賣出'}】${stockCode}`
                       )}
                     </button>
                   </div>

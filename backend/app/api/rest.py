@@ -152,6 +152,7 @@ async def place_order(body: PlaceOrderRequest):
             unit=body.unit,
             price_type=body.price_type,
             price=body.price,
+            order_lot=body.order_lot,
         )
         return res
     except Exception as e:
