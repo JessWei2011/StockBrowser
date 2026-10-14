@@ -337,6 +337,11 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   };
 
   const handleStartEditPrice = (order: OrderItem) => {
+    if (order.orderLot === 'Fixing' || order.orderLot === 'Odd') {
+      setOrderNoticeType('error');
+      setOrderNotice('台股交易所規範：盤後交易（盤後定價與盤後零股）均不支援線上改價！若欲變更價格請先撤單後重新送單。');
+      return;
+    }
     setEditingPriceOrder(order);
     setNewPriceInput(order.price.toString());
   };
@@ -365,8 +370,15 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   };
 
   const handleStartEditQty = (order: OrderItem) => {
+    const isLot = order.orderLot === 'Common' || order.orderLot === 'Fixing';
+    const unitText = isLot ? '張' : '股';
+    if (order.qty <= 1) {
+      setOrderNoticeType('error');
+      setOrderNotice(`目前剩餘委託量僅 1 ${unitText}，依法規減量後不能為 0！已無法再減量，若欲全數取消請直接使用「🗑️ 撤單」。`);
+      return;
+    }
     setEditingQtyOrder(order);
-    setNewQtyInput(Math.max(1, order.qty - (order.orderLot === 'Common' ? 1 : 100)));
+    setNewQtyInput(Math.max(1, order.qty - (isLot ? 1 : 100)));
   };
 
   const handleConfirmUpdateQty = async () => {
@@ -1195,7 +1207,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                           {/* 動作按鈕：僅在可撤單/委託中狀態顯示 */}
                           {order.canCancel && (
                             <div className="order-card-actions">
-                              {order.orderLot !== 'Fixing' && (
+                              {/* 依交易所規定：盤後交易（定價與零股）均不可改價，僅盤中委託支援改價 */}
+                              {order.orderLot !== 'Fixing' && order.orderLot !== 'Odd' && (order.canUpdatePrice ?? true) && (
                                 <button
                                   type="button"
                                   className="btn-card-action btn-edit-price"
@@ -1205,14 +1218,17 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                                   ✏️ 改價
                                 </button>
                               )}
-                              <button
-                                type="button"
-                                className="btn-card-action btn-edit-qty"
-                                onClick={() => handleStartEditQty(order)}
-                                title="減少委託數量"
-                              >
-                                ✂️ 改量
-                              </button>
+                              {/* 依交易所規定：剩餘委託量大於 1 時才可減量，若剩餘委託量僅 1 則必須直接撤單 */}
+                              {order.qty > 1 && (order.canUpdateQty ?? true) && (
+                                <button
+                                  type="button"
+                                  className="btn-card-action btn-edit-qty"
+                                  onClick={() => handleStartEditQty(order)}
+                                  title="減少委託數量"
+                                >
+                                  ✂️ 改量
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 className="btn-card-action btn-cancel-order"
@@ -1262,13 +1278,19 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                       <div className="summary-row">
                         <span className="label">委託規格：</span>
                         <span className="val">
-                          {cancellingOrder.orderLot === 'Common' ? '整張' : '盤中零股'} @ NT$ {cancellingOrder.price.toFixed(2)}
+                          {cancellingOrder.orderLot === 'Fixing'
+                            ? '🌙 盤後定價'
+                            : cancellingOrder.orderLot === 'Odd'
+                            ? '🌙 盤後零股'
+                            : cancellingOrder.orderLot === 'IntradayOdd'
+                            ? '盤中零股'
+                            : '盤中整張'} @ NT$ {cancellingOrder.price.toFixed(2)}
                         </span>
                       </div>
                       <div className="summary-row">
                         <span className="label">剩餘委託量：</span>
                         <span className="val bold">
-                          {cancellingOrder.qty.toLocaleString()} {cancellingOrder.orderLot === 'Common' ? '張' : '股'}
+                          {cancellingOrder.qty.toLocaleString()} {cancellingOrder.orderLot === 'Common' || cancellingOrder.orderLot === 'Fixing' ? '張' : '股'}
                         </span>
                       </div>
                     </div>
@@ -1432,111 +1454,149 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                       ✕
                     </button>
                   </div>
-                  <div className="modal-body">
-                    <div className="modal-summary-box">
-                      <div className="summary-row">
-                        <span className="label">標的：</span>
-                        <span className="val bold">{editingQtyOrder.code} {editingQtyOrder.name}</span>
-                      </div>
-                      <div className="summary-row">
-                        <span className="label">目前委託量：</span>
-                        <span className="val bold">
-                          {editingQtyOrder.qty.toLocaleString()} {editingQtyOrder.orderLot === 'Common' ? '張' : '股'}
-                        </span>
-                      </div>
-                    </div>
+                  {(() => {
+                    const isLotOrder = editingQtyOrder.orderLot === 'Common' || editingQtyOrder.orderLot === 'Fixing';
+                    const unitStr = isLotOrder ? '張' : '股';
+                    const isSingleQty = editingQtyOrder.qty <= 1;
+                    const maxAllowedQty = Math.max(1, editingQtyOrder.qty - 1);
 
-                    <div className="modal-warning-box">
-                      ⚠️ 依交易所規範，委託單僅支援「減量」（減少剩餘委託量），無法增加數量。如需增量請另外新增委託單。
-                    </div>
+                    return (
+                      <>
+                        <div className="modal-body">
+                          <div className="modal-summary-box">
+                            <div className="summary-row">
+                              <span className="label">標的：</span>
+                              <span className="val bold">{editingQtyOrder.code} {editingQtyOrder.name}</span>
+                            </div>
+                            <div className="summary-row">
+                              <span className="label">目前委託量：</span>
+                              <span className="val bold">
+                                {editingQtyOrder.qty.toLocaleString()} {unitStr}
+                              </span>
+                            </div>
+                            <div className="summary-row">
+                              <span className="label">委託類別：</span>
+                              <span className="val">
+                                {editingQtyOrder.orderLot === 'Fixing'
+                                  ? '🌙 盤後定價'
+                                  : editingQtyOrder.orderLot === 'Odd'
+                                  ? '🌙 盤後零股'
+                                  : editingQtyOrder.orderLot === 'IntradayOdd'
+                                  ? '盤中零股'
+                                  : '盤中整張'}
+                              </span>
+                            </div>
+                          </div>
 
-                    <div className="modal-input-section">
-                      <label className="input-label">
-                        變更後的新委託數量 ({editingQtyOrder.orderLot === 'Common' ? '張' : '股'})
-                      </label>
-                      <div className="order-qty-control">
-                        <button
-                          type="button"
-                          className="btn-step"
-                          onClick={() => setNewQtyInput((q) => Math.max(1, q - 1))}
-                        >
-                          -
-                        </button>
-                        <input
-                          type="number"
-                          min="1"
-                          max={editingQtyOrder.qty - 1}
-                          className="form-input qty-input"
-                          value={newQtyInput}
-                          onChange={(e) => setNewQtyInput(Math.max(1, parseInt(e.target.value) || 1))}
-                        />
-                        <button
-                          type="button"
-                          className="btn-step"
-                          onClick={() => setNewQtyInput((q) => Math.min(editingQtyOrder.qty - 1, q + 1))}
-                        >
-                          +
-                        </button>
-                      </div>
+                          {isSingleQty ? (
+                            <div className="modal-warning-box">
+                              ⚠️ <strong>無法減量提示</strong>：目前剩餘委託量僅有 <strong>1 {unitStr}</strong>。依交易所規範減量後必須大於 0（不能減為 0）。若欲全數取消此筆委託，請關閉此視窗並直接點選「<strong>🗑️ 撤單</strong>」。
+                            </div>
+                          ) : (
+                            <div className="modal-warning-box">
+                              ⚠️ 依交易所規範，委託單僅支援「減量」（減少剩餘委託量），無法增加數量。如需增量請另外新增委託單。
+                            </div>
+                          )}
 
-                      <div className="quick-qty-chips modal-chips">
-                        {editingQtyOrder.orderLot === 'Common' ? (
-                          editingQtyOrder.qty > 2 && (
+                          {!isSingleQty && (
+                            <div className="modal-input-section">
+                              <label className="input-label">
+                                變更後的新委託數量 ({unitStr})
+                              </label>
+                              <div className="order-qty-control">
+                                <button
+                                  type="button"
+                                  className="btn-step"
+                                  onClick={() => setNewQtyInput((q) => Math.max(1, q - 1))}
+                                  disabled={newQtyInput <= 1}
+                                >
+                                  -
+                                </button>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max={maxAllowedQty}
+                                  className="form-input qty-input"
+                                  value={newQtyInput}
+                                  onChange={(e) => {
+                                    const val = parseInt(e.target.value) || 1;
+                                    setNewQtyInput(Math.max(1, Math.min(maxAllowedQty, val)));
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  className="btn-step"
+                                  onClick={() => setNewQtyInput((q) => Math.min(maxAllowedQty, q + 1))}
+                                  disabled={newQtyInput >= maxAllowedQty}
+                                >
+                                  +
+                                </button>
+                              </div>
+
+                              <div className="quick-qty-chips modal-chips">
+                                {isLotOrder ? (
+                                  editingQtyOrder.qty > 2 && (
+                                    <button
+                                      type="button"
+                                      className="chip-btn"
+                                      onClick={() => setNewQtyInput(Math.max(1, Math.floor(editingQtyOrder.qty / 2)))}
+                                    >
+                                      減半至 {Math.max(1, Math.floor(editingQtyOrder.qty / 2))} 張
+                                    </button>
+                                  )
+                                ) : (
+                                  <>
+                                    {editingQtyOrder.qty > 200 && (
+                                      <button
+                                        type="button"
+                                        className="chip-btn"
+                                        onClick={() => setNewQtyInput(Math.max(1, Math.floor(editingQtyOrder.qty / 2)))}
+                                      >
+                                        減半至 {Math.max(1, Math.floor(editingQtyOrder.qty / 2))} 股
+                                      </button>
+                                    )}
+                                    {editingQtyOrder.qty > 100 && (
+                                      <button
+                                        type="button"
+                                        className="chip-btn"
+                                        onClick={() => setNewQtyInput(Math.max(1, editingQtyOrder.qty - 100))}
+                                      >
+                                        減 100 股 (剩 {editingQtyOrder.qty - 100} 股)
+                                      </button>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+
+                              <div className="reduction-preview">
+                                本次將自市場減少委託：<strong>{(editingQtyOrder.qty - newQtyInput).toLocaleString()}</strong> {unitStr}（變更後剩餘 {newQtyInput.toLocaleString()} {unitStr}）
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <div className="modal-footer">
+                          <button
+                            type="button"
+                            className="btn-modal-cancel"
+                            disabled={isUpdatingQty}
+                            onClick={() => setEditingQtyOrder(null)}
+                          >
+                            取消
+                          </button>
+                          {!isSingleQty && (
                             <button
                               type="button"
-                              className="chip-btn"
-                              onClick={() => setNewQtyInput(Math.max(1, Math.floor(editingQtyOrder.qty / 2)))}
+                              className="btn-modal-confirm confirm-warning"
+                              disabled={isUpdatingQty || newQtyInput >= editingQtyOrder.qty || newQtyInput <= 0}
+                              onClick={handleConfirmUpdateQty}
                             >
-                              減半至 {Math.max(1, Math.floor(editingQtyOrder.qty / 2))} 張
+                              {isUpdatingQty ? '減量處理中...' : '確認減少數量'}
                             </button>
-                          )
-                        ) : (
-                          <>
-                            {editingQtyOrder.qty > 200 && (
-                              <button
-                                type="button"
-                                className="chip-btn"
-                                onClick={() => setNewQtyInput(Math.max(1, Math.floor(editingQtyOrder.qty / 2)))}
-                              >
-                                減半至 {Math.max(1, Math.floor(editingQtyOrder.qty / 2))} 股
-                              </button>
-                            )}
-                            {editingQtyOrder.qty > 100 && (
-                              <button
-                                type="button"
-                                className="chip-btn"
-                                onClick={() => setNewQtyInput(Math.max(1, editingQtyOrder.qty - 100))}
-                              >
-                                減 100 股 (剩 {editingQtyOrder.qty - 100} 股)
-                              </button>
-                            )}
-                          </>
-                        )}
-                      </div>
-
-                      <div className="reduction-preview">
-                        本次將自市場減少委託：<strong>{(editingQtyOrder.qty - newQtyInput).toLocaleString()}</strong> {editingQtyOrder.orderLot === 'Common' ? '張' : '股'}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="modal-footer">
-                    <button
-                      type="button"
-                      className="btn-modal-cancel"
-                      disabled={isUpdatingQty}
-                      onClick={() => setEditingQtyOrder(null)}
-                    >
-                      取消
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-modal-confirm confirm-warning"
-                      disabled={isUpdatingQty || newQtyInput >= editingQtyOrder.qty || newQtyInput <= 0}
-                      onClick={handleConfirmUpdateQty}
-                    >
-                      {isUpdatingQty ? '減量處理中...' : '確認減少數量'}
-                    </button>
-                  </div>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>,
               document.body

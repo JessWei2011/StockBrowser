@@ -1282,7 +1282,7 @@ class ShioajiAdapter:
                 display_price = mod_price if mod_price > 0 else orig_price
 
                 can_cancel = is_active and active_qty > 0
-                can_update_price = can_cancel and price_type_str == "LMT"
+                can_update_price = can_cancel and price_type_str == "LMT" and order_lot_str not in ("Fixing", "Odd")
                 can_update_qty = can_cancel and active_qty > 1
 
                 orders.append({
@@ -1378,6 +1378,8 @@ class ShioajiAdapter:
 
         # 1. 處理改量 (依交易所法規只能減少，不能增加)
         if new_qty is not None:
+            if current_active_qty <= 1:
+                raise ValueError(f"目前剩餘委託量僅為 {current_active_qty}，無法再減量！若欲取消請直接使用「撤單」。")
             if new_qty >= current_active_qty:
                 raise ValueError(f"改量依法規只能減少！目前剩餘數量為 {current_active_qty}，請輸入小於該值的數量。")
             if new_qty <= 0:
@@ -1387,12 +1389,14 @@ class ShioajiAdapter:
 
         # 2. 處理改價
         if new_price is not None:
+            if order_lot_str in ("Fixing", "Odd"):
+                raise ValueError("台股交易所規範：盤後交易（盤後定價與盤後零股）均不支援線上改價！若欲變更價格請先撤單後重新送單。")
             if new_price <= 0:
                 raise ValueError("委託價格必須大於 0")
             if "Common" in order_lot_str:
                 kwargs["price"] = float(new_price)
             else:
-                # 零股依法規不可直接改價，執行背景智慧撤單重下
+                # 盤中零股依法規不可直接改價，執行背景智慧撤單重下
                 self.api.cancel_order(trade=target_trade)
                 target_qty = new_qty if new_qty is not None else current_active_qty
                 contract = None
