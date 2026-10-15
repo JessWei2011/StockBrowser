@@ -259,9 +259,11 @@ class ShioajiAdapter:
         self._mock_task: Optional[asyncio.Task] = None
         self._odd_lots_scheduler_task: Optional[asyncio.Task] = None
         self._morning_sync_scheduler_task: Optional[asyncio.Task] = None
+        self._heartbeat_watchdog_task: Optional[asyncio.Task] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._last_odd_fetch_date: Optional[str] = None
         self._last_morning_sync_date: Optional[str] = None
+        self._last_reconnect_attempt_ts: float = 0.0
         self.stock_account: Any = None
         self.ca_activated: bool = False
         self._order_modified_prices: dict[str, float] = {}
@@ -323,7 +325,7 @@ class ShioajiAdapter:
             logger.error(f"Failed to refresh contracts and snapshots: {e}", exc_info=True)
 
     async def _morning_sync_scheduler_loop(self):
-        """營業日開盤前自動排程：08:35 ~ 08:50 自動更新今日合約、基準昨收與快照"""
+        """營業日開盤前自動排程：08:30 ~ 08:50 自動執行全新連線重建、登入、合約與快照更新"""
         logger.info("Morning sync scheduler loop started.")
         while True:
             try:
@@ -334,13 +336,18 @@ class ShioajiAdapter:
 
                 is_weekday = (now_tw.weekday() < 5)
                 current_minutes = now_tw.hour * 60 + now_tw.minute
+                # 營業日 08:30 開始執行開盤前重新登入連線與行情快照刷新
                 is_morning_window = (8 * 60 + 30 <= current_minutes <= 8 * 60 + 55)
 
                 if is_weekday and is_morning_window and self._last_morning_sync_date != today_str:
-                    logger.info(f"Triggering scheduled morning contracts & snapshots refresh for {today_str}...")
+                    logger.info(f"Triggering scheduled 08:30 morning reconnect & sync for {today_str}...")
+                    self._last_morning_sync_date = today_str
+                    # 1. 執行完整的重新登入與連線重建 (重設底層 Solace 報價連線)
+                    await self.reconnect()
+                    # 2. 刷新最新合約、基準昨收與當日最新 snapshot
                     loop = asyncio.get_running_loop()
                     await loop.run_in_executor(None, self.refresh_contracts_and_snapshots)
-                    self._last_morning_sync_date = today_str
+                    logger.info(f"Scheduled 08:30 morning reconnect & sync completed for {today_str}.")
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -375,26 +382,7 @@ class ShioajiAdapter:
                     logger.info(f"Locked stock trading account: {self.stock_account.broker_id}-{self.stock_account.account_id}")
 
                 # 啟用 CA 交易憑證
-                ca_path = settings.SJ_CA_PATH
-                if not ca_path or not os.path.exists(ca_path):
-                    candidates = [
-                        Path(__file__).resolve().parent.parent.parent.parent / "Sinopac.pfx",
-                        Path("/Users/jess/Desktop/Python/永豐下單/Sinopac.pfx"),
-                    ]
-                    for c in candidates:
-                        if c.exists():
-                            ca_path = str(c)
-                            break
-
-                ca_passwd = settings.SJ_CA_PASSWD
-                person_id = settings.SJ_PERSON_ID or ca_passwd
-                if ca_path and os.path.exists(ca_path) and ca_passwd:
-                    try:
-                        res = self.api.activate_ca(ca_path=ca_path, ca_passwd=ca_passwd, person_id=person_id)
-                        self.ca_activated = bool(res)
-                        logger.info(f"Shioaji CA activated successfully: {self.ca_activated} (path: {ca_path})")
-                    except Exception as e:
-                        logger.warning(f"Failed to activate Shioaji CA: {e}")
+                self._activate_ca_if_needed()
 
                 # 建立合約快取以供搜尋
                 self._build_contracts_cache()
@@ -421,9 +409,72 @@ class ShioajiAdapter:
         # 啟動開盤前自動更新合約與快照排程
         self._morning_sync_scheduler_task = asyncio.create_task(self._morning_sync_scheduler_loop())
 
+        # 啟動盤中心跳監控自癒任務 (若盤中超過 35 秒無行情則主動自動重連)
+        self._heartbeat_watchdog_task = asyncio.create_task(self._heartbeat_watchdog_loop())
+
         # 如果開啟非盤中模擬跳動或處於測試模式，啟動輔助跳動背景任務
         if settings.ENABLE_OFFHOURS_MOCK_TICKS:
             self._mock_task = asyncio.create_task(self._mock_ticks_loop())
+
+    async def _heartbeat_watchdog_loop(self):
+        """盤中即時行情心跳守護任務：若盤中超過 35 秒完全無報價跳動，自動觸發重連自癒"""
+        logger.info("Heartbeat watchdog loop started.")
+        while True:
+            try:
+                await asyncio.sleep(10.0)
+                # 只有在台股真正開盤時段 (09:00 ~ 13:30) 且有訂閱股票時才進行檢測
+                if is_taiwan_market_open() and self.subscribed_codes and self.is_logged_in:
+                    now_ts = time.time()
+                    # 避免重連間隔過密，至少間隔 60 秒
+                    if (now_ts - self._last_reconnect_attempt_ts) > 60.0:
+                        # 檢查最後一次收到報價的時間
+                        last_ts = 0.0
+                        if self.last_quote_time:
+                            try:
+                                dt = datetime.fromisoformat(self.last_quote_time)
+                                last_ts = dt.timestamp()
+                            except Exception:
+                                pass
+                        
+                        silence_duration = now_ts - last_ts
+                        if silence_duration > 35.0:
+                            logger.warning(
+                                f"Heartbeat watchdog detected market silence for {silence_duration:.1f}s during trading hours! "
+                                "Triggering auto-reconnect..."
+                            )
+                            self._last_reconnect_attempt_ts = now_ts
+                            await self.reconnect()
+                            loop = asyncio.get_running_loop()
+                            await loop.run_in_executor(None, self.refresh_contracts_and_snapshots)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"Error in heartbeat watchdog loop: {e}")
+
+    def _activate_ca_if_needed(self):
+        """啟用 CA 憑證 (登入或重新連線後使用)"""
+        if not self.api:
+            return
+        ca_path = settings.SJ_CA_PATH
+        if not ca_path or not os.path.exists(ca_path):
+            candidates = [
+                Path(__file__).resolve().parent.parent.parent.parent / "Sinopac.pfx",
+                Path("/Users/jess/Desktop/Python/永豐下單/Sinopac.pfx"),
+            ]
+            for c in candidates:
+                if c.exists():
+                    ca_path = str(c)
+                    break
+
+        ca_passwd = settings.SJ_CA_PASSWD
+        person_id = settings.SJ_PERSON_ID or ca_passwd
+        if ca_path and os.path.exists(ca_path) and ca_passwd:
+            try:
+                res = self.api.activate_ca(ca_path=ca_path, ca_passwd=ca_passwd, person_id=person_id)
+                self.ca_activated = bool(res)
+                logger.info(f"Shioaji CA activated successfully: {self.ca_activated} (path: {ca_path})")
+            except Exception as e:
+                logger.warning(f"Failed to activate Shioaji CA: {e}")
 
     def _on_session_down(self):
         logger.warning("Shioaji Solace session down event received! Scheduling reconnect...")
@@ -449,11 +500,23 @@ class ShioajiAdapter:
             accounts = self.api.login(
                 api_key=settings.SJ_API_KEY,
                 secret_key=settings.SJ_SECRET_KEY,
-                subscribe_trade=False
+                subscribe_trade=True
             )
             self.is_logged_in = True
             self.is_connected = True
             logger.info("Shioaji re-login succeeded.")
+
+            stock_accounts = [
+                acc for acc in accounts
+                if getattr(acc, "account_type", None) == sj.AccountType.Stock
+                or str(getattr(acc, "account_type", "")).lower() == "stock"
+                or getattr(acc, "account_type", None) == "H"
+            ]
+            self.stock_account = stock_accounts[0] if stock_accounts else (accounts[0] if accounts else None)
+            if self.stock_account:
+                logger.info(f"Locked stock trading account on reconnect: {self.stock_account.broker_id}-{self.stock_account.account_id}")
+
+            self._activate_ca_if_needed()
             
             self.api.set_on_quote_stk_v1_callback(self._on_quote_callback)
             self.api.set_on_quote_idx_v1_callback(self._on_index_quote_callback)
@@ -477,6 +540,8 @@ class ShioajiAdapter:
             self._odd_lots_scheduler_task.cancel()
         if self._morning_sync_scheduler_task:
             self._morning_sync_scheduler_task.cancel()
+        if self._heartbeat_watchdog_task:
+            self._heartbeat_watchdog_task.cancel()
         if self._mock_task:
             self._mock_task.cancel()
         if self.api and self.is_logged_in:

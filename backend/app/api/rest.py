@@ -100,10 +100,13 @@ async def refresh_announcements():
     return {"status": "ok", "totalStocks": len(res)}
 
 @router.post("/system/refresh")
-async def refresh_system_quotes():
-    """手動重新校正合約快取與今日快照"""
-    shioaji_adapter.refresh_contracts_and_snapshots()
-    return {"status": "ok", "message": "Contracts, snapshots, and indices refreshed"}
+async def refresh_system_quotes(force_reconnect: bool = False):
+    """手動重新校正合約快取與今日快照，若 force_reconnect=True 則強制重設 Shioaji 連線與重新登入"""
+    if force_reconnect:
+        await shioaji_adapter.reconnect()
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, shioaji_adapter.refresh_contracts_and_snapshots)
+    return {"status": "ok", "message": "Contracts, snapshots, and indices refreshed", "reconnected": force_reconnect}
 
 @router.get("/charts/{code}")
 async def get_stock_chart(code: str):

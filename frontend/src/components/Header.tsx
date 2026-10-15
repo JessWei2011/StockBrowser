@@ -9,9 +9,12 @@ interface HeaderProps {
   maxSubscribed: number;
   wsConnected: boolean;
   upstreamConnected: boolean;
+  isMarketOpen?: boolean;
+  lastQuoteTime?: string | null;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
   onRefresh: () => void;
+  onForceReconnect?: () => void;
   onAddStock: (code: string) => Promise<void>;
   onOpenCreateGroup: () => void;
   onOpenEditGroup: () => void;
@@ -24,9 +27,12 @@ export const Header: React.FC<HeaderProps> = ({
   maxSubscribed,
   wsConnected,
   upstreamConnected,
+  isMarketOpen,
+  lastQuoteTime,
   theme,
   onToggleTheme,
   onRefresh,
+  onForceReconnect,
   onAddStock,
   onOpenCreateGroup,
   onOpenEditGroup,
@@ -147,12 +153,48 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className="header-right">
-        <div className="status-badge" title={wsConnected ? 'WebSocket 已連線' : 'WebSocket 連線中...'}>
-          <span className={`status-dot ${wsConnected && upstreamConnected ? 'live' : 'warning'}`} />
-          <span className="status-text">
-            {wsConnected ? (upstreamConnected ? '即時同步' : '行情連線中') : '離線重連中'}
-          </span>
-        </div>
+        {(() => {
+          // 盤中行情新鮮度檢測 (若開盤中且最後報價超過 20 秒未更新，視為行情斷線/停滯)
+          const nowTs = Date.now();
+          const lastTs = lastQuoteTime ? new Date(lastQuoteTime).getTime() : 0;
+          const isStale = isMarketOpen && (!lastQuoteTime || (nowTs - lastTs > 20000));
+          const isOffline = !wsConnected || !upstreamConnected;
+
+          let badgeClass = 'live';
+          let statusText = '即時同步';
+          let badgeTitle = '報價正常跳動中';
+
+          if (isOffline) {
+            badgeClass = 'danger';
+            statusText = wsConnected ? '行情斷線 (點擊重置)' : '伺服器重連中';
+            badgeTitle = '券商行情未連線，點擊以強制重新連線';
+          } else if (isStale) {
+            badgeClass = 'danger pulse-danger';
+            statusText = '行情逾時 (點擊重置)';
+            badgeTitle = '盤中超過 20 秒無即時行情，點擊以強制重置連線';
+          } else if (!isMarketOpen) {
+            badgeClass = 'closed';
+            statusText = '已收盤 (模擬/快照)';
+            badgeTitle = '目前非盤中交易時段';
+          }
+
+          return (
+            <div
+              className={`status-badge ${isStale || isOffline ? 'status-badge-clickable' : ''}`}
+              title={badgeTitle}
+              onClick={() => {
+                if ((isStale || isOffline) && onForceReconnect) {
+                  onForceReconnect();
+                } else {
+                  onRefresh();
+                }
+              }}
+            >
+              <span className={`status-dot ${badgeClass}`} />
+              <span className="status-text">{statusText}</span>
+            </div>
+          );
+        })()}
 
         <div className="count-info">
           共 <strong className="count-highlight">{subscribedCount}/{maxSubscribed}</strong> 檔自選股

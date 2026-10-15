@@ -155,8 +155,14 @@ export async function updateOrder(orderId: string, params: { newPrice?: number; 
   }
   return res.json();
 }
-
-
-
+export async function refreshSystemQuotes(forceReconnect: boolean = false): Promise<void> {
+  const url = `${API_BASE}/api/v1/system/refresh?force_reconnect=${forceReconnect ? 'true' : 'false'}`;
+  const res = await fetch(url, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    throw new Error('Failed to refresh system quotes');
+  }
+}
 
 

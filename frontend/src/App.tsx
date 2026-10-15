@@ -8,6 +8,7 @@ import {
   addItem,
   removeItem,
   reorderItems,
+  refreshSystemQuotes,
 } from './services/api';
 import { wsClient } from './services/websocket';
 import { Header } from './components/Header';
@@ -280,9 +281,19 @@ export const App: React.FC = () => {
         maxSubscribed={upstream.maxAllowed}
         wsConnected={wsConnected}
         upstreamConnected={upstream.connected}
+        isMarketOpen={upstream.isMarketOpen}
+        lastQuoteTime={upstream.lastQuoteTime}
         theme={theme}
         onToggleTheme={handleToggleTheme}
         onRefresh={loadBootstrap}
+        onForceReconnect={async () => {
+          try {
+            await refreshSystemQuotes(true);
+            await loadBootstrap();
+          } catch (e) {
+            console.error('Failed to force reconnect:', e);
+          }
+        }}
         onAddStock={handleAddStock}
         onOpenCreateGroup={() => setModalState({ isOpen: true, mode: 'create' })}
         onOpenEditGroup={() => setModalState({ isOpen: true, mode: 'edit' })}
