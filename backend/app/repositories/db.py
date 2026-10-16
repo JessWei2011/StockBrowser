@@ -3,6 +3,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 from backend.app.settings import settings
 from backend.app.domain.models import WatchlistGroup, WatchlistItem
 
@@ -66,6 +67,13 @@ async def init_db():
         """)
         await db.execute("""
         CREATE INDEX IF NOT EXISTS idx_announcements_code ON stock_announcements(code);
+        """)
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
         """)
         await db.commit()
 
@@ -400,4 +408,19 @@ async def reorder_items(group_id: str, codes: list[str]):
                     (idx, gid, code)
                 )
             await db.execute("UPDATE watchlist_groups SET updated_at = ? WHERE id = ?", (ts, gid))
+        await db.commit()
+
+async def get_setting(key: str) -> Optional[str]:
+    async with get_db_connection() as db:
+        cur = await db.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+        row = await cur.fetchone()
+        return row[0] if row else None
+
+async def set_setting(key: str, value: str):
+    async with get_db_connection() as db:
+        await db.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            (key, value, now_iso())
+        )
         await db.commit()

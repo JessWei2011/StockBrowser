@@ -27,7 +27,13 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
 }) => {
   const formatPrice = (val: number | null | undefined, isSim?: boolean): React.ReactNode => {
     if (val === null || val === undefined || isNaN(val) || val <= 0) return '—';
-    const text = val.toFixed(2);
+    // 千元高價股 (>= 1000)：台股跳動單位為 5 元無角分，整數時精簡顯示，省去冗餘的 .00 字符
+    let text: string;
+    if (val >= 1000 && val % 1 === 0) {
+      text = Math.round(val).toString();
+    } else {
+      text = val.toFixed(2);
+    }
     if (isSim) {
       return (
         <>
@@ -258,65 +264,50 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
               </div>
             </div>
 
-            {/* 下半行：扁平網格數值 (最高、最低、總量、昨收、開盤) + 極簡操作按鈕 */}
-            <div className="flat-row-secondary">
-              <div className="flat-grid">
-                <div className="flat-col">
-                  <span className="flat-label">最高</span>
-                  <span className={`flat-val ${getPriceClass(q?.high, prev)}`}>
-                    {formatPrice(q?.high)}
-                  </span>
-                </div>
-
-                <div className="flat-col">
-                  <span className="flat-label">最低</span>
-                  <span className={`flat-val ${getPriceClass(q?.low, prev)}`}>
-                    {formatPrice(q?.low)}
-                  </span>
-                </div>
-
-                <div className="flat-col">
-                  <span className="flat-label">總量</span>
-                  <span
-                    className="flat-val flat-vol-val"
-                    title={q?.totalVolume ? `總成交量: ${q.totalVolume.toLocaleString()} 張` : undefined}
-                  >
-                    {formatVolume(q?.totalVolume)}
-                  </span>
-                </div>
-
-                <div className="flat-col">
-                  <span className="flat-label">昨收</span>
-                  <span className="flat-val flat-ref-val">
-                    {formatPrice(prev)}
-                  </span>
-                </div>
-
-                <div className="flat-col">
-                  <span className="flat-label">開盤</span>
-                  <span className="flat-val flat-open-val">
-                    {formatPrice(q?.open)}
-                  </span>
-                </div>
+            {/* 中間行：價量 5 大數值 (最高、最低、總量、昨收、開盤) - 獨佔整行 100% 寬度 */}
+            <div className="flat-row-metrics">
+              <div className="flat-col">
+                <span className="flat-label">最高</span>
+                <span className={`flat-val ${getPriceClass(q?.high, prev)}`}>
+                  {formatPrice(q?.high)}
+                </span>
               </div>
 
-              <div className="flat-actions">
-                <button
-                  className="btn-flat-action"
-                  disabled={idx === 0}
-                  onClick={() => onMoveItem(idx, 'up')}
-                  title="上移"
+              <div className="flat-col">
+                <span className="flat-label">最低</span>
+                <span className={`flat-val ${getPriceClass(q?.low, prev)}`}>
+                  {formatPrice(q?.low)}
+                </span>
+              </div>
+
+              <div className="flat-col">
+                <span className="flat-label">總量</span>
+                <span
+                  className="flat-val flat-vol-val"
+                  title={q?.totalVolume ? `總成交量: ${q.totalVolume.toLocaleString()} 張` : undefined}
                 >
-                  ↑
-                </button>
-                <button
-                  className="btn-flat-action"
-                  disabled={idx === items.length - 1}
-                  onClick={() => onMoveItem(idx, 'down')}
-                  title="下移"
-                >
-                  ↓
-                </button>
+                  {formatVolume(q?.totalVolume)}
+                </span>
+              </div>
+
+              <div className="flat-col">
+                <span className="flat-label">昨收</span>
+                <span className="flat-val flat-ref-val">
+                  {formatPrice(prev)}
+                </span>
+              </div>
+
+              <div className="flat-col">
+                <span className="flat-label">開盤</span>
+                <span className="flat-val flat-open-val">
+                  {formatPrice(q?.open)}
+                </span>
+              </div>
+            </div>
+
+            {/* 下半行：技術面均線燈號 (左側) + 排序與刪除操作 (右側) */}
+            <div className="flat-row-footer">
+              <div className="flat-footer-left">
                 {/* 均線標籤：個股顯示，ETF與債券不用 */}
                 {(() => {
                   const isEtfOrBond = item.code.startsWith('00') || ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase());
@@ -356,7 +347,25 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
                     </div>
                   );
                 })()}
+              </div>
 
+              <div className="flat-actions">
+                <button
+                  className="btn-flat-action"
+                  disabled={idx === 0}
+                  onClick={() => onMoveItem(idx, 'up')}
+                  title="上移"
+                >
+                  ↑
+                </button>
+                <button
+                  className="btn-flat-action"
+                  disabled={idx === items.length - 1}
+                  onClick={() => onMoveItem(idx, 'down')}
+                  title="下移"
+                >
+                  ↓
+                </button>
                 {/* 刪除按鈕 (非財神簿群組保留刪除鍵) */}
                 {!isWealthGroup && (
                   <button

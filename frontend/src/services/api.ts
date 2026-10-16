@@ -1,4 +1,4 @@
-import type { BootstrapResponse, InstrumentSearchResult, WatchlistGroup, WatchlistItem, StockAnnouncement } from '../types';
+import type { BootstrapResponse, InstrumentSearchResult, WatchlistGroup, WatchlistItem, StockAnnouncement, AccountBalanceState } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 
@@ -132,6 +132,17 @@ export async function fetchOrders(): Promise<import('../types').OrderItem[]> {
   return res.json();
 }
 
+export async function clearOrders(): Promise<{ success: boolean; message: string; clearedAt?: string }> {
+  const res = await fetch(`${API_BASE}/api/v1/orders/clear`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || '清空委託單紀錄失敗');
+  }
+  return res.json();
+}
+
 export async function cancelOrder(orderId: string): Promise<{ success: boolean; message: string }> {
   const res = await fetch(`${API_BASE}/api/v1/orders/${encodeURIComponent(orderId)}/cancel`, {
     method: 'POST',
@@ -163,6 +174,35 @@ export async function refreshSystemQuotes(forceReconnect: boolean = false): Prom
   if (!res.ok) {
     throw new Error('Failed to refresh system quotes');
   }
+}
+
+export async function fetchAccountBalance(): Promise<AccountBalanceState> {
+  const res = await fetch(`${API_BASE}/api/v1/account/balance`);
+  if (!res.ok) throw new Error('Failed to fetch account balance');
+  return res.json();
+}
+
+export async function updateAccountCapital(capitalWan: number, capitalMode: 'before_t0' | 'after_t0' = 'after_t0'): Promise<{ status: string; capitalWan: number; capitalMode: string }> {
+  const res = await fetch(`${API_BASE}/api/v1/account/capital`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ capitalWan, capitalMode }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || '更新本金失敗');
+  }
+  return res.json();
+}
+
+export async function fetchCalendarMonth(year?: number, month?: number): Promise<import('../types').CalendarMonthData> {
+  const query = [];
+  if (year) query.push(`year=${year}`);
+  if (month) query.push(`month=${month}`);
+  const qStr = query.length > 0 ? `?${query.join('&')}` : '';
+  const res = await fetch(`${API_BASE}/api/v1/calendar${qStr}`);
+  if (!res.ok) throw new Error('無法取得投資日曆資料');
+  return res.json();
 }
 
 

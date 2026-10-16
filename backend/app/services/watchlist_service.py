@@ -22,18 +22,15 @@ class WatchlistService:
         if summary:
             self.wealth_summary = summary
 
-        if shioaji_adapter.stock_positions_detail:
+        if position_codes or shioaji_adapter.is_logged_in:
+            # 正常連線下：以真實 API 回傳為準 (若全部賣光則為空清單，清空資料庫持股)
             await db.save_stock_positions(shioaji_adapter.stock_positions_detail)
-        elif not position_codes:
-            # 離線或重啟時，嘗試從 DB 載入快取的持股
+        else:
+            # 離線或重啟且尚未連線時，嘗試從 DB 載入快取的持股
             cached_positions = await db.load_stock_positions()
             if cached_positions:
                 shioaji_adapter.stock_positions_detail = cached_positions
                 position_codes = [p["code"] for p in cached_positions]
-
-        if not position_codes:
-            logger.info("No stock positions fetched or Shioaji not connected.")
-            return
 
         items_data = []
         for code in position_codes:
@@ -66,6 +63,13 @@ class WatchlistService:
     async def get_bootstrap_data(self) -> dict:
         from backend.app.services.announcement_service import announcement_service
         from backend.app.services.stock_chart_service import get_multiple_stocks_ma_summary
+        
+        # 每次前端載入 / 重新整理時，皆向永豐 API 索取最新持股動態，若有賣出持股立刻同步更新
+        try:
+            await self.sync_wealth_book()
+        except Exception as e:
+            logger.warning(f"Error syncing wealth book in bootstrap: {e}")
+
         groups = await db.get_all_groups()
         server_ver, all_quotes = quote_store.get_all_quotes()
         all_codes = list({it.code for g in groups for it in g.items})

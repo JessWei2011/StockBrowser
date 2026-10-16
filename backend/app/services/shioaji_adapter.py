@@ -263,6 +263,7 @@ class ShioajiAdapter:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._last_odd_fetch_date: Optional[str] = None
         self._last_morning_sync_date: Optional[str] = None
+        self._orders_cleared_at: Optional[datetime] = None
         self._last_reconnect_attempt_ts: float = 0.0
         self.stock_account: Any = None
         self.ca_activated: bool = False
@@ -737,6 +738,112 @@ class ShioajiAdapter:
         }
         self.cached_wealth_summary = live_summary
         return live_summary
+
+    def fetch_settlements(self) -> list[dict[str, Any]]:
+        """查詢 T+0, T+1, T+2 的交割金額與日期"""
+        if not self.api or not self.is_logged_in:
+            return []
+        try:
+            account = self.api.stock_account
+            if not account:
+                return []
+            res = self.api.settlements(account)
+            results = []
+            if res:
+                for item in res:
+                    # item 有 date, amount, T 等屬性
+                    d_val = getattr(item, 'date', None)
+                    d_str = str(d_val) if d_val else ""
+                    amt = float(getattr(item, 'amount', 0.0) or 0.0)
+                    t_val = int(getattr(item, 'T', 0) if getattr(item, 'T', None) is not None else 0)
+                    results.append({
+                        "t": t_val,
+                        "date": d_str,
+                        "amount": amt,
+                        "amountWan": round(amt / 10000.0, 4)
+                    })
+            # 確保按 t 排序 (0, 1, 2)
+            results.sort(key=lambda x: x["t"])
+            return results
+        except Exception as e:
+            logger.error(f"Error fetching settlements: {e}", exc_info=True)
+            return []
+
+    def fetch_today_deals_breakdown(self) -> list[dict[str, Any]]:
+        """查詢今日所有已成交的委託明細與各筆淨交割款計算 (算式: a + b - c)"""
+        if not self.api or not self.is_logged_in:
+            return []
+        try:
+            account = self.api.stock_account
+            if not account:
+                return []
+            self.api.update_status(account)
+            trades = self.api.list_trades()
+            if not trades:
+                return []
+
+            details = []
+            for t in trades:
+                deal_qty = safe_int(getattr(t.status, 'deal_quantity', 0)) or 0
+                if deal_qty <= 0:
+                    continue
+
+                code = str(getattr(t.contract, 'code', '') or getattr(t.order, 'code', '')).strip()
+                action_raw = getattr(t.order, 'action', 'Buy')
+                action = 'Sell' if 'Sell' in str(action_raw) else 'Buy'
+                
+                info = self.contracts_cache.get(code)
+                name = info['name'] if info else code
+                sec_type = info['securityType'] if info else 'STOCK'
+
+                deals = getattr(t.status, 'deals', [])
+                total_val = 0.0
+                if deals:
+                    for d in deals:
+                        d_p = safe_float(getattr(d, 'price', 0.0)) or 0.0
+                        d_q = safe_int(getattr(d, 'quantity', 0)) or 0
+                        total_val += d_p * d_q
+                else:
+                    avg_p = safe_float(getattr(t.order, 'price', 0.0)) or 0.0
+                    total_val = avg_p * deal_qty
+
+                avg_price = round(total_val / deal_qty, 2) if deal_qty > 0 else 0.0
+
+                # 計算手續費 (0.1425%, 最低1元)
+                fee = max(1, int(total_val * 0.001425))
+
+                # 計算證券交易稅 (賣出才有)
+                tax = 0
+                if action == 'Sell':
+                    tax_rate = 0.003
+                    if 'B' in code.upper() or str(sec_type).upper() == 'BOND':
+                        tax_rate = 0.0
+                    elif code.startswith('00') or str(sec_type).upper() == 'ETF':
+                        tax_rate = 0.001
+                    tax = int(total_val * tax_rate)
+
+                if action == 'Sell':
+                    net_amt = total_val - tax - fee
+                else:
+                    net_amt = -(total_val + fee)
+
+                details.append({
+                    "code": code,
+                    "name": name,
+                    "action": action,
+                    "qty": deal_qty,
+                    "price": avg_price,
+                    "totalPrice": round(total_val, 2),
+                    "fee": fee,
+                    "tax": tax,
+                    "netAmount": round(net_amt, 2),
+                    "netAmountWan": round(net_amt / 10000.0, 4)
+                })
+
+            return details
+        except Exception as e:
+            logger.error(f"Error fetching today deals breakdown: {e}", exc_info=True)
+            return []
 
     def _init_and_subscribe_indices(self):
         """初始化並訂閱大盤加權指數 (TSE IX0001) 與 櫃買指數 (OTC IX0043)"""
@@ -1295,6 +1402,22 @@ class ShioajiAdapter:
         except Exception as e:
             logger.warning(f"Error calling update_status: {e}")
 
+        now = datetime.now()
+        # 1. 決定基準截止點 (15:00 收盤後自動清空，且跨日不殘留歷史單)：
+        # - 若當前時間已過 15:00 (15:00 ~ 23:59)：今日 15:00 以前的盤中/盤後委託單已全數收盤結案，自動過濾掉
+        # - 若當前時間在 00:00 ~ 14:59 (開盤前與盤中)：僅採計今日 (當天 00:00 以後) 的委託單，自動排除昨日或更早的歷史單
+        if now.hour >= 15:
+            auto_cutoff = now.replace(hour=15, minute=0, second=0, microsecond=0)
+        else:
+            auto_cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # 2. 手動清除時間點判斷 (若使用者曾手動點擊「清除歷史單」)
+        effective_cutoff = auto_cutoff
+        if getattr(self, "_orders_cleared_at", None):
+            effective_cutoff = max(effective_cutoff, self._orders_cleared_at)
+        if effective_cutoff.tzinfo is not None:
+            effective_cutoff = effective_cutoff.astimezone().replace(tzinfo=None)
+
         orders: list[dict[str, Any]] = []
         try:
             trades = self.api.list_trades()
@@ -1325,8 +1448,29 @@ class ShioajiAdapter:
                 status_raw = getattr(t.status, "status", "Pending")
                 status_str = getattr(status_raw, "value", str(status_raw)).replace("OrderStatus.", "")
 
-                order_dt = getattr(t.status, "order_datetime", None)
-                if isinstance(order_dt, datetime):
+                order_dt_raw = getattr(t.status, "order_datetime", None)
+                order_dt: Optional[datetime] = None
+                if isinstance(order_dt_raw, datetime):
+                    order_dt = order_dt_raw
+                elif isinstance(order_dt_raw, (int, float)):
+                    try:
+                        order_dt = datetime.fromtimestamp(order_dt_raw)
+                    except Exception:
+                        pass
+                elif isinstance(order_dt_raw, str):
+                    try:
+                        order_dt = datetime.fromisoformat(order_dt_raw)
+                    except Exception:
+                        pass
+
+                if order_dt and order_dt.tzinfo is not None:
+                    order_dt = order_dt.astimezone().replace(tzinfo=None)
+
+                # 若委託時間早於有效起算點 (例如已過收盤 15:00 或手動清除前)，則視為歷史已結案單，自動排除
+                if order_dt and order_dt < effective_cutoff:
+                    continue
+
+                if order_dt:
                     time_str = order_dt.strftime("%H:%M:%S")
                 else:
                     time_str = "--:--:--"
@@ -1378,6 +1522,16 @@ class ShioajiAdapter:
 
         orders.sort(key=lambda x: x["time"], reverse=True)
         return orders
+
+    def clear_orders(self) -> dict[str, Any]:
+        """手動清空今日委託單歷史紀錄"""
+        self._orders_cleared_at = datetime.now()
+        logger.info(f"User manually cleared orders history at {self._orders_cleared_at}")
+        return {
+            "success": True,
+            "message": "今日委託單紀錄已清空",
+            "clearedAt": self._orders_cleared_at.isoformat()
+        }
 
     def cancel_order(self, order_id: str) -> dict[str, Any]:
         """取消特定委託單"""

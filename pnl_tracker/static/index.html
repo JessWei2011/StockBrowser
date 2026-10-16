@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>台股已實現損益統計系統</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      background-color: #0f172a;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    .text-tw-up { color: #ef4444; }    /* 台股紅漲 / 獲利 */
+    .text-tw-down { color: #22c55e; }  /* 台股綠跌 / 虧損 */
+    .bg-tw-up-light { background-color: rgba(239, 68, 68, 0.12); }
+    .bg-tw-down-light { background-color: rgba(34, 197, 94, 0.12); }
+    .glass-card {
+      background: rgba(30, 41, 59, 0.7);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 1rem;
+    }
+    @keyframes pulse-sync {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .animate-syncing {
+      animation: pulse-sync 1.5s infinite;
+    }
+  </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+
+  <div class="max-w-7xl mx-auto space-y-6">
+
+    <!-- 頂部 Header & 控制按鈕 -->
+    <header class="glass-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xl">
+      <div>
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-rose-500 flex items-center justify-center text-xl shadow-lg">
+            📊
+          </div>
+          <div>
+            <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+              台股已實現損益分析系統
+              <span class="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-medium">獨立資料庫</span>
+            </h1>
+            <p class="text-xs text-slate-400 mt-0.5" id="headerSubtitle">
+              永豐金證券 Shioaji API 同步支援 • 本機 SQLite 永久保存
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <div class="flex items-center bg-slate-800/80 rounded-lg px-3 py-1.5 border border-slate-700 text-xs text-slate-300">
+          <span class="mr-2 text-slate-400">起算日:</span>
+          <input type="date" id="startDateInput" value="2025-10-01" class="bg-transparent border-0 text-white focus:outline-none focus:ring-0">
+        </div>
+
+        <button id="syncBtn" onclick="triggerSync()" class="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg font-medium text-sm transition-all shadow-lg shadow-blue-500/20 active:scale-95">
+          <span id="syncIcon">🔄</span>
+          <span id="syncBtnText">一鍵從 API 爬取同步</span>
+        </button>
+
+        <a href="/api/export_csv" class="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm border border-slate-700 transition-colors">
+          <span>📥</span> 匯出 CSV
+        </a>
+      </div>
+    </header>
+
+    <!-- 同步進度條 -->
+    <div id="syncProgressCard" class="glass-card p-4 hidden border-blue-500/40 bg-blue-950/20">
+      <div class="flex items-center justify-between text-xs text-blue-300 mb-2">
+        <span id="syncStatusMsg" class="font-medium animate-syncing">正在連線券商 API 同步中...</span>
+        <span id="syncProgressPct" class="font-bold">0%</span>
+      </div>
+      <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+        <div id="syncProgressBar" class="bg-gradient-to-r from-blue-500 to-emerald-400 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+      </div>
+    </div>
+
+    <!-- 總結 KPI 卡片看板 -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      
+      <!-- 卡片 1: 歷史總損益 -->
+      <div class="glass-card p-5 relative overflow-hidden">
+        <div class="text-xs font-medium text-slate-400 uppercase tracking-wider">歷史總淨損益</div>
+        <div class="mt-2 flex items-baseline gap-2">
+          <span id="kpiTotalPnl" class="text-3xl font-extrabold text-slate-200">--</span>
+          <span id="kpiReturnRate" class="text-xs font-semibold px-2 py-0.5 rounded">--</span>
+        </div>
+        <div class="mt-3 text-xs text-slate-400 flex items-center justify-between border-t border-slate-800 pt-2">
+          <span>累積報酬率</span>
+          <span id="kpiReturnPctSub" class="font-medium text-slate-300">--%</span>
+        </div>
+      </div>
+
+      <!-- 卡片 2: 勝率統計 -->
+      <div class="glass-card p-5">
+        <div class="text-xs font-medium text-slate-400 uppercase tracking-wider">交易勝率</div>
+        <div class="mt-2 flex items-baseline gap-2">
+          <span id="kpiWinRate" class="text-3xl font-extrabold text-amber-400">--%</span>
+        </div>
+        <div class="mt-3 text-xs text-slate-400 flex items-center justify-between border-t border-slate-800 pt-2">
+          <span>賺 / 賠筆數</span>
+          <span id="kpiWinLossCount" class="font-medium text-slate-300">-- 勝 / -- 負</span>
+        </div>
+      </div>
+
+      <!-- 卡片 3: 總交易資金 -->
+      <div class="glass-card p-5">
+        <div class="text-xs font-medium text-slate-400 uppercase tracking-wider">總交易週轉金額</div>
+        <div class="mt-2 text-2xl font-bold text-slate-100" id="kpiTotalTurnover">--</div>
+        <div class="mt-3 text-xs text-slate-400 flex items-center justify-between border-t border-slate-800 pt-2">
+          <span>買進 / 賣出金額</span>
+          <span id="kpiBuySellRatio" class="font-medium text-slate-300">-- / --</span>
+        </div>
+      </div>
+
+      <!-- 卡片 4: 交易規模 & 最佳戰績 -->
+      <div class="glass-card p-5">
+        <div class="text-xs font-medium text-slate-400 uppercase tracking-wider">總交易量 & 最佳獲利</div>
+        <div class="mt-2 flex items-baseline justify-between">
+          <span id="kpiTotalTrades" class="text-2xl font-bold text-slate-100">-- 筆</span>
+          <span id="kpiTotalShares" class="text-xs text-slate-400">-- 股</span>
+        </div>
+        <div class="mt-3 text-xs text-slate-400 flex items-center justify-between border-t border-slate-800 pt-2">
+          <span>最佳單筆</span>
+          <span id="kpiBestTrade" class="font-medium text-tw-up truncate max-w-[150px]">--</span>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- 每月損益視覺化圖表 -->
+    <section class="glass-card p-6">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-lg font-bold text-white">月份損益走勢圖</h2>
+          <p class="text-xs text-slate-400">視覺化呈現各月份總損益動態 (紅=獲利，綠=虧損)</p>
+        </div>
+        <span class="text-xs text-slate-500">單位：新台幣 (NTD)</span>
+      </div>
+      <div class="h-64 w-full">
+        <canvas id="monthlyChart"></canvas>
+      </div>
+    </section>
+
+    <!-- 每月績效統計報表 & 單筆展開明細 -->
+    <section class="glass-card p-6">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-lg font-bold text-white">每月份績效明細總表</h2>
+          <p class="text-xs text-slate-400">點擊任一月份列，即可展開檢視該月份所有單筆沖銷明細</p>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto rounded-xl border border-slate-800">
+        <table class="w-full text-left text-sm text-slate-300">
+          <thead class="bg-slate-800/80 text-xs uppercase text-slate-400 font-semibold border-b border-slate-700">
+            <tr>
+              <th class="py-3 px-4">月份</th>
+              <th class="py-3 px-3 text-right">交易筆數</th>
+              <th class="py-3 px-3 text-right">成交總股數</th>
+              <th class="py-3 px-3 text-right">買進總成本</th>
+              <th class="py-3 px-3 text-right">賣出總金額</th>
+              <th class="py-3 px-3 text-right">當月淨損益</th>
+              <th class="py-3 px-3 text-right">報酬率</th>
+              <th class="py-3 px-3 text-right">勝率</th>
+              <th class="py-3 px-4 text-center">明細</th>
+            </tr>
+          </thead>
+          <tbody id="monthlyTableBody" class="divide-y divide-slate-800/60 font-mono text-xs">
+            <tr>
+              <td colspan="9" class="py-8 text-center text-slate-500 font-sans">載入中...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    let chartInstance = null;
+
+    // 格式化數字
+    function formatNTD(num) {
+      if (num === null || num === undefined) return "--";
+      return new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 }).format(num);
+    }
+
+    function formatNumber(num) {
+      if (num === null || num === undefined) return "--";
+      return new Intl.NumberFormat('zh-TW').format(num);
+    }
+
+    // 載入整體數據
+    async function loadData() {
+      try {
+        const [sumRes, monthRes] = await Promise.all([
+          fetch('/api/summary').then(r => r.json()),
+          fetch('/api/monthly').then(r => r.json())
+        ]);
+
+        renderSummary(sumRes);
+        renderMonthlyTable(monthRes);
+        renderChart(monthRes);
+      } catch (err) {
+        console.error("載入資料失敗:", err);
+      }
+    }
+
+    // 渲染總結卡片
+    function renderSummary(data) {
+      const pnl = data.cumulative_pnl || 0;
+      const rate = data.cumulative_return_rate || 0;
+      const pnlEl = document.getElementById('kpiTotalPnl');
+      const rateEl = document.getElementById('kpiReturnRate');
+
+      pnlEl.textContent = (pnl >= 0 ? "+" : "") + formatNTD(pnl) + " 元";
+      pnlEl.className = "text-3xl font-extrabold " + (pnl >= 0 ? "text-tw-up" : "text-tw-down");
+
+      rateEl.textContent = (rate >= 0 ? "+" : "") + rate.toFixed(2) + "%";
+      rateEl.className = "text-xs font-semibold px-2 py-0.5 rounded " + 
+        (rate >= 0 ? "bg-tw-up-light text-tw-up border border-red-500/20" : "bg-tw-down-light text-tw-down border border-green-500/20");
+
+      document.getElementById('kpiReturnPctSub').textContent = (rate >= 0 ? "+" : "") + rate.toFixed(2) + "%";
+      document.getElementById('kpiWinRate').textContent = (data.overall_win_rate ? data.overall_win_rate.toFixed(1) : 0) + "%";
+      document.getElementById('kpiWinLossCount').textContent = `${data.total_win_count || 0} 勝 / ${data.total_loss_count || 0} 負`;
+
+      const buy = data.cumulative_buy_amount || 0;
+      const sell = data.cumulative_sell_amount || 0;
+      document.getElementById('kpiTotalTurnover').textContent = "NT$ " + formatNTD(buy + sell);
+      document.getElementById('kpiBuySellRatio').textContent = `買 ${formatNTD(buy)} / 賣 ${formatNTD(sell)}`;
+
+      document.getElementById('kpiTotalTrades').textContent = (data.total_trades || 0) + " 筆";
+      document.getElementById('kpiTotalShares').textContent = formatNumber(data.total_shares || 0) + " 股";
+
+      if (data.best_trade) {
+        document.getElementById('kpiBestTrade').textContent = 
+          `${data.best_trade.name} (+${formatNTD(data.best_trade.pnl)})`;
+      } else {
+        document.getElementById('kpiBestTrade').textContent = "--";
+      }
+
+      if (data.last_sync) {
+        document.getElementById('headerSubtitle').textContent = 
+          `最後同步: ${data.last_sync.sync_at} • 共收錄 ${data.total_trades || 0} 筆明細 • SQLite 本機維護`;
+      }
+    }
+
+    // 渲染月份走勢圖
+    function renderChart(monthlyList) {
+      const sorted = [...monthlyList].reverse(); // 按時間由舊到新
+      const labels = sorted.map(m => m.month);
+      const dataValues = sorted.map(m => m.total_pnl);
+      const bgColors = dataValues.map(v => v >= 0 ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.8)');
+      const borderColors = dataValues.map(v => v >= 0 ? '#ef4444' : '#22c55e');
+
+      const ctx = document.getElementById('monthlyChart').getContext('2d');
+      if (chartInstance) {
+        chartInstance.destroy();
+      }
+
+      chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: '當月損益 (元)',
+            data: dataValues,
+            backgroundColor: bgColors,
+            borderColor: borderColors,
+            borderWidth: 1,
+            borderRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const val = context.raw;
+                  return (val >= 0 ? '獲利: +' : '虧損: ') + formatNTD(val) + ' 元';
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(255, 255, 255, 0.05)' },
+              ticks: { color: '#94a3b8' }
+            },
+            y: {
+              grid: { color: 'rgba(255, 255, 255, 0.05)' },
+              ticks: { 
+                color: '#94a3b8',
+                callback: function(val) { return formatNTD(val); }
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // 渲染月份報表
+    function renderMonthlyTable(monthlyList) {
+      const tbody = document.getElementById('monthlyTableBody');
+      if (!monthlyList || monthlyList.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="9" class="py-8 text-center text-slate-500 font-sans">尚無交易資料，請點擊上方「一鍵從 API 爬取同步」按鈕！</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = monthlyList.map((m, idx) => {
+        const isUp = m.total_pnl >= 0;
+        const pnlClass = isUp ? "text-tw-up font-bold" : "text-tw-down font-bold";
+        const rateClass = isUp ? "text-tw-up" : "text-tw-down";
+        const pnlPrefix = isUp ? "+" : "";
+
+        return `
+          <tr class="hover:bg-slate-800/40 transition-colors cursor-pointer" onclick="toggleDetails('${m.month}')">
+            <td class="py-3 px-4 font-sans font-medium text-white flex items-center gap-2">
+              <span id="arrow-${m.month}" class="text-slate-500 text-xs transition-transform duration-200">▶</span>
+              ${m.month}
+            </td>
+            <td class="py-3 px-3 text-right text-slate-300">${m.trade_count} 筆</td>
+            <td class="py-3 px-3 text-right text-slate-400">${formatNumber(m.total_shares)}</td>
+            <td class="py-3 px-3 text-right text-slate-300">${formatNTD(m.total_buy_amount)}</td>
+            <td class="py-3 px-3 text-right text-slate-300">${formatNTD(m.total_sell_amount)}</td>
+            <td class="py-3 px-3 text-right ${pnlClass}">${pnlPrefix}${formatNTD(m.total_pnl)}</td>
+            <td class="py-3 px-3 text-right ${rateClass}">${pnlPrefix}${m.return_rate.toFixed(2)}%</td>
+            <td class="py-3 px-3 text-right text-amber-400">${m.win_rate.toFixed(1)}%</td>
+            <td class="py-3 px-4 text-center">
+              <button class="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 text-xs border border-slate-700">
+                查看明細
+              </button>
+            </td>
+          </tr>
+          <tr id="details-row-${m.month}" class="hidden bg-slate-900/90">
+            <td colspan="9" class="p-4 border-t border-b border-slate-800">
+              <div id="details-container-${m.month}" class="p-2">
+                <div class="text-xs text-slate-400 py-2">載入明細中...</div>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // 展開 / 收合單月明細
+    async function toggleDetails(month) {
+      const row = document.getElementById(`details-row-${month}`);
+      const arrow = document.getElementById(`arrow-${month}`);
+      const container = document.getElementById(`details-container-${month}`);
+
+      if (!row.classList.contains('hidden')) {
+        row.classList.add('hidden');
+        arrow.style.transform = 'rotate(0deg)';
+        return;
+      }
+
+      row.classList.remove('hidden');
+      arrow.style.transform = 'rotate(90deg)';
+
+      try {
+        const trades = await fetch(`/api/trades?month=${month}`).then(r => r.json());
+        if (!trades || trades.length === 0) {
+          container.innerHTML = `<div class="text-xs text-slate-500 py-2">該月份無明細</div>`;
+          return;
+        }
+
+        container.innerHTML = `
+          <div class="overflow-x-auto rounded-lg border border-slate-800/80 bg-slate-950/40">
+            <table class="w-full text-xs text-left text-slate-300 font-mono">
+              <thead class="bg-slate-800/50 text-slate-400 font-sans border-b border-slate-800">
+                <tr>
+                  <th class="py-2.5 px-3">商品</th>
+                  <th class="py-2.5 px-3">成交日期</th>
+                  <th class="py-2.5 px-3 text-right">成交數量</th>
+                  <th class="py-2.5 px-3 text-right">成交價格</th>
+                  <th class="py-2.5 px-3 text-right">買進金額</th>
+                  <th class="py-2.5 px-3 text-right">賣出金額</th>
+                  <th class="py-2.5 px-3 text-right">損益試算</th>
+                  <th class="py-2.5 px-3 text-right">報酬率</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800/40">
+                ${trades.map(t => {
+                  const isUp = t.pnl >= 0;
+                  const pnlClass = isUp ? "text-tw-up font-semibold" : "text-tw-down font-semibold";
+                  const pnlPrefix = isUp ? "+" : "";
+                  return `
+                    <tr class="hover:bg-slate-800/20">
+                      <td class="py-2 px-3 font-sans font-medium text-white">${t.code} ${t.name}</td>
+                      <td class="py-2 px-3 text-slate-400">${t.trade_date}</td>
+                      <td class="py-2 px-3 text-right">${formatNumber(t.quantity)} 股</td>
+                      <td class="py-2 px-3 text-right text-slate-200">${t.price}</td>
+                      <td class="py-2 px-3 text-right">${formatNTD(t.buy_amount)}</td>
+                      <td class="py-2 px-3 text-right">${formatNTD(t.sell_amount)}</td>
+                      <td class="py-2 px-3 text-right ${pnlClass}">${pnlPrefix}${formatNTD(t.pnl)}</td>
+                      <td class="py-2 px-3 text-right ${pnlClass}">${pnlPrefix}${t.return_rate.toFixed(2)}%</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      } catch (e) {
+        container.innerHTML = `<div class="text-xs text-red-400 py-2">載入明細失敗: ${e}</div>`;
+      }
+    }
+
+    // 觸發同步任務
+    async function triggerSync() {
+      const startDate = document.getElementById('startDateInput').value || '2025-10-01';
+      const syncBtn = document.getElementById('syncBtn');
+      const syncIcon = document.getElementById('syncIcon');
+      const syncBtnText = document.getElementById('syncBtnText');
+      const progressCard = document.getElementById('syncProgressCard');
+
+      syncBtn.disabled = true;
+      syncBtn.classList.add('opacity-70', 'cursor-not-allowed');
+      syncIcon.classList.add('animate-spin');
+      syncBtnText.textContent = "同步任務啟動中...";
+      progressCard.classList.remove('hidden');
+
+      try {
+        const resp = await fetch('/api/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ start_date: startDate })
+        });
+        
+        if (!resp.ok) {
+          const errData = await resp.json();
+          alert(errData.detail || "同步啟動失敗");
+          resetSyncUI();
+          return;
+        }
+
+        pollSyncProgress();
+      } catch (err) {
+        alert("請求失敗: " + err);
+        resetSyncUI();
+      }
+    }
+
+    // 輪詢同步進度
+    function pollSyncProgress() {
+      const timer = setInterval(async () => {
+        try {
+          const status = await fetch('/api/sync/status').then(r => r.json());
+          
+          document.getElementById('syncStatusMsg').textContent = status.message;
+          document.getElementById('syncProgressPct').textContent = status.progress + "%";
+          document.getElementById('syncProgressBar').style.width = status.progress + "%";
+
+          if (!status.is_syncing) {
+            clearInterval(timer);
+            setTimeout(() => {
+              resetSyncUI();
+              loadData(); // 重新整理報表
+            }, 1000);
+          }
+        } catch (e) {
+          clearInterval(timer);
+          resetSyncUI();
+        }
+      }, 800);
+    }
+
+    function resetSyncUI() {
+      const syncBtn = document.getElementById('syncBtn');
+      const syncIcon = document.getElementById('syncIcon');
+      const syncBtnText = document.getElementById('syncBtnText');
+      const progressCard = document.getElementById('syncProgressCard');
+
+      syncBtn.disabled = false;
+      syncBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+      syncIcon.classList.remove('animate-spin');
+      syncBtnText.textContent = "一鍵從 API 爬取同步";
+      setTimeout(() => progressCard.classList.add('hidden'), 2500);
+    }
+
+    // 初始化載入
+    window.addEventListener('DOMContentLoaded', loadData);
+  </script>
+</body>
+</html>

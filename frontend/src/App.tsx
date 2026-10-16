@@ -20,6 +20,7 @@ import { GroupModal } from './components/GroupModal';
 import { VaultPasswordModal, isVaultAuthenticated, clearVaultAuthenticated } from './components/VaultPasswordModal';
 import { StockChartDrawer } from './components/StockChartDrawer';
 import { MarketIndexTrend } from './components/MarketIndexTrend';
+import { InvestmentCalendarModal } from './components/InvestmentCalendarModal';
 import './App.css';
 
 export const App: React.FC = () => {
@@ -29,11 +30,12 @@ export const App: React.FC = () => {
   const [positions, setPositions] = useState<StockPosition[]>([]);
   const [dirtyCodes, setDirtyCodes] = useState<Set<string>>(new Set());
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [drawerTab, setDrawerTab] = useState<'vault' | 'order'>('vault');
+  const [drawerTab, setDrawerTab] = useState<'vault' | 'vault_ledger' | 'order' | 'balance'>('vault');
   const [isVaultPasswordModalOpen, setIsVaultPasswordModalOpen] = useState(false);
   const [orderTargetCode, setOrderTargetCode] = useState<string | null>(null);
   const [pendingOrderCode, setPendingOrderCode] = useState<string | null>(null);
   const [selectedChartCode, setSelectedChartCode] = useState<string | null>(null);
+  const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const [upstream, setUpstream] = useState<UpstreamStatus>({
     connected: false,
     loggedIn: false,
@@ -297,6 +299,7 @@ export const App: React.FC = () => {
         onAddStock={handleAddStock}
         onOpenCreateGroup={() => setModalState({ isOpen: true, mode: 'create' })}
         onOpenEditGroup={() => setModalState({ isOpen: true, mode: 'edit' })}
+        onOpenCalendar={() => setIsCalendarModalOpen(true)}
       />
 
       <GroupTabs
@@ -328,7 +331,7 @@ export const App: React.FC = () => {
             onClose={() => setIsDrawerOpen(false)}
             activeTab={drawerTab}
             onChangeTab={(tab) => {
-              if (tab === 'vault' && !isVaultAuthenticated()) {
+              if ((tab === 'vault' || tab === 'vault_ledger') && !isVaultAuthenticated()) {
                 setIsVaultPasswordModalOpen(true);
                 return;
               }
@@ -339,6 +342,7 @@ export const App: React.FC = () => {
             wealthSummary={wealthSummary}
             dirtyCodes={dirtyCodes}
             initialOrderCode={orderTargetCode || undefined}
+            onOrderTargetCodeChange={(code) => setOrderTargetCode(code)}
             orderedCodes={
               groups.find((g) => g.id === 'g-wealth' || g.name === '財神簿')?.items.map((i) => i.code) ||
               groups.find((g) => g.id === 'g-vault' || g.name === '財神庫')?.items.map((i) => i.code) ||
@@ -348,6 +352,7 @@ export const App: React.FC = () => {
               clearVaultAuthenticated();
               setIsDrawerOpen(false);
             }}
+            onRefreshPositions={loadBootstrap}
           />
         )}
 
@@ -558,6 +563,12 @@ export const App: React.FC = () => {
         theme={theme}
         currentPrice={selectedChartCode && quotes[selectedChartCode]?.last ? quotes[selectedChartCode].last : null}
         changePercent={selectedChartCode && quotes[selectedChartCode]?.changePercent ? quotes[selectedChartCode].changePercent : null}
+      />
+
+      <InvestmentCalendarModal
+        isOpen={isCalendarModalOpen}
+        onClose={() => setIsCalendarModalOpen(false)}
+        onSelectStock={(code) => setSelectedChartCode(code)}
       />
     </div>
   );

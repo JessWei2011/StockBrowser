@@ -151,9 +151,13 @@ class AnnouncementService:
             logger.error(f"Failed to save announcements to DB: {e}")
 
     async def refresh_all_announcements(self, reason: str = "manual") -> dict[str, list[dict]]:
-        """全量抓取所有追蹤個股的公告：注意、處置、重大訊息、除權息預告、財報/法說會日程"""
+        """全量抓取所有追蹤個股與熱門權值股的公告：注意、處置、重大訊息、除權息預告、財報/法說會日程"""
         logger.info(f"Starting announcements refresh (reason: {reason})...")
         wanted_codes = await db.get_all_subscribed_codes()
+        
+        # 加入重要熱門權值股
+        top_weights = {"2330", "2317", "2454", "2382", "2308", "2881", "2882", "2303", "3231", "3711", "2603", "3008", "2357"}
+        wanted_codes = wanted_codes.union(top_weights)
         if not wanted_codes:
             logger.info("No subscribed codes in watchlist.")
             return {}

@@ -1,21 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { StockPosition, QuoteState, WealthSummary, OrderItem } from '../types';
-import { submitOrder, fetchOrders, cancelOrder, updateOrder } from '../services/api';
+import { submitOrder, fetchOrders, cancelOrder, updateOrder, clearOrders } from '../services/api';
 import { getStoredVaultPassword } from './VaultPasswordModal';
+import { BalanceTab } from './BalanceTab';
 
 interface AssistantSidebarProps {
   isOpen: boolean;
   onClose: () => void;
-  activeTab: 'vault' | 'order';
-  onChangeTab: (tab: 'vault' | 'order') => void;
+  activeTab: 'vault' | 'vault_ledger' | 'order' | 'balance';
+  onChangeTab: (tab: 'vault' | 'vault_ledger' | 'order' | 'balance') => void;
   positions: StockPosition[];
   quotes: Record<string, QuoteState>;
   wealthSummary: WealthSummary | null;
   dirtyCodes: Set<string>;
   initialOrderCode?: string;
+  onOrderTargetCodeChange?: (code: string) => void;
   onLock?: () => void;
   orderedCodes?: string[];
+  onRefreshPositions?: () => Promise<void> | void;
 }
 
 function calcPositionMetrics(
@@ -55,7 +58,7 @@ function calcPositionMetrics(
 
 export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   isOpen,
-  onClose,
+  onClose: _onClose,
   activeTab,
   onChangeTab,
   positions,
@@ -63,9 +66,60 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   wealthSummary,
   dirtyCodes,
   initialOrderCode,
+  onOrderTargetCodeChange,
   onLock,
   orderedCodes = [],
+  onRefreshPositions,
 }) => {
+  const [isRefreshingPositions, setIsRefreshingPositions] = useState(false);
+  const prevInitialCodeRef = useRef<string | undefined>(undefined);
+
+  // 側邊欄多螢幕自適應與手動自由拖曳寬度
+  const sidebarRef = useRef<HTMLElement>(null);
+  const [customWidth, setCustomWidth] = useState<number | null>(() => {
+    const saved = localStorage.getItem('assistant_sidebar_custom_width');
+    return saved ? parseInt(saved, 10) : null;
+  });
+  const [isResizing, setIsResizing] = useState(false);
+
+  // 限制自訂寬度在合理範圍內 (避免拖曳到較小螢幕時遮蔽行情區，最多不超過視窗寬度 55%)
+  const effectiveWidth = customWidth ? Math.min(customWidth, Math.max(320, window.innerWidth * 0.55)) : undefined;
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+    const startX = e.clientX;
+    const initialWidth = sidebarRef.current ? sidebarRef.current.getBoundingClientRect().width : 520;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const minW = 320;
+      const maxW = Math.max(minW, Math.min(800, window.innerWidth * 0.6));
+      const newW = Math.max(minW, Math.min(maxW, initialWidth + delta));
+      setCustomWidth(newW);
+    };
+
+    const onMouseUp = (upEvent: MouseEvent) => {
+      setIsResizing(false);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      const delta = upEvent.clientX - startX;
+      const minW = 320;
+      const maxW = Math.max(minW, Math.min(800, window.innerWidth * 0.6));
+      const finalW = Math.max(minW, Math.min(maxW, initialWidth + delta));
+      setCustomWidth(finalW);
+      localStorage.setItem('assistant_sidebar_custom_width', `${finalW}`);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleResetWidth = () => {
+    setCustomWidth(null);
+    localStorage.removeItem('assistant_sidebar_custom_width');
+  };
+
   // 下單頁面 (財神筆) 狀態
   const [orderAction, setOrderAction] = useState<'buy' | 'sell'>('buy');
   // 交易時段：'normal' 盤中交易 (09:00~13:30) 或 'after_hours' 盤後交易 (13:40~14:30)
@@ -130,9 +184,10 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   const activeOrdersCount = orders.filter((o) => o.canCancel).length;
   const currentStockActiveOrders = orders.filter((o) => o.code === stockCode && o.canCancel);
 
-  // 當 initialOrderCode 變更時同步更新代號與最新參考價
+  // 當 initialOrderCode 變更時同步更新代號與最新參考價 (僅在代號真正改變時觸發，避免 quotes 1Hz 更新時衝掉使用者選擇)
   useEffect(() => {
-    if (initialOrderCode) {
+    if (initialOrderCode && initialOrderCode !== prevInitialCodeRef.current) {
+      prevInitialCodeRef.current = initialOrderCode;
       setStockCode(initialOrderCode);
       const q = quotes[initialOrderCode];
       if (q && q.last && q.last > 0) {
@@ -191,6 +246,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
   // 點選持股一鍵帶入財神筆下單
   const handleSelectToOrder = (code: string, quantity?: number) => {
+    prevInitialCodeRef.current = code;
+    onOrderTargetCodeChange?.(code);
     setStockCode(code);
     const q = quotes[code];
     if (q && q.last && q.last > 0) {
@@ -410,6 +467,32 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     }
   };
 
+  // 手動清除歷史委託單紀錄
+  const [isClearingOrders, setIsClearingOrders] = useState(false);
+  const handleClearOrders = async () => {
+    const activeList = orders.filter((o) => o.canCancel);
+    let confirmMsg = '確定要清空今日委託單歷史紀錄嗎？';
+    if (activeList.length > 0) {
+      confirmMsg = `目前尚有 ${activeList.length} 筆掛單待撮合。\n\n「清空歷史單」僅清空畫面歷史顯示，不會向券商撤銷進行中的掛單。\n\n確定要清空紀錄嗎？`;
+    }
+
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      setIsClearingOrders(true);
+      await clearOrders();
+      setOrders([]);
+      setOrderNoticeType('info');
+      setOrderNotice('✔ 今日委託單歷史紀錄已清空');
+      setTimeout(() => setOrderNotice(null), 5000);
+    } catch (err: any) {
+      console.error('Failed to clear orders:', err);
+      alert('清空紀錄失敗：' + (err.message || '請稍後再試'));
+    } finally {
+      setIsClearingOrders(false);
+    }
+  };
+
   // 篩選委託單列表
   const filteredOrders = orders.filter((o) => {
     if (orderFilter === 'active') return o.canCancel;
@@ -420,9 +503,18 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
   return (
     <aside
-      className="assistant-sidebar"
+      ref={sidebarRef}
+      className={`assistant-sidebar ${isResizing ? 'is-resizing' : ''}`}
+      style={effectiveWidth ? { width: effectiveWidth } : undefined}
       aria-label="側邊輔助資料視窗"
     >
+      {/* 拖曳調節分隔手柄 (支援手動自由拉伸寬度，雙擊還原當前螢幕最佳寬度) */}
+      <div
+        className={`sidebar-resizer ${isResizing ? 'is-resizing' : ''}`}
+        onMouseDown={handleMouseDown}
+        onDoubleClick={handleResetWidth}
+        title="按住拖曳可調整財神庫寬度；雙擊重設為當前螢幕最佳自適應寬度"
+      />
       {/* 頂部標題與分頁切換列 */}
       <div className="sidebar-header">
         <div className="sidebar-tabs">
@@ -436,9 +528,17 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
             <span className="sidebar-tab-badge">{positions.length}</span>
           </button>
           <button
+            className={`sidebar-tab-btn ${activeTab === 'vault_ledger' ? 'active' : ''}`}
+            onClick={() => onChangeTab('vault_ledger')}
+            title="分頁二：財神收支簿（持股即時成交行情與操作）"
+          >
+            <span className="sidebar-tab-icon">📖</span>
+            <span className="sidebar-tab-title">財神收支簿</span>
+          </button>
+          <button
             className={`sidebar-tab-btn ${activeTab === 'order' ? 'active' : ''}`}
             onClick={() => onChangeTab('order')}
-            title="分頁二：財神筆（快速下單與委託管理）"
+            title="分頁三：財神筆（快速下單與委託管理）"
           >
             <span className="sidebar-tab-icon">✍️</span>
             <span className="sidebar-tab-title">財神筆</span>
@@ -452,6 +552,14 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
               </span>
             ) : null}
           </button>
+          <button
+            className={`sidebar-tab-btn ${activeTab === 'balance' ? 'active' : ''}`}
+            onClick={() => onChangeTab('balance')}
+            title="分頁四：財神口袋（T+2 在途交割與投資本金試算）"
+          >
+            <span className="sidebar-tab-icon">💰</span>
+            <span className="sidebar-tab-title">財神口袋</span>
+          </button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           {onLock && (
@@ -463,13 +571,6 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
               🔒 上鎖
             </button>
           )}
-          <button
-            className="btn-sidebar-collapse"
-            onClick={onClose}
-            title="收合左側輔助視窗"
-          >
-            ◂ 收合
-          </button>
         </div>
       </div>
 
@@ -541,6 +642,24 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                       >
                         💰 損益排行
                       </button>
+                      {onRefreshPositions && (
+                        <button
+                          type="button"
+                          className="vault-sort-pill vault-refresh-pill"
+                          disabled={isRefreshingPositions}
+                          onClick={async () => {
+                            setIsRefreshingPositions(true);
+                            try {
+                              await onRefreshPositions();
+                            } finally {
+                              setIsRefreshingPositions(false);
+                            }
+                          }}
+                          title="立即向永豐證券重新同步最新庫存 (包含買賣成交異動)"
+                        >
+                          {isRefreshingPositions ? '⟳ 同步中...' : '⟳ 同步持股'}
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -628,7 +747,147 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
               )}
             </div>
           </div>
-        ) : (
+        ) : activeTab === 'vault_ledger' ? (
+          /* ==================== 分頁二：財神收支簿 ==================== */
+          <div className="sidebar-vault-content">
+            <div className="sidebar-vault-list">
+              {sortedPositions.length === 0 ? (
+                <div className="sidebar-empty-msg">
+                  尚無持股資料，系統將於永豐證券 API 連線後自動同步。
+                </div>
+              ) : (
+                <>
+                  <div className="vault-sort-bar">
+                    <span className="vault-sort-title">持股收支簿 ({sortedPositions.length} 檔)</span>
+                    <div className="vault-sort-btn-group">
+                      <button
+                        type="button"
+                        className={`vault-sort-pill ${vaultSortMode === 'custom' ? 'active' : ''}`}
+                        onClick={() => setVaultSortMode('custom')}
+                        title="與財神簿自訂排序完全一致 (ETF、債、虎航在後)"
+                      >
+                        📌 自訂排序
+                      </button>
+                      <button
+                        type="button"
+                        className={`vault-sort-pill ${vaultSortMode === 'pnl' ? 'active' : ''}`}
+                        onClick={() => setVaultSortMode('pnl')}
+                        title="依未實現損益高低排序"
+                      >
+                        💰 損益排行
+                      </button>
+                      {onRefreshPositions && (
+                        <button
+                          type="button"
+                          className="vault-sort-pill vault-refresh-pill"
+                          disabled={isRefreshingPositions}
+                          onClick={async () => {
+                            setIsRefreshingPositions(true);
+                            try {
+                              await onRefreshPositions();
+                            } finally {
+                              setIsRefreshingPositions(false);
+                            }
+                          }}
+                          title="立即向永豐證券重新同步最新庫存 (包含買賣成交異動)"
+                        >
+                          {isRefreshingPositions ? '⟳ 同步中...' : '⟳ 同步持股'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="sidebar-vault-col-header">
+                    <span className="col-h-stock">商品</span>
+                    <span className="col-h-last-price">成交價</span>
+                    <span className="col-h-oddlot-price">零股價</span>
+                    <span className="col-h-change-pct">漲跌幅</span>
+                    <span className="col-h-action">操作</span>
+                  </div>
+                  {sortedPositions.map((pos) => {
+                    const q = quotes[pos.code];
+                    const prev = (q?.previousClose && q.previousClose > 0) ? q.previousClose : null;
+                    const last = (q?.last && q.last > 0) ? q.last : null;
+                    const chg = (last !== null && prev !== null) ? (q?.change ?? (last - prev)) : null;
+                    const pct = (last !== null && prev !== null) ? (q?.changePercent ?? (chg !== null ? (chg / prev) * 100 : null)) : null;
+
+                    let changeClass = 'color-neutral';
+                    if (chg !== null && !isNaN(chg)) {
+                      if (chg > 0) changeClass = 'color-up';
+                      else if (chg < 0) changeClass = 'color-down';
+                    }
+
+                    const lastClass = (last !== null && prev !== null)
+                      ? (last > prev ? 'color-up' : last < prev ? 'color-down' : 'color-neutral')
+                      : 'color-neutral';
+
+                    const oddLot = q?.oddLotLast ?? null;
+                    const oddLotClass = (oddLot !== null && prev !== null)
+                      ? (oddLot > prev ? 'color-up' : oddLot < prev ? 'color-down' : 'color-neutral')
+                      : 'color-neutral';
+
+                    const isOtc = ((pos.exchange || q?.exchange || '').toUpperCase() === 'OTC');
+                    const isDirty = dirtyCodes.has(pos.code);
+                    const isDimmed = Boolean(
+                      pos.code.startsWith('00') ||
+                      pos.code.includes('B') ||
+                      ['ETF', 'BOND'].includes((q?.securityType || '').toUpperCase()) ||
+                      pos.code === '6757'
+                    );
+
+                    return (
+                      <div
+                        key={pos.code}
+                        className={`sidebar-stock-card flat-card ${isDimmed ? 'card-dimmed' : ''} ${isDirty ? 'card-flash' : ''}`}
+                      >
+                        <div className="flat-card-stock">
+                          <span
+                            className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
+                            title={isOtc ? '上櫃股票' : '上市股票'}
+                          >
+                            {isOtc ? '櫃' : '市'}
+                          </span>
+                          <span className="flat-stock-name" title={pos.name || pos.code}>
+                            {pos.name || pos.code}
+                          </span>
+                          <span className={`flat-stock-code ${isOtc ? 'code-otc' : 'code-tse'}`}>
+                            {pos.code}
+                          </span>
+                        </div>
+
+                        <div className={`flat-card-price ${lastClass}`} title="整股成交價">
+                          {last !== null ? last.toFixed(2) : '—'}
+                        </div>
+
+                        <div className={`flat-card-oddlot ${oddLotClass}`} title="盤中零股成交價">
+                          <span className="oddlot-prefix">零</span>
+                          {oddLot !== null && oddLot > 0 ? oddLot.toFixed(2) : '—'}
+                        </div>
+
+                        <div className={`flat-card-pct ${changeClass}`} title="當日漲跌幅">
+                          {pct === null || isNaN(pct)
+                            ? '—'
+                            : pct > 0
+                            ? `+${pct.toFixed(2)}%`
+                            : `${pct.toFixed(2)}%`}
+                        </div>
+
+                        <button
+                          className="btn-order-shortcut"
+                          title={`帶入「${pos.name || pos.code}」快速下單`}
+                          onClick={() => handleSelectToOrder(pos.code, pos.quantity)}
+                        >
+                          <span>下單</span>
+                          <span className="order-shortcut-arrow">↗</span>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+            </div>
+          </div>
+        ) : activeTab === 'order' ? (
           /* ==================== 分頁二：財神筆 ==================== */
           <div className="sidebar-order-content">
             {orderNotice && (
@@ -1080,15 +1339,26 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     <span>今日委託單紀錄</span>
                     <span className="orders-count-tag">共 {orders.length} 筆</span>
                   </div>
-                  <button
-                    type="button"
-                    className={`btn-reload-orders ${isLoadingOrders ? 'loading' : ''}`}
-                    onClick={loadOrders}
-                    disabled={isLoadingOrders}
-                    title="立即更新委託單狀態"
-                  >
-                    {isLoadingOrders ? '🔄 更新中...' : '🔄 整理'}
-                  </button>
+                  <div className="orders-mgmt-actions">
+                    <button
+                      type="button"
+                      className="btn-clear-orders"
+                      onClick={handleClearOrders}
+                      disabled={isClearingOrders || orders.length === 0}
+                      title={orders.length === 0 ? "目前尚無委託單可清空" : "清空目前顯示的歷史委託單紀錄"}
+                    >
+                      {isClearingOrders ? '🧹 清空中...' : '🧹 清空歷史單'}
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn-reload-orders ${isLoadingOrders ? 'loading' : ''}`}
+                      onClick={loadOrders}
+                      disabled={isLoadingOrders}
+                      title="立即更新委託單狀態"
+                    >
+                      {isLoadingOrders ? '🔄 更新中...' : '🔄 整理'}
+                    </button>
+                  </div>
                 </div>
 
                 {/* 篩選標籤 */}
@@ -1129,6 +1399,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     <div className="orders-empty-state">
                       <div className="empty-icon">📭</div>
                       <div className="empty-text">今日尚無符合條件的委託單</div>
+                      <div className="empty-subtext">（每日 15:00 收盤後自動歸檔清空，不影響次日交易）</div>
                       <button
                         type="button"
                         className="btn-goto-order"
@@ -1774,6 +2045,9 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
               document.body
             )}
           </div>
+        ) : (
+          /* ==================== 分頁三：資金餘額 ==================== */
+          <BalanceTab />
         )}
       </div>
     </aside>

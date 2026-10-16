@@ -2,26 +2,27 @@
   --bg-main: #f8fafc;
   --bg-card: #ffffff;
   --bg-hover: #f1f5f9;
-  --border-color: #e2e8f0;
-  --border-subtle: #f1f5f9;
-  --text-main: #0f172a;
-  --text-sub: #334155;
-  --text-muted: #64748b;
+  --border-color: #cbd5e1;
+  --border-subtle: #e2e8f0;
+  --text-main: #0a0f1d;
+  --text-sub: #1e293b;
+  --text-secondary: #334155;
+  --text-muted: #475569;
   --color-up: #dc2626;
   --color-down: #16a34a;
-  --color-orange: #d97706;
+  --color-orange: #b45309;
   --header-bg: #f1f5f9;
   --input-bg: #ffffff;
-  --input-border: #cbd5e1;
-  --badge-bg: #f1f5f9;
+  --input-border: #94a3b8;
+  --badge-bg: #e2e8f0;
   --pill-group-bg: #e2e8f0;
   --pill-active-bg: #ffffff;
-  --pill-text: #475569;
-  --pill-active-text: #0f172a;
+  --pill-text: #1e293b;
+  --pill-active-text: #0a0f1d;
   --btn-bg: #ffffff;
-  --btn-border: #cbd5e1;
-  --btn-hover: #f8fafc;
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --btn-border: #94a3b8;
+  --btn-hover: #f1f5f9;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 [data-theme="dark"] {
@@ -1467,35 +1468,26 @@ body {
   gap: 2px;
 }
 
-/* 下半行：平整數值網格 (最高/最低/總量/昨收/開盤) + 極簡操作按鈕 */
-.flat-row-secondary {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+/* 中間行：平整數值網格 (最高/最低/總量/昨收/開盤) - 獨佔整行 100% 寬度 */
+.flat-row-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  width: 100%;
   padding-top: 6px;
   border-top: 1px dashed var(--border-subtle);
-  gap: 6px;
-  min-height: 38px;
-}
-
-.flat-grid {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex: 1 1 auto;
-  min-width: 0;
   gap: 4px;
+  box-sizing: border-box;
 }
 
 .flat-col {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   min-width: 0;
-  flex: 1 1 0;
 }
 
 .flat-label {
-  font-size: 9px;
+  font-size: 9.5px;
   font-weight: 500;
   color: var(--text-muted);
   margin-bottom: 2px;
@@ -1504,13 +1496,16 @@ body {
 }
 
 .flat-val {
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 600;
   font-feature-settings: 'tnum';
   white-space: nowrap;
-  letter-spacing: -0.4px;
-  line-height: 1.15;
+  letter-spacing: -0.2px;
+  line-height: 1.2;
   margin-top: 0 !important;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .flat-val.color-up {
@@ -1543,11 +1538,33 @@ body {
   color: var(--text-sub) !important;
 }
 
+/* 下半行：均線標籤 (左側) 與極簡操作按鈕 (右側) */
+.flat-row-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 3px;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.flat-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.flat-footer-left .ma-tag-group-card {
+  margin-left: 0;
+}
+
 /* 扁平化操作按鈕：無突兀線框、純平微交互 */
 .flat-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   flex-shrink: 0;
 }
 
@@ -1834,19 +1851,22 @@ body {
     font-size: 10px;
     height: 22px;
   }
-  .flat-row-secondary {
+  .flat-row-metrics {
     padding-top: 5px;
     gap: 3px;
-    min-height: 34px;
   }
-  .flat-grid {
-    gap: 2px;
+  .flat-label {
+    font-size: 9px;
   }
   .flat-val {
-    font-size: 10px;
+    font-size: 10.5px;
+  }
+  .flat-row-footer {
+    padding-top: 3px;
+    min-height: 22px;
   }
   .flat-actions {
-    gap: 0;
+    gap: 1px;
   }
   .btn-flat-action {
     width: 20px;
@@ -2008,12 +2028,13 @@ body {
   overflow-x: hidden;
 }
 
-/* 左側輔助視窗 (並排側邊欄) */
+/* 左側輔助視窗 (並排側邊欄) - 支援多螢幕自適應與手動自由拉伸 */
 .assistant-sidebar {
-  width: 520px;
-  min-width: 480px;
-  max-width: 560px;
+  width: var(--sidebar-width, 520px);
+  min-width: 320px;
+  max-width: 650px;
   flex-shrink: 0;
+  position: relative;
   background-color: var(--bg-card);
   border-right: 1px solid var(--border-color);
   box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
@@ -2024,15 +2045,38 @@ body {
   animation: slideSidebarIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.assistant-sidebar.is-resizing {
+  user-select: none;
+  transition: none !important;
+}
+
 @keyframes slideSidebarIn {
   from {
     width: 0;
     opacity: 0;
   }
   to {
-    width: 520px;
+    width: var(--sidebar-width, 520px);
     opacity: 1;
   }
+}
+
+/* 側邊欄拖曳調節分隔線 (支援手動自由拉伸寬度，雙擊還原自適應) */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 25;
+  transition: background-color 0.15s ease;
+}
+
+.sidebar-resizer:hover,
+.sidebar-resizer.is-resizing {
+  background-color: var(--color-orange, #f59e0b);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
 }
 
 .sidebar-header {
@@ -2084,22 +2128,7 @@ body {
   color: var(--text-muted);
 }
 
-.btn-sidebar-collapse {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.btn-sidebar-collapse:hover {
-  background-color: var(--bg-hover);
-  color: var(--text-main);
-  border-color: var(--text-muted);
-}
+/* .btn-sidebar-collapse 已移除 */
 
 .btn-sidebar-lock {
   background: rgba(239, 68, 68, 0.08);
@@ -2386,6 +2415,65 @@ body {
   transform: translate(1px, -1px);
 }
 
+/* 財神收支簿專用樣式 */
+.sidebar-vault-col-header .col-h-last-price {
+  flex: 0.9;
+  text-align: right;
+  min-width: 65px;
+}
+
+.sidebar-vault-col-header .col-h-oddlot-price {
+  flex: 0.9;
+  text-align: right;
+  min-width: 65px;
+}
+
+.sidebar-vault-col-header .col-h-change-pct {
+  flex: 0.9;
+  text-align: right;
+  min-width: 65px;
+}
+
+.flat-card-price {
+  flex: 0.9;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-feature-settings: 'tnum';
+  white-space: nowrap;
+  min-width: 65px;
+}
+
+.flat-card-oddlot {
+  flex: 0.9;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-feature-settings: 'tnum';
+  white-space: nowrap;
+  min-width: 65px;
+}
+
+.flat-card-oddlot .oddlot-prefix {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+.flat-card-pct {
+  flex: 0.9;
+  text-align: right;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-feature-settings: 'tnum';
+  white-space: nowrap;
+  min-width: 65px;
+}
+
 /* 財神筆 (下單雛形) 內容 */
 .sidebar-order-content {
   display: flex;
@@ -2428,17 +2516,65 @@ body {
 }
 
 
+/* ==================== 多螢幕解析度動態適配 (Multi-Monitor Responsive Layout) ==================== */
+:root {
+  --sidebar-width: 520px;
+}
+
+/* 1. 超寬與大螢幕 (如 32 吋 2K/4K，寬度 >= 1920px)：充分釋放橫向視野，側邊欄與個股清單全開不裁切 */
+@media (min-width: 1920px) {
+  :root {
+    --sidebar-width: 520px;
+  }
+}
+
+/* 2. 標準桌面寬螢幕 (1440px ~ 1919px，常見 24 吋 / 27 吋 1080p 螢幕) */
+@media (min-width: 1440px) and (max-width: 1919px) {
+  :root {
+    --sidebar-width: 480px;
+  }
+}
+
+/* 3. 筆記型電腦螢幕或中型分割視窗 (1024px ~ 1439px，如 MacBook 螢幕) */
+@media (min-width: 1024px) and (max-width: 1439px) {
+  :root {
+    --sidebar-width: clamp(380px, 30vw, 440px);
+  }
+  .vault-table th.th-vault-stock, .vault-table td.cell-vault-stock {
+    padding-left: 10px;
+  }
+  .vault-table th.th-vault-roi, .vault-table td.cell-vault-roi {
+    padding-right: 10px;
+  }
+}
+
+/* 4. 窄螢幕 / 左右分割半螢幕 (769px ~ 1023px) */
+@media (min-width: 769px) and (max-width: 1023px) {
+  :root {
+    --sidebar-width: clamp(330px, 34vw, 380px);
+  }
+  .vault-table th.th-vault-stock, .vault-table td.cell-vault-stock {
+    padding-left: 8px;
+  }
+  .vault-table th.th-vault-roi, .vault-table td.cell-vault-roi {
+    padding-right: 8px;
+  }
+}
+
 @media (max-width: 768px) {
   .app-workspace.sidebar-open {
     flex-direction: column;
   }
   .assistant-sidebar {
-    width: 100%;
-    min-width: 100%;
-    max-width: 100%;
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
     border-right: none;
     border-bottom: 1px solid var(--border-color);
     max-height: 55vh;
+  }
+  .sidebar-resizer {
+    display: none;
   }
 }
 
@@ -3053,6 +3189,38 @@ body {
   font-weight: 500;
 }
 
+.orders-mgmt-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-clear-orders {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-clear-orders:hover:not(:disabled) {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.btn-clear-orders:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
 .btn-reload-orders {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
@@ -3135,6 +3303,14 @@ body {
 .orders-empty-state .empty-text {
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.orders-empty-state .empty-subtext {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  opacity: 0.8;
+  margin-top: -4px;
+  margin-bottom: 4px;
 }
 
 .btn-goto-order {
@@ -4334,3 +4510,1155 @@ body {
   border-color: rgba(147, 51, 234, 0.4);
   font-weight: 600;
 }
+
+/* ==================== 資金餘額分頁 (BalanceTab) 樣式 ==================== */
+.balance-tab-container {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px;
+  overflow-y: auto;
+  color: var(--text-main);
+}
+
+.balance-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.balance-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.balance-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.balance-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.btn-refresh-balance {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-refresh-balance:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: #38bdf8;
+  color: #38bdf8;
+}
+
+.balance-error-banner {
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  color: #f87171;
+  font-size: 12px;
+}
+
+/* 區塊 1: 帳戶起始本金卡片 */
+.balance-capital-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.capital-mode-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+
+.mode-selector-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.mode-pills {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.btn-mode-pill {
+  flex: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.btn-mode-pill:hover {
+  color: var(--text-main);
+  background: var(--bg-hover);
+}
+
+.btn-mode-pill.active {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: #38bdf8;
+  color: #38bdf8;
+  font-weight: 700;
+}
+
+.delta-applied {
+  font-size: 11px;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.capital-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.capital-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fbbf24;
+}
+
+.capital-unit {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.capital-input-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.capital-input-wrap {
+  position: relative;
+  flex: 1;
+}
+
+.capital-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 32px 8px 12px;
+  background: var(--input-bg, #ffffff);
+  border: 1px solid var(--input-border, #cbd5e1);
+  border-radius: 6px;
+  color: var(--text-main, #0f172a);
+  font-size: 17px;
+  font-weight: 700;
+  font-family: monospace;
+  position: relative;
+  z-index: 1;
+  pointer-events: auto !important;
+}
+
+.capital-input:focus {
+  outline: none;
+  border-color: #fbbf24;
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.2);
+}
+
+.capital-input-suffix {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.btn-save-capital {
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: #2563eb;
+  border: none;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.btn-save-capital:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.btn-save-capital.btn-save-success {
+  background: #10b981;
+}
+
+.capital-adjust-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.adjust-tip {
+  color: var(--text-muted);
+}
+
+.adjust-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-adjust {
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card, #ffffff);
+  transition: all 0.15s ease;
+}
+
+.btn-adjust-sub {
+  color: #ef4444;
+}
+
+.btn-adjust-sub:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+}
+
+.btn-adjust-add {
+  color: #10b981;
+}
+
+.btn-adjust-add:hover {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: #10b981;
+}
+
+/* 區塊 2: 三大階段餘額格子 (格子1, 格子2, 格子3) */
+.balance-stages-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.balance-grid-card {
+  background: var(--bg-card, #ffffff);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.balance-grid-card.highlight-target {
+  background: var(--bg-card, #ffffff);
+  border: 2px solid #0284c7;
+  box-shadow: 0 4px 16px rgba(2, 132, 199, 0.15);
+}
+
+[data-theme="dark"] .balance-grid-card.highlight-target {
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+  border: 1.5px solid #38bdf8;
+  box-shadow: 0 4px 16px rgba(56, 189, 248, 0.12);
+}
+
+.grid-card-tag {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-hover, #f1f5f9);
+  color: var(--text-muted);
+}
+
+.grid-card-tag.badge-final {
+  background: rgba(2, 132, 199, 0.15);
+  color: #0284c7;
+  border: 1px solid rgba(2, 132, 199, 0.35);
+}
+
+[data-theme="dark"] .grid-card-tag.badge-final {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+}
+
+.grid-card-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.grid-date {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.grid-amount-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.grid-main-val {
+  font-size: 24px;
+  font-weight: 800;
+  font-family: monospace;
+  color: var(--text-main);
+}
+
+.highlight-amount .grid-main-val {
+  color: #0284c7;
+  font-size: 28px;
+}
+
+[data-theme="dark"] .highlight-amount .grid-main-val {
+  color: #38bdf8;
+}
+
+.grid-val-unit {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.grid-delta-row {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.delta-zero {
+  color: var(--text-muted);
+}
+
+.delta-income {
+  color: #ef4444; /* 台股漲/收為紅 */
+  font-weight: 700;
+}
+
+.delta-expense {
+  color: #10b981; /* 台股扣款為綠 */
+  font-weight: 700;
+}
+
+.grid-card-footnote {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 4px;
+  background: rgba(56, 189, 248, 0.06);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+/* 區塊 3: 永豐在途交割款清單表格 */
+.balance-details-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.details-title {
+  margin: 0 0 10px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.settlements-table-wrap {
+  overflow-x: auto;
+}
+
+.settlements-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.settlements-table th {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.settlements-table td {
+  padding: 8px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.settlements-table .align-right {
+  text-align: right;
+}
+
+.settlements-table .num-font {
+  font-family: monospace;
+  font-weight: 600;
+}
+
+.badge-t {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.badge-t0 {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+}
+
+.badge-t1 {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+.badge-t2 {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+}
+
+.tag-pay {
+  color: #10b981;
+  font-weight: 600;
+}
+
+.tag-receive {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+.tag-none {
+  color: var(--text-muted);
+}
+
+.table-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 16px !important;
+}
+
+/* T+2 買賣算式 (a+b-c) 樣式 */
+.t2-delta-formula-row {
+  align-items: flex-start !important;
+  margin-top: 4px;
+}
+
+.t2-formula-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.t2-formula-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  line-height: 1.5;
+}
+
+.t2-formula-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: help;
+  transition: transform 0.15s ease;
+}
+
+.t2-formula-item:hover {
+  transform: translateY(-1px);
+}
+
+.formula-plus {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.formula-minus {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.formula-op {
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.formula-val {
+  font-family: monospace;
+}
+
+.formula-name {
+  font-size: 10.5px;
+  opacity: 0.9;
+  margin-left: 1px;
+}
+
+.t2-formula-equal {
+  color: var(--text-muted);
+  font-weight: 700;
+  font-size: 12px;
+  margin: 0 2px;
+}
+
+.t2-formula-total {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+}
+
+/* ==================== 投資事件月行事曆 (Investment Calendar Modal) ==================== */
+.cal-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  padding: 20px;
+}
+
+.cal-modal-container {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  width: 95vw;
+  max-width: 1280px;
+  height: 90vh;
+  max-height: 860px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.cal-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cal-header-icon {
+  font-size: 20px;
+}
+
+.cal-header-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.cal-header-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.cal-header-center {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cal-nav-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.cal-nav-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-color, #38bdf8);
+}
+
+.cal-current-label {
+  font-size: 16px;
+  color: var(--text-main);
+  min-width: 120px;
+  text-align: center;
+}
+
+.cal-today-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.cal-today-btn:hover {
+  color: var(--text-main);
+  background: var(--bg-hover);
+}
+
+.cal-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.cal-close-btn:hover {
+  color: #ef4444;
+  background: var(--bg-hover);
+}
+
+/* 篩選列 */
+.cal-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background-color: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.cal-filter-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.cal-filter-pill {
+  padding: 4px 10px;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.cal-filter-pill:hover {
+  background: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.cal-filter-pill.active {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border-color: #38bdf8;
+}
+
+.cal-filter-pill.pill-futures.active {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+.cal-filter-pill.pill-macro.active {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border-color: #60a5fa;
+}
+
+.cal-filter-pill.pill-stock.active {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border-color: #34d399;
+}
+
+[data-theme='light'] .cal-filter-pill.active {
+  background: #e0f2fe;
+  color: #0369a1;
+  border-color: #0284c7;
+}
+
+[data-theme='light'] .cal-filter-pill.pill-futures.active {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-color: #dc2626;
+}
+
+[data-theme='light'] .cal-filter-pill.pill-macro.active {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-color: #2563eb;
+}
+
+[data-theme='light'] .cal-filter-pill.pill-stock.active {
+  background: #d1fae5;
+  color: #047857;
+  border-color: #059669;
+}
+
+.cal-count-badge {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* 主體雙欄 */
+.cal-body-wrapper {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.cal-grid-pane {
+  flex: 2.2;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border-color);
+  overflow-y: auto;
+}
+
+.cal-weekday-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  padding: 8px 0;
+  flex-shrink: 0;
+}
+
+.cal-weekday.weekend {
+  color: var(--text-muted);
+}
+
+.cal-days-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-auto-rows: minmax(100px, 1fr);
+  flex: 1;
+  background-color: var(--border-color);
+  gap: 1px;
+}
+
+.cal-day-cell {
+  background-color: var(--bg-card);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+  overflow: hidden;
+}
+
+.cal-day-cell:hover {
+  background-color: var(--bg-hover);
+}
+
+.cal-day-cell.not-current-month {
+  background-color: rgba(0, 0, 0, 0.15);
+  opacity: 0.45;
+}
+
+[data-theme='light'] .cal-day-cell.not-current-month {
+  background-color: #f8fafc;
+  opacity: 0.5;
+}
+
+.cal-day-cell.cell-today {
+  border: 1.5px solid #38bdf8;
+}
+
+.cal-day-cell.cell-selected {
+  background-color: rgba(56, 189, 248, 0.08);
+  box-shadow: inset 0 0 0 2px #38bdf8;
+}
+
+.cal-cell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cal-cell-num {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+  font-family: var(--font-mono, monospace);
+}
+
+.cal-today-tag {
+  font-size: 10px;
+  background: #38bdf8;
+  color: #0f172a;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+
+.cal-cell-events {
+  display: flex;
+  flex-direction: column;
+  gap: 2.5px;
+  overflow: hidden;
+}
+
+.cal-mini-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.25;
+}
+
+.cal-mini-badge.badge-futures {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ff6b6b;
+  border-left: 3px solid #ef4444;
+}
+
+.cal-mini-badge.badge-macro {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border-left: 3px solid #3b82f6;
+}
+
+.cal-mini-badge.badge-stock {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border-left: 3px solid #10b981;
+}
+
+[data-theme='light'] .cal-mini-badge.badge-futures {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-left: 3px solid #dc2626;
+  border-top: 1px solid #fca5a5;
+  border-right: 1px solid #fca5a5;
+  border-bottom: 1px solid #fca5a5;
+}
+
+[data-theme='light'] .cal-mini-badge.badge-macro {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-left: 3px solid #2563eb;
+  border-top: 1px solid #93c5fd;
+  border-right: 1px solid #93c5fd;
+  border-bottom: 1px solid #93c5fd;
+}
+
+[data-theme='light'] .cal-mini-badge.badge-stock {
+  background: #d1fae5;
+  color: #047857;
+  border-left: 3px solid #059669;
+  border-top: 1px solid #6ee7b7;
+  border-right: 1px solid #6ee7b7;
+  border-bottom: 1px solid #6ee7b7;
+}
+
+.cal-more-badge {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 700;
+  padding-left: 2px;
+}
+
+/* 右側明細抽屜 */
+.cal-detail-pane {
+  flex: 1.2;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-secondary);
+  overflow-y: auto;
+}
+
+.cal-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background-color: var(--bg-card);
+  flex-shrink: 0;
+}
+
+.cal-detail-title {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.cal-detail-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.cal-detail-list {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cal-empty-state {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 40px 16px;
+  font-size: 13px;
+}
+
+.cal-event-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  transition: border-color 0.15s;
+}
+
+.cal-event-card.type-futures {
+  border-left: 4px solid #ef4444;
+}
+
+.cal-event-card.type-macro {
+  border-left: 4px solid #3b82f6;
+}
+
+.cal-event-card.type-stock {
+  border-left: 4px solid #10b981;
+}
+
+.cal-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cal-card-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cal-type-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.cal-type-tag.tag-futures {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.cal-type-tag.tag-macro {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.cal-type-tag.tag-stock {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+[data-theme='light'] .cal-type-tag.tag-futures {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #f87171;
+}
+
+[data-theme='light'] .cal-type-tag.tag-macro {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border: 1px solid #60a5fa;
+}
+
+[data-theme='light'] .cal-type-tag.tag-stock {
+  background: #d1fae5;
+  color: #047857;
+  border: 1px solid #34d399;
+}
+
+.cal-tag-pill {
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--bg-hover);
+  color: var(--text-main);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.cal-time-pill {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-muted);
+}
+
+.cal-btn-view-stock {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.cal-btn-view-stock:hover {
+  background: #f59e0b;
+  color: #ffffff;
+}
+
+.cal-event-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 1.4;
+}
+
+.cal-event-detail {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+.cal-macro-data-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.data-pill {
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.data-pill.forecast strong {
+  color: #38bdf8;
+}
+
+[data-theme='light'] .data-pill.forecast strong {
+  color: #0284c7;
+}
+
+.data-pill.previous strong {
+  color: var(--text-muted);
+}
+
+[data-theme='light'] .data-pill.previous strong {
+  color: #334155;
+}
+
+@media (max-width: 900px) {
+  .cal-body-wrapper {
+    flex-direction: column;
+  }
+  .cal-grid-pane {
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+  }
+}
+

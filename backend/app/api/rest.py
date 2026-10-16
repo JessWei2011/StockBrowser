@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from backend.app.services.watchlist_service import watchlist_service
 from backend.app.services.shioaji_adapter import shioaji_adapter
@@ -12,7 +13,14 @@ from backend.app.domain.models import (
     PlaceOrderRequest,
     OrderItem,
     UpdateOrderRequest,
+    AccountBalanceState,
+    UpdateCapitalRequest,
+    SettlementItem,
+    SettlementTradeDetail,
+    CalendarMonthResponse,
 )
+import datetime
+from backend.app.repositories.db import get_setting, set_setting, now_iso
 
 router = APIRouter(prefix="/api/v1")
 
@@ -99,14 +107,28 @@ async def refresh_announcements():
     res = await announcement_service.refresh_all_announcements(reason="manual_api")
     return {"status": "ok", "totalStocks": len(res)}
 
+@router.get("/calendar", response_model=CalendarMonthResponse)
+async def get_calendar_events(
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None)
+):
+    from backend.app.services.calendar_service import calendar_service
+    now = datetime.datetime.now()
+    y = year or now.year
+    m = month or now.month
+    return await calendar_service.get_month_calendar(y, m)
+
 @router.post("/system/refresh")
 async def refresh_system_quotes(force_reconnect: bool = False):
-    """手動重新校正合約快取與今日快照，若 force_reconnect=True 則強制重設 Shioaji 連線與重新登入"""
+    """手動重新校正合約快取、持股庫存與今日快照，若 force_reconnect=True 則強制重設 Shioaji 連線與重新登入"""
     if force_reconnect:
         await shioaji_adapter.reconnect()
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, shioaji_adapter.refresh_contracts_and_snapshots)
-    return {"status": "ok", "message": "Contracts, snapshots, and indices refreshed", "reconnected": force_reconnect}
+    await watchlist_service.sync_wealth_book()
+    from backend.app.services.publisher import publisher
+    await publisher.broadcast_watchlist_changed()
+    return {"status": "ok", "message": "Contracts, snapshots, indices, and positions refreshed", "reconnected": force_reconnect}
 
 @router.get("/charts/{code}")
 async def get_stock_chart(code: str):
@@ -166,6 +188,14 @@ async def get_orders():
     """查詢今日所有證券委託單與成交狀態"""
     return shioaji_adapter.fetch_orders()
 
+@router.post("/orders/clear")
+async def clear_orders():
+    """手動清空今日委託單紀錄"""
+    try:
+        return shioaji_adapter.clear_orders()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.post("/orders/{order_id}/cancel")
 async def cancel_order(order_id: str):
     """取消特定委託單"""
@@ -183,6 +213,112 @@ async def update_order(order_id: str, body: UpdateOrderRequest):
             new_price=body.newPrice,
             new_qty=body.newQty,
         )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/account/balance", response_model=AccountBalanceState)
+async def get_account_balance():
+    """取得帳戶本金設定與 T+0 / T+1 / T+2 交割試算餘額"""
+    try:
+        raw_cap = await get_setting("account_capital_wan")
+        has_configured = raw_cap is not None and raw_cap.strip() != ""
+        base_cap = float(raw_cap) if has_configured else None
+
+        raw_mode = await get_setting("account_capital_mode")
+        capital_mode = raw_mode if raw_mode in ("before_t0", "after_t0") else "after_t0"
+
+        settlements_raw = shioaji_adapter.fetch_settlements()
+        
+        t0_amt = 0.0
+        t0_date = ""
+        t1_amt = 0.0
+        t1_date = ""
+        t2_amt = 0.0
+        t2_date = ""
+        
+        items: list[SettlementItem] = []
+        for s in settlements_raw:
+            t = s.get("t", 0)
+            d = s.get("date", "")
+            amt = float(s.get("amount", 0.0))
+            amt_wan = float(s.get("amountWan", 0.0))
+            items.append(SettlementItem(
+                t=t,
+                date=d,
+                amount=amt,
+                amountWan=amt_wan
+            ))
+            if t == 0:
+                t0_amt = amt
+                t0_date = d
+            elif t == 1:
+                t1_amt = amt
+                t1_date = d
+            elif t == 2:
+                t2_amt = amt
+                t2_date = d
+
+        t0_remaining = None
+        t1_remaining = None
+        t2_remaining = None
+
+        if has_configured and base_cap is not None:
+            # 計算三格餘額 (單位: 萬)
+            # 若使用者填的是「T+0 扣款前」：則格子 1 (T+0 餘額) = 起始本金 + 今日交割款
+            # 若使用者填的是「T+0 扣款後」：則今日交割款已在填入本金中反映，格子 1 (T+0 餘額) = 起始本金
+            if capital_mode == "before_t0":
+                t0_remaining = round(base_cap + (t0_amt / 10000.0), 4)
+            else:
+                t0_remaining = round(base_cap, 4)
+
+            # 格子 2 (T+1): T+0 餘額 + 次日交割款
+            t1_remaining = round(t0_remaining + (t1_amt / 10000.0), 4)
+            # 格子 3 (T+2): T+1 餘額 + 後天交割款
+            t2_remaining = round(t1_remaining + (t2_amt / 10000.0), 4)
+
+        # 取得今日買賣明細並拼裝算式 (a + b - c)
+        raw_deals = shioaji_adapter.fetch_today_deals_breakdown()
+        t2_trade_details: list[SettlementTradeDetail] = []
+        formula_parts = []
+        for rd in raw_deals:
+            detail_item = SettlementTradeDetail(**rd)
+            t2_trade_details.append(detail_item)
+            sign = "+" if detail_item.netAmount >= 0 else "-"
+            amt_abs_wan = abs(detail_item.netAmountWan)
+            stock_label = f"{detail_item.name or detail_item.code}"
+            formula_parts.append(f"{sign}{amt_abs_wan:.2f}萬({stock_label})")
+
+        t2_formula_str = " ".join(formula_parts) if formula_parts else ""
+
+        return AccountBalanceState(
+            hasConfigured=has_configured,
+            baseCapitalWan=round(base_cap, 4) if base_cap is not None else None,
+            capitalMode=capital_mode,
+            t0Date=t0_date,
+            t0Amount=t0_amt,
+            t0RemainingWan=t0_remaining,
+            t1Date=t1_date,
+            t1Amount=t1_amt,
+            t1RemainingWan=t1_remaining,
+            t2Date=t2_date,
+            t2Amount=t2_amt,
+            t2RemainingWan=t2_remaining,
+            t2Formula=t2_formula_str,
+            t2Details=t2_trade_details,
+            settlements=items,
+            updatedAt=now_iso() if "now_iso" in globals() else ""
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/account/capital")
+async def update_account_capital(body: UpdateCapitalRequest):
+    """更新帳戶起始投資本金與扣款模式 (單位: 萬)"""
+    try:
+        await set_setting("account_capital_wan", str(body.capitalWan))
+        mode = body.capitalMode if body.capitalMode in ("before_t0", "after_t0") else "after_t0"
+        await set_setting("account_capital_mode", mode)
+        return {"status": "ok", "capitalWan": body.capitalWan, "capitalMode": mode}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

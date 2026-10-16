@@ -62,3 +62,18 @@ async def test_vault_and_wealth_protection():
 
         del_w = await client.delete("/api/v1/groups/g-wealth")
         assert del_w.status_code == 400
+
+@pytest.mark.asyncio
+async def test_orders_and_clear_orders():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # 測試取得委託清單
+        res = await client.get("/api/v1/orders")
+        assert res.status_code == 200
+        assert isinstance(res.json(), list)
+
+        # 測試手動清空委託單歷史紀錄
+        clear_res = await client.post("/api/v1/orders/clear")
+        assert clear_res.status_code == 200
+        data = clear_res.json()
+        assert data["success"] is True
+        assert "今日委託單紀錄已清空" in data["message"]

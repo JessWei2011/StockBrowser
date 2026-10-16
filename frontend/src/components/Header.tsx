@@ -18,6 +18,7 @@ interface HeaderProps {
   onAddStock: (code: string) => Promise<void>;
   onOpenCreateGroup: () => void;
   onOpenEditGroup: () => void;
+  onOpenCalendar?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -36,6 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
   onAddStock,
   onOpenCreateGroup,
   onOpenEditGroup,
+  onOpenCalendar,
 }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<InstrumentSearchResult[]>([]);
@@ -203,6 +205,16 @@ export const Header: React.FC<HeaderProps> = ({
         <button className="btn-icon" title="重新載入" onClick={onRefresh}>
           ↻
         </button>
+
+        {onOpenCalendar && (
+          <button
+            className="btn-action btn-calendar-action"
+            title="開啟投資事件月行事曆 (期指結算、美國總經、自選與權值股事件)"
+            onClick={onOpenCalendar}
+          >
+            📅 行事曆
+          </button>
+        )}
 
         <button
           className="btn-theme-toggle"

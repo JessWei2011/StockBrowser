@@ -99,6 +99,29 @@ export interface StockAnnouncement {
   updatedAt?: string | null;
 }
 
+export interface CalendarEvent {
+  id: string;
+  date: string; // YYYY-MM-DD
+  time?: string | null;
+  type: 'futures' | 'macro' | 'stock';
+  category: string;
+  title: string;
+  tag: string;
+  code?: string | null;
+  name?: string | null;
+  detail?: string | null;
+  forecast?: string | null;
+  previous?: string | null;
+  impact?: 'High' | 'Medium' | 'Low' | string | null;
+}
+
+export interface CalendarMonthData {
+  year: number;
+  month: number;
+  events: CalendarEvent[];
+  updatedAt: string;
+}
+
 export interface StockMaSummary {
   code: string;
   name?: string;
@@ -245,6 +268,45 @@ export interface OrderItem {
 export interface UpdateOrderParams {
   newPrice?: number;
   newQty?: number;
+}
+
+export interface SettlementItem {
+  t: number;
+  date: string;
+  amount: number;
+  amountWan: number;
+}
+
+export interface SettlementTradeDetail {
+  code: string;
+  name: string;
+  action: 'Buy' | 'Sell' | string;
+  qty: number;
+  price: number;
+  totalPrice: number;
+  fee: number;
+  tax: number;
+  netAmount: number;
+  netAmountWan: number;
+}
+
+export interface AccountBalanceState {
+  hasConfigured: boolean;
+  baseCapitalWan: number | null;
+  capitalMode: 'before_t0' | 'after_t0';
+  t0Date: string;
+  t0Amount: number;
+  t0RemainingWan: number | null;
+  t1Date: string;
+  t1Amount: number;
+  t1RemainingWan: number | null;
+  t2Date: string;
+  t2Amount: number;
+  t2RemainingWan: number | null;
+  t2Formula?: string;
+  t2Details?: SettlementTradeDetail[];
+  settlements: SettlementItem[];
+  updatedAt: string;
 }
 
 
