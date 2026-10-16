@@ -83,6 +83,178 @@ JACKSON_HOLE_SCHEDULE = {
     "2027-08-28": "Jackson Hole 全球央行年會 (閉幕)",
 }
 
+# 全球與台灣年度重大科技與產業展覽行事曆
+MAJOR_EXHIBITIONS = [
+    {
+        "id": "ces",
+        "name": "CES 國際消費性電子展",
+        "tag": "🎪 CES電子展",
+        "venue": "美國拉斯維加斯會展中心 (LVCC)",
+        "theme": "AI PC、AI 終端裝置、智慧車載與座艙、人形機器人、智慧家庭",
+        "stocks": "聯發科(2454)、華碩(2357)、廣達(2382)、微星(2377)、技嘉(2376)、台達電(2308)",
+        "schedules": [
+            ("2025-01-07", "2025-01-10"),
+            ("2026-01-06", "2026-01-09"),
+            ("2027-01-05", "2027-01-08"),
+        ],
+    },
+    {
+        "id": "tgs",
+        "name": "台北國際電玩展 (Taipei Game Show)",
+        "tag": "🎪 台北電玩展",
+        "venue": "台北南港展覽館 1 館",
+        "theme": "電競硬體設備、遊戲主機、元宇宙 XR 沉浸裝置、AI 遊戲開發應用",
+        "stocks": "微星(2377)、技嘉(2376)、華碩(2357)、智冠(5478)、鈊象(3293)",
+        "schedules": [
+            ("2025-01-23", "2025-01-26"),
+            ("2026-01-22", "2026-01-25"),
+            ("2027-01-21", "2027-01-24"),
+        ],
+    },
+    {
+        "id": "mwc",
+        "name": "MWC 世界行動通訊大會",
+        "tag": "🎪 MWC通訊展",
+        "venue": "西班牙巴塞隆納 Fira Gran Via",
+        "theme": "5G-Advanced、6G 前瞻網路、Wi-Fi 7、低軌衛星直連通訊 (NTN)、邊緣 AI 伺服器",
+        "stocks": "聯發科(2454)、中磊(5388)、智邦(2345)、啟碁(6285)、智易(3596)、聯茂(6213)",
+        "schedules": [
+            ("2025-03-03", "2025-03-06"),
+            ("2026-03-02", "2026-03-05"),
+            ("2027-03-01", "2027-03-04"),
+        ],
+    },
+    {
+        "id": "gtc",
+        "name": "NVIDIA GTC 全球 AI 開發者大會",
+        "tag": "🎪 NVIDIA GTC",
+        "venue": "美國加州聖荷西會展中心",
+        "theme": "次世代 GPU 運算架構、人形機器人 Project GR00T、AI 超級運算、NVLink、液冷散熱技術",
+        "stocks": "台積電(2330)、鴻海(2317)、廣達(2382)、緯穎(6669)、奇鋐(3017)、雙鴻(3324)、所羅門(2359)、川湖(2059)",
+        "schedules": [
+            ("2025-03-17", "2025-03-21"),
+            ("2026-03-16", "2026-03-19"),
+            ("2027-03-15", "2027-03-18"),
+        ],
+    },
+    {
+        "id": "touch-taiwan",
+        "name": "Touch Taiwan 系列展 (智慧顯示展 / 智慧製造展)",
+        "tag": "🎪 Touch Taiwan",
+        "venue": "台北南港展覽館 1 館 4 樓",
+        "theme": "MicroLED 次世代顯示、矽光子 (CPO)、面板級扇出型封裝 (FOPLP)、彩色電子紙、車用智慧座艙顯示",
+        "stocks": "友達(2409)、群創(3481)、富采(3714)、元太(8069)、惠特(6706)、由田(3455)、群翊(6664)",
+        "schedules": [
+            ("2025-04-16", "2025-04-18"),
+            ("2026-04-08", "2026-04-10"),
+            ("2027-04-14", "2027-04-16"),
+        ],
+    },
+    {
+        "id": "computex",
+        "name": "COMPUTEX 台北國際電腦展 (InnoVEX)",
+        "tag": "🎪 COMPUTEX",
+        "venue": "台北南港展覽館 1 館 & 2 館",
+        "theme": "AI 伺服器旗艦平台、AI 算力叢集、液冷與浸沒式散熱、AI PC/邊緣運算、高頻高速傳輸",
+        "stocks": "台積電(2330)、鴻海(2317)、廣達(2382)、緯創(3231)、華碩(2357)、技嘉(2376)、奇鋐(3017)、雙鴻(3324)、台達電(2308)",
+        "schedules": [
+            ("2025-05-20", "2025-05-23"),
+            ("2026-06-02", "2026-06-05"),
+            ("2027-06-01", "2027-06-04"),
+        ],
+    },
+    {
+        "id": "robot-tairos",
+        "name": "台北國際自動化工業大展 & 台灣機器人與智慧自動化展 (TAIROS)",
+        "tag": "🎪 機器人展",
+        "venue": "台北南港展覽館 1 館 & 2 館",
+        "theme": "具身智能人形機器人、AI 視覺引導、協作型機械手臂、精密減速機/滾珠螺桿、智慧工廠 AMR",
+        "stocks": "所羅門(2359)、廣明(6188)、上銀(2049)、亞德客-KY(1590)、研華(2395)、新漢(8234)、凌華(6166)、大銀微系統(4576)",
+        "schedules": [
+            ("2025-08-20", "2025-08-23"),
+            ("2026-08-19", "2026-08-22"),
+            ("2027-08-18", "2027-08-21"),
+        ],
+    },
+    {
+        "id": "semicon",
+        "name": "SEMICON Taiwan 國際半導體展",
+        "tag": "🎪 半導體展",
+        "venue": "台北南港展覽館 1 館 & 2 館",
+        "theme": "埃米世代先進製程 (A16/2nm)、CoWoS/SoIC 3D 先進封裝、矽光子 (SiPh/CPO) 聯盟、半導體設備與材料自主化",
+        "stocks": "台積電(2330)、日月光投控(3711)、弘塑(3131)、辛耘(3583)、萬潤(6187)、均豪(5443)、穎崴(6515)、旺矽(6223)、聯亞(3081)",
+        "schedules": [
+            ("2025-09-03", "2025-09-05"),
+            ("2026-09-02", "2026-09-04"),
+            ("2027-09-01", "2027-09-03"),
+        ],
+    },
+    {
+        "id": "tadte-aerospace",
+        "name": "台北國際航太暨國防工業展 (TADTE)",
+        "tag": "🎪 航太國防展",
+        "venue": "台北南港展覽館 1 館",
+        "theme": "軍民通用無人機防禦、國防航太裝備、低軌衛星載具通訊、高階複合材料",
+        "stocks": "漢翔(2634)、雷虎(8033)、事欣科(4916)、全訊(5222)、邑錡(7402)、寶一(8222)、亞航(2630)",
+        "schedules": [
+            ("2025-09-18", "2025-09-20"),
+            ("2027-09-16", "2027-09-18"),
+        ],
+    },
+    {
+        "id": "tpca-show",
+        "name": "TPCA Show 台灣電路板產業國際展",
+        "tag": "🎪 TPCA電路板展",
+        "venue": "台北南港展覽館 1 館",
+        "theme": "先進封裝載板 (ABF/BT)、高頻高速銅箔基板 (CCL)、高多層伺服器 PCB、高密度互連 (HDI)",
+        "stocks": "欣興(3037)、景碩(3189)、南電(8046)、台光電(2383)、台燿(6274)、聯茂(6213)、金像電(2368)",
+        "schedules": [
+            ("2025-10-22", "2025-10-24"),
+            ("2026-10-21", "2026-10-23"),
+            ("2027-10-20", "2027-10-22"),
+        ],
+    },
+    {
+        "id": "energy-taiwan",
+        "name": "Energy Taiwan 台灣國際智慧能源週 & Net-Zero Taiwan 淨零永續展",
+        "tag": "🎪 綠能淨零展",
+        "venue": "台北南港展覽館 1 館 & 2 館",
+        "theme": "離岸風電水下基礎、太陽光電模組、大容量儲能系統、智慧電網與高壓重電變壓器、氫能科技",
+        "stocks": "華城(1519)、士電(1503)、中興電(1513)、亞力(1514)、森崴能源(6806)、雲豹能源(6869)、世紀鋼(9958)",
+        "schedules": [
+            ("2025-10-29", "2025-10-31"),
+            ("2026-10-28", "2026-10-30"),
+            ("2027-10-27", "2027-10-29"),
+        ],
+    },
+    {
+        "id": "tasti-space",
+        "name": "TASTI 台灣太空國際年會暨太空產業展",
+        "tag": "🎪 太空科技展",
+        "venue": "高雄展覽館 / 大台南會展中心 (TASA 官方巡迴主辦)",
+        "theme": "國家太空科技計畫、低軌道通訊衛星酬載、B5G/6G 太空星系、相位陣列地面接收天線、太空級零組件驗證",
+        "stocks": "昇達科(3491)、華通(2313)、金寶(2312)、台揚(2314)、元晶(6443)、事欣科(4916)、耀登(3138)",
+        "schedules": [
+            ("2025-10-27", "2025-10-30"),
+            ("2026-11-08", "2026-11-10"),
+            ("2027-10-25", "2027-10-28"),
+        ],
+    },
+    {
+        "id": "healthcare-expo",
+        "name": "Healthcare+ Expo 台灣醫療科技展",
+        "tag": "🎪 醫療科技展",
+        "venue": "台北南港展覽館 1 館",
+        "theme": "醫療生成式 AI 輔助、智慧醫院遠距照護、微創手術機器人、精準基因療法、再生醫療 CDMO",
+        "stocks": "佳世達(2352)、研華(2395)、廣達(2382)、保瑞(6472)、美時(1795)、長聖(6712)",
+        "schedules": [
+            ("2025-12-04", "2025-12-07"),
+            ("2026-12-03", "2026-12-06"),
+            ("2027-12-02", "2027-12-05"),
+        ],
+    },
+]
+
 class CalendarService:
     def __init__(self):
         self._cached_ff_events: list[dict] = []
@@ -466,9 +638,9 @@ class CalendarService:
                     continue
 
                 cat = it.get("category", "")
-                tag = it.get("tag", "個股")
+                raw_tag = it.get("tag", "個股")
                 # 排除「注意股票」事件不納入行事曆
-                if cat == "attention" or "注意" in tag:
+                if cat == "attention" or "注意" in raw_tag:
                     continue
 
                 title = it.get("title", "")
@@ -476,15 +648,39 @@ class CalendarService:
                 raw_name = code_name_map.get(code)
                 c_name = raw_name if raw_name and raw_name != code else code
                 display_label = f"[{code} {c_name}]" if c_name != code else f"[{code}]"
+                target_name = c_name if c_name else code
+
+                # 標籤與標題依使用者要求：標示明確目標 (如「致茂 財報」、「台積電 除息」)，日期已在月曆格中，不需重複
+                if cat == "earnings" or "財報" in raw_tag or "財報" in title:
+                    event_tag = f"{target_name} 財報"
+                    event_title = f"{display_label} 財報/法說會公告"
+                elif cat == "exdividend" or "除息" in raw_tag or "除權" in raw_tag:
+                    ex_type = "息" if "息" in raw_tag else "權" if "權" in raw_tag else "權息"
+                    event_tag = f"{target_name} 除{ex_type}"
+                    event_title = f"{display_label} 除權除息預告 ({ex_type})"
+                elif cat == "briefing" or "法說" in raw_tag or "法說" in title:
+                    event_tag = f"{target_name} 法說"
+                    event_title = f"{display_label} 法人說明會"
+                elif cat == "revenue" or "自結" in raw_tag or "營收" in raw_tag:
+                    event_tag = f"{target_name} 營收"
+                    event_title = f"{display_label} 自結營收公告"
+                elif cat == "disposition" or "處置" in raw_tag:
+                    event_tag = f"{target_name} 處置"
+                    event_title = f"{display_label} 處置股票列管"
+                else:
+                    cleaned_tag = re.sub(r'[\s(]*\d{1,2}/\d{1,2}[)]*', '', raw_tag).strip()
+                    event_tag = f"{target_name} {cleaned_tag}" if cleaned_tag else f"{target_name} 個股"
+                    cleaned_title = re.sub(r'[\s(]*\d{1,2}/\d{1,2}[)]*', '', title).strip()
+                    event_title = f"{display_label} {cleaned_title}" if cleaned_title else f"{display_label} 重大事件"
 
                 results.append(CalendarEventItem(
                     id=f"stk-{it.get('id', f'{code}-{d}')}",
                     date=d,
-                    time="14:00" if "法說" in tag or "法說" in title else None,
+                    time="14:00" if "法說" in raw_tag or "法說" in title else None,
                     type="stock",
                     category=cat,
-                    title=f"{display_label} {title}",
-                    tag=tag,
+                    title=event_title,
+                    tag=event_tag,
                     code=code,
                     name=c_name,
                     detail=detail,
@@ -508,6 +704,51 @@ class CalendarService:
 
         return results
 
+    def get_exhibition_events(self, year: int, month: int) -> list[CalendarEventItem]:
+        """產出當月份的各大科技與產業展覽行事曆事件 (Touch Taiwan、機器人展、太空展、SEMICON、COMPUTEX等)"""
+        results: list[CalendarEventItem] = []
+
+        for exh in MAJOR_EXHIBITIONS:
+            for s_date, e_date in exh.get("schedules", []):
+                try:
+                    s_dt = datetime.date.fromisoformat(s_date)
+                    e_dt = datetime.date.fromisoformat(e_date)
+                except ValueError:
+                    continue
+
+                cur = s_dt
+                total_days = (e_dt - s_dt).days + 1
+                while cur <= e_dt:
+                    if cur.year == year and cur.month == month:
+                        d_str = cur.strftime("%Y-%m-%d")
+                        if cur == s_dt:
+                            status_str = "開展首日"
+                        elif cur == e_dt:
+                            status_str = "閉幕日"
+                        else:
+                            day_idx = (cur - s_dt).days + 1
+                            status_str = f"展期第 {day_idx}/{total_days} 天"
+
+                        results.append(CalendarEventItem(
+                            id=f"exh-{exh['id']}-{d_str}",
+                            date=d_str,
+                            time="全日",
+                            type="exhibition",
+                            category="exhibition",
+                            title=f"【{status_str}】{exh['name']}",
+                            tag=exh["tag"],
+                            detail=(
+                                f"📍 展出地點：{exh['venue']}\n"
+                                f"📅 展會日程：{s_date} ~ {e_date} (每日 10:00~17:00)\n"
+                                f"🎯 核心題材：{exh['theme']}\n"
+                                f"💡 關鍵概念股：{exh['stocks']}"
+                            ),
+                            impact="High"
+                        ))
+                    cur += datetime.timedelta(days=1)
+
+        return results
+
     async def get_month_calendar(self, year: int, month: int) -> CalendarMonthResponse:
         """整合同一月份的所有行事曆事件"""
         # 1. 期指結算日 (演算法)
@@ -519,13 +760,17 @@ class CalendarService:
         # 3. 總經即時 Feed (美 CPI / PPI / NFP / 失業率)
         feed_macro = self.get_macro_feed_events(year, month)
 
-        # 4. 個股事件 (自選 + 熱門權值股)
+        # 4. 產業大展 (Touch Taiwan / 機器人展 / 太空展 / COMPUTEX / SEMICON 等)
+        exhibition_events = self.get_exhibition_events(year, month)
+
+        # 5. 個股事件 (自選 + 熱門權值股)
         stock_events = await self.get_stock_events(year, month)
 
-        all_events = futures_events + fixed_macro + feed_macro + stock_events
+        all_events = futures_events + fixed_macro + feed_macro + exhibition_events + stock_events
 
-        # 依照日期排序
-        all_events.sort(key=lambda x: (x.date, x.time or "00:00", x.type))
+        # 依照日期與類型優先級排序 (期貨 > 總經 > 產業大展 > 個股)
+        type_priority = {"futures": 0, "macro": 1, "exhibition": 2, "stock": 3}
+        all_events.sort(key=lambda x: (x.date, type_priority.get(x.type, 9), x.time or "99:99"))
 
         return CalendarMonthResponse(
             year=year,

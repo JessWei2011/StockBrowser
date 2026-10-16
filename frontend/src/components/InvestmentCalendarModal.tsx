@@ -8,7 +8,36 @@ interface InvestmentCalendarModalProps {
   onSelectStock?: (code: string) => void;
 }
 
-type FilterType = 'all' | 'futures' | 'macro' | 'stock';
+type FilterType = 'all' | 'futures' | 'macro' | 'exhibition' | 'stock';
+
+/**
+ * 格式化日曆事件標籤：
+ * 依使用者需求，月曆每一天格子中已明確顯示日期，標籤必須標明具體目標 (如「致茂 財報」、「台積電 除息」)，
+ * 絕不顯示無目標的「財報 10/19」等冗餘日期標籤。
+ */
+export const formatEventTag = (ev: CalendarEvent): string => {
+  if (ev.type === 'stock') {
+    const target = ev.name || ev.code;
+    let baseTag = ev.tag || '';
+    if (/\d{1,2}\/\d{1,2}/.test(baseTag)) {
+      if (baseTag.includes('財報')) {
+        return target ? `${target} 財報` : '財報';
+      }
+      if (baseTag.includes('除息')) {
+        return target ? `${target} 除息` : '除息';
+      }
+      if (baseTag.includes('除權')) {
+        return target ? `${target} 除權` : '除權';
+      }
+      baseTag = baseTag.replace(/[\s(]*\d{1,2}\/\d{1,2}[)]*/g, '').trim();
+    }
+    if (target && !baseTag.startsWith(target)) {
+      return `${target} ${baseTag}`.trim();
+    }
+    return baseTag;
+  }
+  return ev.tag;
+};
 
 export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = ({
   isOpen,
@@ -161,8 +190,8 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
   // 當前選取日期的事件列表
   const selectedDateEvents = useMemo(() => {
     return (eventsByDate[selectedDate] || []).sort((a, b) => {
-      // 期貨 > 總經 > 個股
-      const rank = { futures: 0, macro: 1, stock: 2 };
+      // 期貨 > 總經 > 產業大展 > 個股
+      const rank = { futures: 0, macro: 1, exhibition: 2, stock: 3 };
       return (rank[a.type] ?? 9) - (rank[b.type] ?? 9);
     });
   }, [eventsByDate, selectedDate]);
@@ -178,7 +207,7 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
             <span className="cal-header-icon">📅</span>
             <h2 className="cal-header-title">投資事件月行事曆</h2>
             <span className="cal-header-sub">
-              (期指結算 · 美國總經 · 自選與權值股事件)
+              (期指結算 · 美國總經 · 產業大展 · 自選與權值股事件)
             </span>
           </div>
 
@@ -222,6 +251,12 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
             onClick={() => setActiveFilter('macro')}
           >
             🇺🇸 美國總經 / 聯準會
+          </button>
+          <button
+            className={`cal-filter-pill pill-exhibition ${activeFilter === 'exhibition' ? 'active' : ''}`}
+            onClick={() => setActiveFilter('exhibition')}
+          >
+            🎪 產業大展
           </button>
           <button
             className={`cal-filter-pill pill-stock ${activeFilter === 'stock' ? 'active' : ''}`}
@@ -280,7 +315,7 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
                           className={`cal-mini-badge badge-${ev.type}`}
                           title={`${ev.time ? `[${ev.time}] ` : ''}${ev.title}`}
                         >
-                          <span className="mini-tag">{ev.tag}</span>
+                          <span className="mini-tag">{formatEventTag(ev)}</span>
                         </div>
                       ))}
                       {dayEvents.length > 3 && (
@@ -321,9 +356,15 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
                     <div className="cal-card-top">
                       <div className="cal-card-badges">
                         <span className={`cal-type-tag tag-${ev.type}`}>
-                          {ev.type === 'futures' ? '期指結算' : ev.type === 'macro' ? '美國總經' : '個股事件'}
+                          {ev.type === 'futures'
+                            ? '期指結算'
+                            : ev.type === 'macro'
+                            ? '美國總經'
+                            : ev.type === 'exhibition'
+                            ? '產業大展'
+                            : '個股事件'}
                         </span>
-                        <span className="cal-tag-pill">{ev.tag}</span>
+                        <span className="cal-tag-pill">{formatEventTag(ev)}</span>
                         {ev.time && (
                           <span className="cal-time-pill">⏰ {ev.time}</span>
                         )}

@@ -5248,6 +5248,12 @@ body {
   border-color: #60a5fa;
 }
 
+.cal-filter-pill.pill-exhibition.active {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border-color: #a855f7;
+}
+
 .cal-filter-pill.pill-stock.active {
   background: rgba(16, 185, 129, 0.15);
   color: #34d399;
@@ -5270,6 +5276,12 @@ body {
   background: #dbeafe;
   color: #1d4ed8;
   border-color: #2563eb;
+}
+
+[data-theme='light'] .cal-filter-pill.pill-exhibition.active {
+  background: #f3e8ff;
+  color: #7e22ce;
+  border-color: #9333ea;
 }
 
 [data-theme='light'] .cal-filter-pill.pill-stock.active {
@@ -5411,6 +5423,12 @@ body {
   border-left: 3px solid #3b82f6;
 }
 
+.cal-mini-badge.badge-exhibition {
+  background: rgba(168, 85, 247, 0.2);
+  color: #d8b4fe;
+  border-left: 3px solid #a855f7;
+}
+
 .cal-mini-badge.badge-stock {
   background: rgba(16, 185, 129, 0.2);
   color: #34d399;
@@ -5433,6 +5451,15 @@ body {
   border-top: 1px solid #93c5fd;
   border-right: 1px solid #93c5fd;
   border-bottom: 1px solid #93c5fd;
+}
+
+[data-theme='light'] .cal-mini-badge.badge-exhibition {
+  background: #f3e8ff;
+  color: #6b21a8;
+  border-left: 3px solid #7e22ce;
+  border-top: 1px solid #d8b4fe;
+  border-right: 1px solid #d8b4fe;
+  border-bottom: 1px solid #d8b4fe;
 }
 
 [data-theme='light'] .cal-mini-badge.badge-stock {
@@ -5516,6 +5543,10 @@ body {
   border-left: 4px solid #3b82f6;
 }
 
+.cal-event-card.type-exhibition {
+  border-left: 4px solid #a855f7;
+}
+
 .cal-event-card.type-stock {
   border-left: 4px solid #10b981;
 }
@@ -5550,6 +5581,11 @@ body {
   color: #3b82f6;
 }
 
+.cal-type-tag.tag-exhibition {
+  background: rgba(168, 85, 247, 0.18);
+  color: #c084fc;
+}
+
 .cal-type-tag.tag-stock {
   background: rgba(16, 185, 129, 0.15);
   color: #10b981;
@@ -5565,6 +5601,12 @@ body {
   background: #dbeafe;
   color: #1d4ed8;
   border: 1px solid #60a5fa;
+}
+
+[data-theme='light'] .cal-type-tag.tag-exhibition {
+  background: #f3e8ff;
+  color: #6b21a8;
+  border: 1px solid #c084fc;
 }
 
 [data-theme='light'] .cal-type-tag.tag-stock {

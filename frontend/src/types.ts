@@ -103,7 +103,7 @@ export interface CalendarEvent {
   id: string;
   date: string; // YYYY-MM-DD
   time?: string | null;
-  type: 'futures' | 'macro' | 'stock';
+  type: 'futures' | 'macro' | 'stock' | 'exhibition';
   category: string;
   title: string;
   tag: string;

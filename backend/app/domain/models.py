@@ -106,8 +106,8 @@ class CalendarEventItem(BaseModel):
     id: str
     date: str  # YYYY-MM-DD
     time: Optional[str] = None  # e.g. "20:30", "14:00", "02:00"
-    type: str  # 'futures' | 'macro' | 'stock'
-    category: str  # 'tx_settlement' | 'sgx_settlement' | 'quad_witching' | 'fomc' | 'cpi' | 'ppi' | 'nfp' | 'jackson_hole' | 'earnings' | 'revenue' | 'exdividend' | 'briefing' | 'macro_other'
+    type: str  # 'futures' | 'macro' | 'exhibition' | 'stock'
+    category: str  # 'tx_settlement' | 'sgx_settlement' | 'quad_witching' | 'fomc' | 'cpi' | 'ppi' | 'nfp' | 'jackson_hole' | 'exhibition' | 'earnings' | 'revenue' | 'exdividend' | 'briefing' | 'macro_other'
     title: str
     tag: str
     code: Optional[str] = None
