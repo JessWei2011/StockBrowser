@@ -1003,9 +1003,9 @@ class ShioajiAdapter:
             bid = safe_float(bids[0]) if bids and len(bids) > 0 else None
             ask = safe_float(asks[0]) if asks and len(asks) > 0 else None
 
-            # 試撮判定：Shioaji simtrade 旗標 (1: 試撮) 或當前台股試撮時段
-            simtrade_flag = getattr(quote, "simtrade", 0)
-            is_sim = bool(simtrade_flag == 1 or is_taiwan_trial_matching())
+            # 試撮判定：僅在開盤前試撮 (08:30~09:00) 或收盤前試撮 (13:25~13:30) 標記試撮
+            # 盤中一般交易時段 (09:00~13:25) 成交價一律維持真實成交價，避免分盤處置委託試撮洗成星號長亮
+            is_sim = is_taiwan_trial_matching()
 
             dt = getattr(quote, "datetime", None)
             source_ts = dt.isoformat() if isinstance(dt, datetime) else None

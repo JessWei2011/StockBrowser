@@ -51,6 +51,9 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 手機專用檢視模式：'calendar' (月曆網格 + 當日明細) | 'list' (全月所有事件清單)
+  const [mobileViewMode, setMobileViewMode] = useState<'calendar' | 'list'>('calendar');
+
   // 選取的單日與篩選器
   const [selectedDate, setSelectedDate] = useState<string>(
     `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
@@ -110,6 +113,14 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
     setCurrentYear(now.getFullYear());
     setCurrentMonth(now.getMonth() + 1);
     setSelectedDate(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
+  };
+
+  const getWeekdayStr = (dateStr: string) => {
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return '';
+    const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    const weekdays = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
+    return weekdays[dt.getDay()] || '';
   };
 
   // 生成月曆矩陣（每週 7 天，週日到週六）
@@ -196,6 +207,94 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
     });
   }, [eventsByDate, selectedDate]);
 
+  // 當月所有事件（依日期排序），用於手機「事件清單 (Agenda)」模式
+  const allMonthEventsGrouped = useMemo(() => {
+    if (!calendarData?.events) return [];
+    const dateMap = new Map<string, CalendarEvent[]>();
+    for (const ev of calendarData.events) {
+      if (activeFilter !== 'all' && ev.type !== activeFilter) {
+        continue;
+      }
+      if (!dateMap.has(ev.date)) {
+        dateMap.set(ev.date, []);
+      }
+      dateMap.get(ev.date)!.push(ev);
+    }
+    const sortedDates = Array.from(dateMap.keys()).sort();
+    const rank = { futures: 0, macro: 1, exhibition: 2, stock: 3 };
+    return sortedDates.map((dStr) => {
+      const list = dateMap.get(dStr)!;
+      list.sort((a, b) => (rank[a.type] ?? 9) - (rank[b.type] ?? 9));
+      return {
+        dateStr: dStr,
+        events: list,
+      };
+    });
+  }, [calendarData, activeFilter]);
+
+  const totalFilteredEventsCount = useMemo(() => {
+    return allMonthEventsGrouped.reduce((acc, g) => acc + g.events.length, 0);
+  }, [allMonthEventsGrouped]);
+
+  const renderEventCard = (ev: CalendarEvent) => (
+    <div key={ev.id} className={`cal-event-card type-${ev.type}`}>
+      <div className="cal-card-top">
+        <div className="cal-card-badges">
+          <span className={`cal-type-tag tag-${ev.type}`}>
+            {ev.type === 'futures'
+              ? '期指結算'
+              : ev.type === 'macro'
+              ? '美國總經'
+              : ev.type === 'exhibition'
+              ? '產業大展'
+              : '個股事件'}
+          </span>
+          <span className="cal-tag-pill">{formatEventTag(ev)}</span>
+          {ev.time && (
+            <span className="cal-time-pill">⏰ {ev.time}</span>
+          )}
+        </div>
+
+        {ev.code && onSelectStock && (
+          <button
+            type="button"
+            className="cal-btn-view-stock"
+            onClick={() => {
+              onClose();
+              onSelectStock(ev.code!);
+            }}
+            title="開啟此個股技術圖表"
+          >
+            走勢圖 ↗
+          </button>
+        )}
+      </div>
+
+      <h4 className="cal-event-title">{ev.title}</h4>
+
+      {ev.detail && (
+        <p className="cal-event-detail">
+          {ev.detail}
+        </p>
+      )}
+
+      {(ev.forecast || ev.previous) && (
+        <div className="cal-macro-data-row">
+          {ev.forecast && (
+            <span className="data-pill forecast">
+              預測: <strong>{ev.forecast}</strong>
+            </span>
+          )}
+          {ev.previous && (
+            <span className="data-pill previous">
+              前值: <strong>{ev.previous}</strong>
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
   if (!isOpen) return null;
 
   return (
@@ -226,9 +325,29 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
             </button>
           </div>
 
-          <button className="cal-close-btn" onClick={onClose} title="關閉 (Esc)">
-            ✕
-          </button>
+          <div className="cal-header-actions">
+            {/* 手機專用：切換「月曆」與「清單」檢視模式 */}
+            <div className="cal-view-mode-toggle">
+              <button
+                type="button"
+                className={`cal-view-mode-btn ${mobileViewMode === 'calendar' ? 'active' : ''}`}
+                onClick={() => setMobileViewMode('calendar')}
+              >
+                📅 月曆
+              </button>
+              <button
+                type="button"
+                className={`cal-view-mode-btn ${mobileViewMode === 'list' ? 'active' : ''}`}
+                onClick={() => setMobileViewMode('list')}
+              >
+                📋 清單 ({totalFilteredEventsCount})
+              </button>
+            </div>
+
+            <button className="cal-close-btn" onClick={onClose} title="關閉 (Esc)">
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* 篩選切換列 */}
@@ -273,7 +392,7 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
         </div>
 
         {/* 月曆與側邊詳情雙欄區 */}
-        <div className="cal-body-wrapper">
+        <div className={`cal-body-wrapper mode-${mobileViewMode}`}>
           {/* 左側日曆主網格 */}
           <div className="cal-grid-pane">
             <div className="cal-weekday-row">
@@ -307,7 +426,7 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
                       {cell.isToday && <span className="cal-today-tag">今日</span>}
                     </div>
 
-                    {/* 當日事件摘要標籤清單 (最多顯示 3 條) */}
+                    {/* 桌面端事件摘要文字標籤 */}
                     <div className="cal-cell-events">
                       {dayEvents.slice(0, 3).map((ev) => (
                         <div
@@ -324,13 +443,27 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
                         </div>
                       )}
                     </div>
+
+                    {/* 手機端事件彩色圓點標示 (俐落不破版) */}
+                    <div className="cal-cell-dots">
+                      {dayEvents.slice(0, 4).map((ev) => (
+                        <span
+                          key={ev.id}
+                          className={`cal-cell-dot dot-${ev.type}`}
+                          title={formatEventTag(ev)}
+                        />
+                      ))}
+                      {dayEvents.length > 4 && (
+                        <span className="cal-cell-dot-more">+{dayEvents.length - 4}</span>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
           </div>
 
-          {/* 右側所選日期的事件詳情抽屜 */}
+          {/* 右側所選日期的事件詳情抽屜 (手機月曆模式下置於月曆下方) */}
           <div className="cal-detail-pane">
             <div className="cal-detail-header">
               <h3 className="cal-detail-title">
@@ -351,64 +484,59 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
                   當日尚無排定之重大財經事件或結算。
                 </div>
               ) : (
-                selectedDateEvents.map((ev) => (
-                  <div key={ev.id} className={`cal-event-card type-${ev.type}`}>
-                    <div className="cal-card-top">
-                      <div className="cal-card-badges">
-                        <span className={`cal-type-tag tag-${ev.type}`}>
-                          {ev.type === 'futures'
-                            ? '期指結算'
-                            : ev.type === 'macro'
-                            ? '美國總經'
-                            : ev.type === 'exhibition'
-                            ? '產業大展'
-                            : '個股事件'}
+                selectedDateEvents.map(renderEventCard)
+              )}
+            </div>
+          </div>
+
+          {/* 手機全月事件清單 (在清單模式下全螢幕捲動瀏覽) */}
+          <div className="cal-agenda-pane">
+            <div className="cal-agenda-header">
+              <span className="cal-agenda-header-title">
+                {currentYear} 年 {currentMonth} 月事件一覽
+              </span>
+              <span className="cal-agenda-header-count">
+                共 {totalFilteredEventsCount} 項
+              </span>
+            </div>
+
+            <div className="cal-agenda-list">
+              {isLoading ? (
+                <div className="cal-empty-state">載入中...</div>
+              ) : error ? (
+                <div className="cal-empty-state cal-error-state">{error}</div>
+              ) : allMonthEventsGrouped.length === 0 ? (
+                <div className="cal-empty-state">
+                  本月尚無排定之重大財經事件或結算。
+                </div>
+              ) : (
+                allMonthEventsGrouped.map((group) => {
+                  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+                  const isGroupToday = group.dateStr === todayStr;
+                  return (
+                    <div key={group.dateStr} className="cal-agenda-date-group">
+                      <div className={`cal-agenda-date-header ${isGroupToday ? 'is-today' : ''}`}>
+                        <div className="cal-agenda-date-left">
+                          <span className="cal-agenda-date-badge">
+                            {group.dateStr.slice(5).replace('-', '/')}
+                          </span>
+                          <span className="cal-agenda-weekday">
+                            {getWeekdayStr(group.dateStr)}
+                          </span>
+                          {isGroupToday && (
+                            <span className="cal-agenda-today-pill">今日</span>
+                          )}
+                        </div>
+                        <span className="cal-agenda-date-count">
+                          {group.events.length} 項
                         </span>
-                        <span className="cal-tag-pill">{formatEventTag(ev)}</span>
-                        {ev.time && (
-                          <span className="cal-time-pill">⏰ {ev.time}</span>
-                        )}
                       </div>
-
-                      {ev.code && onSelectStock && (
-                        <button
-                          type="button"
-                          className="cal-btn-view-stock"
-                          onClick={() => {
-                            onClose();
-                            onSelectStock(ev.code!);
-                          }}
-                          title="開啟此個股技術圖表"
-                        >
-                          走勢圖 ↗
-                        </button>
-                      )}
+                      <div className="cal-agenda-cards-list">
+                        {group.events.map(renderEventCard)}
+                      </div>
                     </div>
-
-                    <h4 className="cal-event-title">{ev.title}</h4>
-
-                    {ev.detail && (
-                      <p className="cal-event-detail">
-                        {ev.detail}
-                      </p>
-                    )}
-
-                    {(ev.forecast || ev.previous) && (
-                      <div className="cal-macro-data-row">
-                        {ev.forecast && (
-                          <span className="data-pill forecast">
-                            預測: <strong>{ev.forecast}</strong>
-                          </span>
-                        )}
-                        {ev.previous && (
-                          <span className="data-pill previous">
-                            前值: <strong>{ev.previous}</strong>
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>

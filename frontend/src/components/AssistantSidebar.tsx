@@ -19,6 +19,7 @@ interface AssistantSidebarProps {
   onLock?: () => void;
   orderedCodes?: string[];
   onRefreshPositions?: () => Promise<void> | void;
+  onReorderPositions?: (codes: string[]) => Promise<void> | void;
 }
 
 function calcPositionMetrics(
@@ -70,8 +71,16 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   onLock,
   orderedCodes = [],
   onRefreshPositions,
+  onReorderPositions,
 }) => {
   const [isRefreshingPositions, setIsRefreshingPositions] = useState(false);
+  // 財神庫排序模式：'custom' (依照自選排序，預設) 或 'pnl' (依損益金額排序)
+  const [vaultSortMode, setVaultSortMode] = useState<'custom' | 'pnl'>('custom');
+  // 拖曳排序狀態
+  const [draggedPosIdx, setDraggedPosIdx] = useState<number | null>(null);
+  const [dragOverPosIdx, setDragOverPosIdx] = useState<number | null>(null);
+  // 手動清除歷史委託單紀錄
+  const [isClearingOrders, setIsClearingOrders] = useState(false);
   const prevInitialCodeRef = useRef<string | undefined>(undefined);
 
   // 側邊欄多螢幕自適應與手動自由拖曳寬度
@@ -223,9 +232,6 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
   if (!isOpen) return null;
 
-  // 財神庫排序模式：'custom' (依照自選排序，預設) 或 'pnl' (依損益金額排序)
-  const [vaultSortMode, setVaultSortMode] = useState<'custom' | 'pnl'>('custom');
-
   // 排序持股：預設依自選順序 (與財神簿相同)，亦可切換為損益排行
   const sortedPositions = [...positions].sort((a, b) => {
     if (vaultSortMode === 'custom' && orderedCodes && orderedCodes.length > 0) {
@@ -243,6 +249,95 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     const pnlB = calcPositionMetrics(b.code, priceB, b.quantity, b.costPrice, b.initialLast, b.initialPnl).pnl;
     return pnlB - pnlA;
   });
+
+  // 向上或向下移動持股位置 (與財神簿自訂排序雙向同步)
+  const handleMovePosition = async (index: number, delta: number) => {
+    const targetIdx = index + delta;
+    if (targetIdx < 0 || targetIdx >= sortedPositions.length) return;
+
+    const currentCodes = sortedPositions.map((p) => p.code);
+    const newDisplayCodes = [...currentCodes];
+    const temp = newDisplayCodes[index];
+    newDisplayCodes[index] = newDisplayCodes[targetIdx];
+    newDisplayCodes[targetIdx] = temp;
+
+    // 將可見順序整合回完整的 orderedCodes
+    const displaySet = new Set(newDisplayCodes);
+    const fullNewCodes: string[] = [];
+    let dIdx = 0;
+    for (const c of orderedCodes) {
+      if (displaySet.has(c)) {
+        fullNewCodes.push(newDisplayCodes[dIdx++]);
+      } else {
+        fullNewCodes.push(c);
+      }
+    }
+    for (const c of newDisplayCodes) {
+      if (!fullNewCodes.includes(c)) {
+        fullNewCodes.push(c);
+      }
+    }
+
+    if (onReorderPositions) {
+      await onReorderPositions(fullNewCodes);
+    }
+  };
+
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    if (vaultSortMode !== 'custom') return;
+    setDraggedPosIdx(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', `${index}`);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    if (vaultSortMode !== 'custom') return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverPosIdx !== index) {
+      setDragOverPosIdx(index);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedPosIdx(null);
+    setDragOverPosIdx(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    if (vaultSortMode !== 'custom' || draggedPosIdx === null || draggedPosIdx === dropIndex) {
+      handleDragEnd();
+      return;
+    }
+    const from = draggedPosIdx;
+    handleDragEnd();
+
+    const currentCodes = sortedPositions.map((p) => p.code);
+    const newDisplayCodes = [...currentCodes];
+    const [moved] = newDisplayCodes.splice(from, 1);
+    newDisplayCodes.splice(dropIndex, 0, moved);
+
+    const displaySet = new Set(newDisplayCodes);
+    const fullNewCodes: string[] = [];
+    let dIdx = 0;
+    for (const c of orderedCodes) {
+      if (displaySet.has(c)) {
+        fullNewCodes.push(newDisplayCodes[dIdx++]);
+      } else {
+        fullNewCodes.push(c);
+      }
+    }
+    for (const c of newDisplayCodes) {
+      if (!fullNewCodes.includes(c)) {
+        fullNewCodes.push(c);
+      }
+    }
+
+    if (onReorderPositions) {
+      await onReorderPositions(fullNewCodes);
+    }
+  };
 
   // 點選持股一鍵帶入財神筆下單
   const handleSelectToOrder = (code: string, quantity?: number) => {
@@ -468,7 +563,6 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   };
 
   // 手動清除歷史委託單紀錄
-  const [isClearingOrders, setIsClearingOrders] = useState(false);
   const handleClearOrders = async () => {
     const activeList = orders.filter((o) => o.canCancel);
     let confirmMsg = '確定要清空今日委託單歷史紀錄嗎？';
@@ -530,10 +624,10 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
           <button
             className={`sidebar-tab-btn ${activeTab === 'vault_ledger' ? 'active' : ''}`}
             onClick={() => onChangeTab('vault_ledger')}
-            title="分頁二：財神收支簿（持股即時成交行情與操作）"
+            title="分頁二：財神簿（持股即時成交行情與操作）"
           >
             <span className="sidebar-tab-icon">📖</span>
-            <span className="sidebar-tab-title">財神收支簿</span>
+            <span className="sidebar-tab-title">財神簿</span>
           </button>
           <button
             className={`sidebar-tab-btn ${activeTab === 'order' ? 'active' : ''}`}
@@ -624,13 +718,18 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
               ) : (
                 <>
                   <div className="vault-sort-bar">
-                    <span className="vault-sort-title">持股列表</span>
+                    <span className="vault-sort-title">
+                      持股列表
+                      {vaultSortMode === 'custom' && (
+                        <span className="vault-sort-subhint">（可按 ↑ / ↓ 自由排序）</span>
+                      )}
+                    </span>
                     <div className="vault-sort-btn-group">
                       <button
                         type="button"
                         className={`vault-sort-pill ${vaultSortMode === 'custom' ? 'active' : ''}`}
                         onClick={() => setVaultSortMode('custom')}
-                        title="與財神簿自訂排序完全一致 (ETF、債、虎航在後)"
+                        title="自訂排序 (可按 ↑ / ↓ 或拖曳調整，並與財神簿即時同步)"
                       >
                         📌 自訂排序
                       </button>
@@ -664,13 +763,14 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                   </div>
 
                   <div className="sidebar-vault-col-header">
+                    {vaultSortMode === 'custom' && <span className="col-h-reorder">排序</span>}
                     <span className="col-h-stock">商品</span>
                     <span className="col-h-qty">股數</span>
                     <span className="col-h-pnl">損益試算</span>
                     <span className="col-h-roi">報酬率</span>
                     <span className="col-h-action">操作</span>
                   </div>
-                  {sortedPositions.map((pos) => {
+                  {sortedPositions.map((pos, idx) => {
                     const q = quotes[pos.code];
                     const currPrice =
                       q?.last !== null && q?.last !== undefined && q.last > 0
@@ -701,8 +801,45 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     return (
                       <div
                         key={pos.code}
-                        className={`sidebar-stock-card flat-card ${isDimmed ? 'card-dimmed' : ''} ${isDirty ? 'card-flash' : ''}`}
+                        className={`sidebar-stock-card flat-card ${isDimmed ? 'card-dimmed' : ''} ${isDirty ? 'card-flash' : ''} ${
+                          draggedPosIdx === idx ? 'card-dragging' : ''
+                        } ${dragOverPosIdx === idx ? 'card-drop-target' : ''}`}
+                        draggable={vaultSortMode === 'custom'}
+                        onDragStart={(e) => handleDragStart(e, idx)}
+                        onDragOver={(e) => handleDragOver(e, idx)}
+                        onDragEnd={handleDragEnd}
+                        onDrop={(e) => handleDrop(e, idx)}
                       >
+                        {vaultSortMode === 'custom' && (
+                          <div className="sidebar-reorder-controls" onClick={(e) => e.stopPropagation()}>
+                            <span className="drag-handle sidebar-drag-handle" title="按住拖曳排序">⠿</span>
+                            <button
+                              type="button"
+                              className="btn-order-arrow btn-sidebar-arrow"
+                              title="往上移"
+                              disabled={idx === 0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMovePosition(idx, -1);
+                              }}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-order-arrow btn-sidebar-arrow"
+                              title="往下移"
+                              disabled={idx === sortedPositions.length - 1}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMovePosition(idx, 1);
+                              }}
+                            >
+                              ↓
+                            </button>
+                          </div>
+                        )}
+
                         <div className="flat-card-stock">
                           <span
                             className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
@@ -748,7 +885,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
             </div>
           </div>
         ) : activeTab === 'vault_ledger' ? (
-          /* ==================== 分頁二：財神收支簿 ==================== */
+          /* ==================== 分頁二：財神簿 ==================== */
           <div className="sidebar-vault-content">
             <div className="sidebar-vault-list">
               {sortedPositions.length === 0 ? (
@@ -758,13 +895,18 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
               ) : (
                 <>
                   <div className="vault-sort-bar">
-                    <span className="vault-sort-title">持股收支簿 ({sortedPositions.length} 檔)</span>
+                    <span className="vault-sort-title">
+                      財神簿 ({sortedPositions.length} 檔)
+                      {vaultSortMode === 'custom' && (
+                        <span className="vault-sort-subhint">（可按 ↑ / ↓ 自由排序）</span>
+                      )}
+                    </span>
                     <div className="vault-sort-btn-group">
                       <button
                         type="button"
                         className={`vault-sort-pill ${vaultSortMode === 'custom' ? 'active' : ''}`}
                         onClick={() => setVaultSortMode('custom')}
-                        title="與財神簿自訂排序完全一致 (ETF、債、虎航在後)"
+                        title="自訂排序 (可按 ↑ / ↓ 或拖曳調整，並與主畫面財神簿即時同步)"
                       >
                         📌 自訂排序
                       </button>
@@ -798,13 +940,14 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                   </div>
 
                   <div className="sidebar-vault-col-header">
+                    {vaultSortMode === 'custom' && <span className="col-h-reorder">排序</span>}
                     <span className="col-h-stock">商品</span>
                     <span className="col-h-last-price">成交價</span>
                     <span className="col-h-oddlot-price">零股價</span>
                     <span className="col-h-change-pct">漲跌幅</span>
                     <span className="col-h-action">操作</span>
                   </div>
-                  {sortedPositions.map((pos) => {
+                  {sortedPositions.map((pos, idx) => {
                     const q = quotes[pos.code];
                     const prev = (q?.previousClose && q.previousClose > 0) ? q.previousClose : null;
                     const last = (q?.last && q.last > 0) ? q.last : null;
@@ -838,8 +981,45 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     return (
                       <div
                         key={pos.code}
-                        className={`sidebar-stock-card flat-card ${isDimmed ? 'card-dimmed' : ''} ${isDirty ? 'card-flash' : ''}`}
+                        className={`sidebar-stock-card flat-card ${isDimmed ? 'card-dimmed' : ''} ${isDirty ? 'card-flash' : ''} ${
+                          draggedPosIdx === idx ? 'card-dragging' : ''
+                        } ${dragOverPosIdx === idx ? 'card-drop-target' : ''}`}
+                        draggable={vaultSortMode === 'custom'}
+                        onDragStart={(e) => handleDragStart(e, idx)}
+                        onDragOver={(e) => handleDragOver(e, idx)}
+                        onDragEnd={handleDragEnd}
+                        onDrop={(e) => handleDrop(e, idx)}
                       >
+                        {vaultSortMode === 'custom' && (
+                          <div className="sidebar-reorder-controls" onClick={(e) => e.stopPropagation()}>
+                            <span className="drag-handle sidebar-drag-handle" title="按住拖曳排序">⠿</span>
+                            <button
+                              type="button"
+                              className="btn-order-arrow btn-sidebar-arrow"
+                              title="往上移"
+                              disabled={idx === 0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMovePosition(idx, -1);
+                              }}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-order-arrow btn-sidebar-arrow"
+                              title="往下移"
+                              disabled={idx === sortedPositions.length - 1}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMovePosition(idx, 1);
+                              }}
+                            >
+                              ↓
+                            </button>
+                          </div>
+                        )}
+
                         <div className="flat-card-stock">
                           <span
                             className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}

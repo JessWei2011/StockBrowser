@@ -222,7 +222,15 @@ export const App: React.FC = () => {
     // 樂觀更新
     const nextCodes = newItems.map((i) => i.code);
     setGroups((prev) =>
-      prev.map((g) => (g.id === activeGroup.id ? { ...g, items: newItems } : g))
+      prev.map((g) => {
+        if (g.id === activeGroup.id || ((activeGroup.id === 'g-wealth' || activeGroup.id === 'g-vault') && (g.id === 'g-wealth' || g.id === 'g-vault'))) {
+          const itemMap = new Map(g.items.map((it) => [it.code, it]));
+          const reordered = nextCodes.map((c) => itemMap.get(c)).filter(Boolean);
+          const remaining = g.items.filter((it) => !nextCodes.includes(it.code));
+          return { ...g, items: [...reordered, ...remaining] as typeof g.items };
+        }
+        return g;
+      })
     );
     await reorderItems(activeGroup.id, nextCodes);
   };
@@ -236,9 +244,35 @@ export const App: React.FC = () => {
 
     const nextCodes = newItems.map((i) => i.code);
     setGroups((prev) =>
-      prev.map((g) => (g.id === activeGroup.id ? { ...g, items: newItems } : g))
+      prev.map((g) => {
+        if (g.id === activeGroup.id || ((activeGroup.id === 'g-wealth' || activeGroup.id === 'g-vault') && (g.id === 'g-wealth' || g.id === 'g-vault'))) {
+          const itemMap = new Map(g.items.map((it) => [it.code, it]));
+          const reordered = nextCodes.map((c) => itemMap.get(c)).filter(Boolean);
+          const remaining = g.items.filter((it) => !nextCodes.includes(it.code));
+          return { ...g, items: [...reordered, ...remaining] as typeof g.items };
+        }
+        return g;
+      })
     );
     await reorderItems(activeGroup.id, nextCodes);
+  };
+
+  // 側邊欄持股自訂排序 (財神庫 / 財神簿，雙向同步財神簿與財神庫組合)
+  const handleReorderPositions = async (nextCodes: string[]) => {
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id === 'g-wealth' || g.id === 'g-vault' || g.name === '財神簿' || g.name === '財神庫') {
+          const itemMap = new Map(g.items.map((it) => [it.code, it]));
+          const reordered = nextCodes
+            .map((c) => itemMap.get(c))
+            .filter((it): it is typeof g.items[0] => Boolean(it));
+          const remaining = g.items.filter((it) => !nextCodes.includes(it.code));
+          return { ...g, items: [...reordered, ...remaining] };
+        }
+        return g;
+      })
+    );
+    await reorderItems('g-wealth', nextCodes);
   };
 
   // 組合管理
@@ -353,6 +387,7 @@ export const App: React.FC = () => {
               setIsDrawerOpen(false);
             }}
             onRefreshPositions={loadBootstrap}
+            onReorderPositions={handleReorderPositions}
           />
         )}
 

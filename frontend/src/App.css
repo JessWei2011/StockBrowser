@@ -2212,6 +2212,15 @@ body {
   font-size: 13px;
   font-weight: 700;
   color: var(--text-main);
+  display: flex;
+  align-items: center;
+}
+
+.vault-sort-subhint {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-orange);
+  margin-left: 6px;
 }
 
 .vault-sort-btn-group {
@@ -2256,9 +2265,16 @@ body {
   gap: 8px;
 }
 
+.sidebar-vault-col-header .col-h-reorder {
+  flex: 0 0 42px;
+  width: 42px;
+  text-align: center;
+  user-select: none;
+}
+
 .sidebar-vault-col-header .col-h-stock {
   flex: 2.2;
-  min-width: 175px;
+  min-width: 140px;
 }
 
 .sidebar-vault-col-header .col-h-qty {
@@ -2285,6 +2301,62 @@ body {
   flex-shrink: 0;
 }
 
+/* 側邊欄持股自訂排序控制鈕 (⠿, ↑, ↓) */
+.sidebar-reorder-controls {
+  flex: 0 0 42px;
+  width: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.sidebar-drag-handle {
+  cursor: grab;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 2px;
+  user-select: none;
+  opacity: 0.6;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.sidebar-drag-handle:hover {
+  opacity: 1;
+  color: var(--color-orange);
+}
+
+.sidebar-drag-handle:active {
+  cursor: grabbing;
+}
+
+.btn-sidebar-arrow {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 1px 3px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 2px;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-sidebar-arrow:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.btn-sidebar-arrow:disabled {
+  opacity: 0.2;
+  cursor: not-allowed;
+}
+
 /* 扁平化單行持股卡片 */
 .sidebar-stock-card.flat-card {
   display: flex;
@@ -2304,12 +2376,24 @@ body {
   border-color: rgba(245, 158, 11, 0.4);
 }
 
+.sidebar-stock-card.card-dragging {
+  opacity: 0.4 !important;
+  background-color: var(--bg-hover) !important;
+  border-style: dashed !important;
+  border-color: var(--color-orange) !important;
+}
+
+.sidebar-stock-card.card-drop-target {
+  border-top: 2px solid var(--color-orange) !important;
+  box-shadow: 0 -2px 6px rgba(245, 158, 11, 0.35);
+}
+
 .flat-card-stock {
   display: flex;
   align-items: center;
   gap: 5px;
   flex: 2.2;
-  min-width: 175px;
+  min-width: 140px;
 }
 
 .flat-stock-name {
@@ -2415,7 +2499,7 @@ body {
   transform: translate(1px, -1px);
 }
 
-/* 財神收支簿專用樣式 */
+/* 財神簿分頁專用樣式 */
 .sidebar-vault-col-header .col-h-last-price {
   flex: 0.9;
   text-align: right;
@@ -5694,13 +5778,432 @@ body {
   color: #334155;
 }
 
-@media (max-width: 900px) {
+/* 桌面端預設樣式 */
+.cal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cal-view-mode-toggle {
+  display: none; /* 桌面端為雙欄並排，不需切換 */
+}
+
+.cal-cell-dots {
+  display: none; /* 桌面端顯示完整的文字標籤 */
+}
+
+.cal-agenda-pane {
+  display: none; /* 桌面端不顯示全月 Agenda，由左側月曆矩陣 + 右側當日明細負責 */
+}
+
+/* ==================== 行事曆行動端 (手機/兩行卡片模式) 完整 RWD 排版 ==================== */
+@media (max-width: 768px) {
+  .cal-modal-overlay {
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+  }
+
+  .cal-modal-container {
+    width: 100vw;
+    height: 100dvh;
+    max-width: 100vw;
+    max-height: 100dvh;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+  }
+
+  .cal-header {
+    padding: 10px 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+    background-color: var(--bg-card);
+  }
+
+  .cal-header-left {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .cal-header-title {
+    font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .cal-header-sub {
+    display: none; /* 手機端隱藏超長副標題，避免破版 */
+  }
+
+  .cal-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .cal-view-mode-toggle {
+    display: flex;
+    align-items: center;
+    background: var(--bg-hover);
+    padding: 2px;
+    border-radius: 6px;
+    gap: 2px;
+    border: 1px solid var(--border-color);
+  }
+
+  .cal-view-mode-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .cal-view-mode-btn.active {
+    background: var(--bg-card);
+    color: var(--accent-color, #38bdf8);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  }
+
+  [data-theme='light'] .cal-view-mode-btn.active {
+    background: #ffffff;
+    color: #0284c7;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  }
+
+  .cal-close-btn {
+    font-size: 16px;
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .cal-header-center {
+    order: 3;
+    width: 100%;
+    justify-content: space-between;
+    padding-top: 6px;
+    border-top: 1px dashed var(--border-color);
+  }
+
+  .cal-nav-btn {
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+
+  .cal-current-label {
+    font-size: 13.5px;
+  }
+
+  .cal-today-btn {
+    padding: 4px 8px;
+    font-size: 11.5px;
+  }
+
+  /* 橫向滑動篩選列 */
+  .cal-filter-bar {
+    padding: 6px 10px;
+    gap: 5px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .cal-filter-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .cal-filter-label {
+    display: none;
+  }
+
+  .cal-count-badge {
+    display: none;
+  }
+
+  .cal-filter-pill {
+    flex-shrink: 0;
+    padding: 3px 9px;
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+
+  /* 主體排版 */
   .cal-body-wrapper {
     flex-direction: column;
+    overflow: hidden;
   }
-  .cal-grid-pane {
+
+  /* 在月曆模式下：上部月曆矩陣 + 下部當日明細 */
+  .cal-body-wrapper.mode-calendar .cal-grid-pane {
+    display: flex;
+    flex: none;
+    max-height: 44vh;
     border-right: none;
     border-bottom: 1px solid var(--border-color);
+    overflow-y: auto;
+  }
+
+  .cal-body-wrapper.mode-calendar .cal-detail-pane {
+    display: flex;
+    flex: 1;
+    overflow-y: auto;
+    background-color: var(--bg-card);
+  }
+
+  .cal-body-wrapper.mode-calendar .cal-agenda-pane {
+    display: none;
+  }
+
+  /* 在清單模式下：全螢幕滾動 Agenda 清單 */
+  .cal-body-wrapper.mode-list .cal-grid-pane {
+    display: none;
+  }
+
+  .cal-body-wrapper.mode-list .cal-detail-pane {
+    display: none;
+  }
+
+  .cal-body-wrapper.mode-list .cal-agenda-pane {
+    display: flex;
+  }
+
+  /* 手機端月曆網格緊湊化 */
+  .cal-weekday-row {
+    padding: 3px 0;
+    font-size: 10.5px;
+  }
+
+  .cal-days-grid {
+    grid-auto-rows: minmax(44px, 1fr);
+  }
+
+  .cal-day-cell {
+    padding: 2px;
+    gap: 1px;
+    min-height: 44px;
+  }
+
+  .cal-cell-header {
+    justify-content: center;
+    position: relative;
+  }
+
+  .cal-cell-num {
+    font-size: 11px;
+  }
+
+  .cal-today-tag {
+    position: absolute;
+    top: -2px;
+    right: 0;
+    font-size: 7.5px;
+    padding: 0 2px;
+    transform: scale(0.85);
+  }
+
+  /* 手機端隱藏文字標籤，改用彩色圓點 */
+  .cal-cell-events {
+    display: none;
+  }
+
+  .cal-cell-dots {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2.5px;
+    flex-wrap: wrap;
+    margin-top: 1px;
+  }
+
+  .cal-cell-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .cal-cell-dot.dot-futures {
+    background-color: #ef4444;
+  }
+
+  .cal-cell-dot.dot-macro {
+    background-color: #3b82f6;
+  }
+
+  .cal-cell-dot.dot-exhibition {
+    background-color: #a855f7;
+  }
+
+  .cal-cell-dot.dot-stock {
+    background-color: #10b981;
+  }
+
+  .cal-cell-dot-more {
+    font-size: 8px;
+    color: var(--text-muted);
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  /* 手機當日明細抽屜 */
+  .cal-detail-header {
+    padding: 8px 12px;
+    background-color: var(--bg-secondary);
+  }
+
+  .cal-detail-title {
+    font-size: 13px;
+  }
+
+  .cal-detail-count {
+    font-size: 11px;
+  }
+
+  .cal-detail-list {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  .cal-event-card {
+    padding: 9px 11px;
+    gap: 5px;
+    border-radius: 6px;
+  }
+
+  .cal-event-title {
+    font-size: 13px;
+  }
+
+  .cal-event-detail {
+    font-size: 11.5px;
+  }
+
+  /* 手機 Agenda 清單樣式 */
+  .cal-agenda-pane {
+    flex: 1;
+    flex-direction: column;
+    overflow-y: auto;
+    background-color: var(--bg-secondary);
+  }
+
+  .cal-agenda-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background-color: var(--bg-card);
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .cal-agenda-header-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-main);
+  }
+
+  .cal-agenda-header-count {
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+
+  .cal-agenda-list {
+    padding: 10px 10px 24px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .cal-agenda-date-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .cal-agenda-date-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-card);
+    padding: 5px 10px;
+    border-radius: 6px;
+    border-left: 3px solid #38bdf8;
+    border-top: 1px solid var(--border-color);
+    border-right: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 36px;
+    z-index: 5;
+  }
+
+  .cal-agenda-date-header.is-today {
+    border-left-color: #10b981;
+    background: rgba(16, 185, 129, 0.08);
+  }
+
+  [data-theme='light'] .cal-agenda-date-header {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+  }
+
+  [data-theme='light'] .cal-agenda-header {
+    background: #ffffff;
+  }
+
+  .cal-agenda-date-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .cal-agenda-date-badge {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--text-main);
+    font-family: var(--font-mono, monospace);
+  }
+
+  .cal-agenda-weekday {
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  .cal-agenda-today-pill {
+    font-size: 9px;
+    background: #10b981;
+    color: #ffffff;
+    padding: 0 4px;
+    border-radius: 3px;
+    font-weight: 700;
+  }
+
+  .cal-agenda-date-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+
+  .cal-agenda-cards-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
 }
 
