@@ -79,6 +79,26 @@ export interface MarketIndexState {
   points?: number[];
 }
 
+export interface GlobalIndexItem {
+  symbol: string;
+  name: string;
+  englishName?: string;
+  price: number;
+  reference: number;
+  open: number;
+  high: number;
+  low: number;
+  change: number;
+  changePercent: number;
+  points: number[];
+}
+
+export interface GlobalIndicesResponse {
+  us: GlobalIndexItem[];
+  asia: GlobalIndexItem[];
+  updatedAt: string;
+}
+
 export interface StockPosition {
   code: string;
   name: string;

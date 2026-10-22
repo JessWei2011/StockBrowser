@@ -205,4 +205,10 @@ export async function fetchCalendarMonth(year?: number, month?: number): Promise
   return res.json();
 }
 
+export async function fetchGlobalIndices(): Promise<import('../types').GlobalIndicesResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/global-indices`);
+  if (!res.ok) throw new Error('無法取得國際股市行情');
+  return res.json();
+}
+
 

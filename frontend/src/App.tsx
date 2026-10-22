@@ -21,6 +21,7 @@ import { VaultPasswordModal, isVaultAuthenticated, clearVaultAuthenticated } fro
 import { StockChartDrawer } from './components/StockChartDrawer';
 import { MarketIndexTrend } from './components/MarketIndexTrend';
 import { InvestmentCalendarModal } from './components/InvestmentCalendarModal';
+import { GlobalIndicesModal } from './components/GlobalIndicesModal';
 import './App.css';
 
 export const App: React.FC = () => {
@@ -32,6 +33,7 @@ export const App: React.FC = () => {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<'vault' | 'vault_ledger' | 'order' | 'balance'>('vault');
   const [isVaultPasswordModalOpen, setIsVaultPasswordModalOpen] = useState(false);
+  const [isGlobalIndicesModalOpen, setIsGlobalIndicesModalOpen] = useState(false);
   const [orderTargetCode, setOrderTargetCode] = useState<string | null>(null);
   const [pendingOrderCode, setPendingOrderCode] = useState<string | null>(null);
   const [selectedChartCode, setSelectedChartCode] = useState<string | null>(null);
@@ -501,6 +503,15 @@ export const App: React.FC = () => {
                     <MarketIndexTrend quote={marketIndices.OTC} />
                   </div>
                 )}
+                <button
+                  className="index-pill btn-global-indices"
+                  onClick={() => setIsGlobalIndicesModalOpen(true)}
+                  title="查看美股四大指數與亞股(日韓)行情與分時走勢"
+                >
+                  <span className="global-pill-icon">🌐</span>
+                  <span className="global-pill-title">美股 / 亞股</span>
+                  <span className="global-pill-arrow">›</span>
+                </button>
               </div>
             )}
           </div>
@@ -604,6 +615,11 @@ export const App: React.FC = () => {
         isOpen={isCalendarModalOpen}
         onClose={() => setIsCalendarModalOpen(false)}
         onSelectStock={(code) => setSelectedChartCode(code)}
+      />
+
+      <GlobalIndicesModal
+        isOpen={isGlobalIndicesModalOpen}
+        onClose={() => setIsGlobalIndicesModalOpen(false)}
       />
     </div>
   );

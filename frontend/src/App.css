@@ -537,6 +537,41 @@ body {
   font-size: 13px;
 }
 
+/* ── 國際股市膠囊按鈕 ── */
+.btn-global-indices {
+  cursor: pointer;
+  background: var(--bg-card);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: var(--text-main);
+  transition: all 0.2s ease;
+  user-select: none;
+  font-family: inherit;
+}
+
+.btn-global-indices:hover {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: #38bdf8;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(56, 189, 248, 0.2);
+}
+
+.global-pill-icon {
+  font-size: 13px;
+}
+
+.global-pill-title {
+  font-weight: 700;
+  font-size: 12.5px;
+  color: var(--text-main);
+}
+
+.global-pill-arrow {
+  font-size: 14px;
+  font-weight: 700;
+  color: #38bdf8;
+  margin-left: 2px;
+}
+
 .index-label {
   font-weight: 700;
   color: var(--text-muted);
@@ -6240,4 +6275,262 @@ body {
     gap: 6px;
   }
 }
+
+/* ==================== 國際股市彈出視窗 (Yahoo 卡片風) ==================== */
+.global-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  padding: 20px;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.global-modal-content {
+  width: min(1360px, 94vw);
+  max-width: 1360px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 22px 26px;
+  animation: modalScaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.global-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.global-modal-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.global-modal-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.global-modal-icon {
+  font-size: 20px;
+}
+
+.global-modal-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.global-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.global-modal-close {
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.global-modal-close:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.global-modal-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.global-tab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 6px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.global-tab-btn:hover {
+  color: var(--text-main);
+}
+
+.global-tab-btn.active {
+  color: var(--color-primary, #38bdf8);
+  border-bottom-color: var(--color-primary, #38bdf8);
+}
+
+.global-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  padding: 18px 0;
+  overflow: visible;
+  align-content: start;
+}
+
+/* ── Yahoo 經典指數卡片 ── */
+.yahoo-index-card {
+  background: var(--bg-surface, rgba(15, 23, 42, 0.45));
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.2s ease;
+}
+
+.yahoo-index-card:hover {
+  border-color: rgba(56, 189, 248, 0.45);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+[data-theme='light'] .yahoo-index-card {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+[data-theme='light'] .yahoo-index-card:hover {
+  border-color: #94a3b8;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.yahoo-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.yahoo-card-title-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.yahoo-card-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.yahoo-card-symbol {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+}
+
+.yahoo-card-price-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.yahoo-card-price {
+  font-size: 19px;
+  font-weight: 800;
+  font-family: var(--font-mono, monospace);
+  line-height: 1.2;
+}
+
+.yahoo-card-change {
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+  font-family: var(--font-mono, monospace);
+}
+
+.yahoo-card-chart-area {
+  margin: 6px 0;
+  width: 100%;
+  height: 64px;
+}
+
+.yahoo-modal-sparkline {
+  display: block;
+  overflow: visible;
+}
+
+.yahoo-card-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.yahoo-stat-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11.5px;
+}
+
+.yahoo-stat-label {
+  color: var(--text-muted);
+}
+
+.yahoo-stat-val {
+  font-weight: 700;
+  color: var(--text-main);
+  font-family: var(--font-mono, monospace);
+}
+
+.global-modal-footer {
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+@media (max-width: 1200px) {
+  .global-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .global-modal-content {
+    width: 95vw;
+    max-height: 85vh;
+    padding: 14px 12px;
+    overflow-y: auto;
+  }
+  .global-cards-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 

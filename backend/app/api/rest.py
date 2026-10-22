@@ -42,6 +42,17 @@ async def health_check():
 async def get_bootstrap():
     return await watchlist_service.get_bootstrap_data()
 
+@router.get("/global-indices")
+async def get_global_indices():
+    """取得美股與亞股（日韓）國際指數行情與走勢數據"""
+    from backend.app.services.yahoo_market_service import yahoo_market_service
+    data = yahoo_market_service.get_global_indices()
+    # 若快取尚無資料，即時抓取一次
+    if not data.get("us") and not data.get("asia"):
+        await yahoo_market_service.update_indices_once()
+        data = yahoo_market_service.get_global_indices()
+    return data
+
 @router.post("/groups")
 async def create_group(body: CreateGroupRequest):
     if not body.name.strip():
