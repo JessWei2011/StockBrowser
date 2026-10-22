@@ -245,8 +245,8 @@ class ShioajiAdapter:
         self.contracts_cache: dict[str, dict] = {}
         self.disposition_dates_cache: dict[str, dict[str, Any]] = {}
         self.market_indices: dict[str, dict[str, Any]] = {
-            "TSE": {"code": "IX0001", "name": "加權指數", "price": 0.0, "change": 0.0, "changePercent": 0.0, "reference": None, "open": None, "high": None, "low": None, "volumeText": None, "volumeAmount": None},
-            "OTC": {"code": "IX0043", "name": "櫃買指數", "price": 0.0, "change": 0.0, "changePercent": 0.0, "reference": None, "open": None, "high": None, "low": None, "volumeText": None, "volumeAmount": None},
+            "TSE": {"code": "IX0001", "name": "加權指數", "price": 0.0, "change": 0.0, "changePercent": 0.0, "reference": None, "open": None, "high": None, "low": None, "volumeText": None, "volumeAmount": None, "points": []},
+            "OTC": {"code": "IX0043", "name": "櫃買指數", "price": 0.0, "change": 0.0, "changePercent": 0.0, "reference": None, "open": None, "high": None, "low": None, "volumeText": None, "volumeAmount": None, "points": []},
         }
         self.indices_dirty = False
         self.stock_positions_detail: list[dict[str, Any]] = []
@@ -968,6 +968,13 @@ class ShioajiAdapter:
                     if amt_str:
                         self.market_indices[target_key]["volumeText"] = amt_str
                         self.market_indices[target_key]["volumeAmount"] = amt_val
+
+                # 即時更新當前最新點位至 points
+                pts = self.market_indices[target_key].setdefault("points", [])
+                if pts:
+                    pts[-1] = round(close_p, 2)
+                else:
+                    pts.append(round(close_p, 2))
 
                 self.indices_dirty = True
         except Exception as e:

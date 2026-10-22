@@ -1,12 +1,20 @@
-import React from 'react';
+import React, { useId, useMemo } from 'react';
 import type { MarketIndexState } from '../types';
 
 interface MarketIndexTrendProps {
   quote: MarketIndexState;
+  width?: number;
+  height?: number;
 }
 
-export const MarketIndexTrend: React.FC<MarketIndexTrendProps> = ({ quote }) => {
-  const z = typeof quote.price === 'number' && Number.isFinite(quote.price) ? quote.price : null;
+export const MarketIndexTrend: React.FC<MarketIndexTrendProps> = ({
+  quote,
+  width = 90,
+  height = 32,
+}) => {
+  const uid = useId().replace(/:/g, '');
+
+  const z = typeof quote.price === 'number' && Number.isFinite(quote.price) && quote.price > 0 ? quote.price : null;
   const y = typeof quote.reference === 'number' && Number.isFinite(quote.reference) && quote.reference > 0
     ? quote.reference
     : (z !== null && typeof quote.change === 'number' && Number.isFinite(quote.change) ? z - quote.change : null);
@@ -19,115 +27,173 @@ export const MarketIndexTrend: React.FC<MarketIndexTrendProps> = ({ quote }) => 
     ? quote.low
     : (y !== null && o !== null && z !== null ? Math.min(y, o, z) : z);
 
-  if (y === null || z === null || o === null || h === null || l === null) {
+  // 整理走勢點位陣列
+  const rawPoints = useMemo(() => {
+    const list: number[] = [];
+    if (Array.isArray(quote.points) && quote.points.length > 0) {
+      for (const p of quote.points) {
+        if (typeof p === 'number' && Number.isFinite(p) && p > 0) {
+          list.push(p);
+        }
+      }
+    }
+
+    // 若無歷史點位，以開高低現合成平滑示意走勢
+    if (list.length === 0) {
+      if (o !== null && z !== null) {
+        if (h !== null && l !== null && (h > Math.max(o, z) || l < Math.min(o, z))) {
+          list.push(o, (o + h) / 2, h, (h + l) / 2, l, (l + z) / 2, z);
+        } else {
+          list.push(o, (o + z) / 2, z);
+        }
+      }
+    } else if (z !== null) {
+      // 確保最後一個點位精準貼齊即時現價
+      list[list.length - 1] = z;
+    }
+
+    return list;
+  }, [quote.points, z, o, h, l]);
+
+  if (y === null || z === null || rawPoints.length < 2) {
     return null;
   }
 
-  // 1. 開高走低四種盤勢判定：開盤看昨收(y)，走高走低看今日開盤(o)
-  let badgeText = '';
-  if (o >= y) {
-    badgeText = z >= o ? '開高走高' : '開高走低';
-  } else {
-    badgeText = z >= o ? '開低走高' : '開低走低';
+  const W = width;
+  const H = height;
+  const padTop = 3;
+  const padBottom = 3;
+  const usableH = H - padTop - padBottom;
+
+  // 計算座標極值 (將昨收 y 納入範圍，確保基準線永遠在視圖內)
+  let minVal = y;
+  let maxVal = y;
+  for (const pt of rawPoints) {
+    if (pt < minVal) minVal = pt;
+    if (pt > maxVal) maxVal = pt;
   }
 
-  // 2. 漲跌顏色：比對目標一律為「昨日收盤價 (y)」
-  const isUp = z > y;
-  const isDown = z < y;
-  const badgeClass = isUp ? 'badge-up' : isDown ? 'badge-down' : 'badge-flat';
-  const candleColor = isUp ? '#ff5964' : isDown ? '#4ade80' : '#94a3b8';
+  const span = maxVal - minVal;
+  // 上下預留 8% 邊距，避免貼頂/貼底
+  const margin = Math.max(span * 0.08, 0.5);
+  const scaleMin = minVal - margin;
+  const scaleMax = maxVal + margin;
+  const scaleRange = scaleMax - scaleMin || 1;
 
-  const minVal = Math.min(l, y, o, z);
-  const maxVal = Math.max(h, y, o, z);
-  const span = maxVal - minVal || 1;
-  const pad = span * 0.12;
-  const chartMin = minVal - pad;
-  const chartMax = maxVal + pad;
-  const chartRange = chartMax - chartMin;
+  const getY = (val: number) => {
+    const ratio = (val - scaleMin) / scaleRange;
+    return padTop + (1 - ratio) * usableH;
+  };
 
-  const W = 38;
-  const H = 28;
-  const scaleY = (val: number) => Math.round((H - 3) - ((val - chartMin) / chartRange) * (H - 6));
+  const baseY = Math.max(padTop, Math.min(H - padBottom, getY(y)));
+  const totalPts = rawPoints.length;
 
-  const yY = scaleY(y);
-  const yO = scaleY(o);
-  const yZ = scaleY(z);
-  const yH = scaleY(h);
-  const yL = scaleY(l);
-
-  const bodyTop = Math.min(yO, yZ);
-  const bodyHeight = Math.max(Math.abs(yZ - yO), 3);
-
-  const fmt = (num: number) => num.toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const fmtShort = (num: number) => num.toLocaleString('zh-TW', {
-    minimumFractionDigits: num >= 1000 ? 0 : 1,
-    maximumFractionDigits: num >= 1000 ? 0 : 1,
+  // 產生 SVG 折線點座標
+  const coords: Array<[number, number]> = rawPoints.map((pt, i) => {
+    const x = (i / (totalPts - 1)) * (W - 4) + 2;
+    const cy = getY(pt);
+    return [Math.round(x * 10) / 10, Math.round(cy * 10) / 10];
   });
 
-  const tooltip = `${quote.name || quote.code} 走勢脈動\n昨收: ${fmt(y)}\n開盤: ${fmt(o)}\n現價: ${fmt(z)}\n最高: ${fmt(h)}\n最低: ${fmt(l)}`;
+  const lineD = coords.reduce((acc, [x, cy], i) => `${acc} ${i === 0 ? 'M' : 'L'} ${x} ${cy}`, '');
+
+  // 封閉面積路徑 (由折線路徑 + 封閉回基準線 baseY)
+  const firstX = coords[0][0];
+  const lastX = coords[coords.length - 1][0];
+  const lastY = coords[coords.length - 1][1];
+  const areaD = `${lineD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
+
+  const isUp = z >= y;
+  const pointColor = isUp ? '#ff5964' : '#22c55e';
+
+  const fmt = (num: number) =>
+    num.toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const chg = typeof quote.change === 'number' ? quote.change : z - y;
+  const pct = typeof quote.changePercent === 'number' ? quote.changePercent : (chg / y) * 100;
+
+  const tooltip = `${quote.name || quote.code} 當日分時走勢\n現價: ${fmt(z)} (${chg >= 0 ? '+' : ''}${fmt(chg)}, ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)\n昨收基準: ${fmt(y)}\n開盤: ${o !== null ? fmt(o) : '-'}\n最高: ${h !== null ? fmt(h) : '-'}\n最低: ${l !== null ? fmt(l) : '-'}\n累積分時: ${totalPts} 點`;
 
   return (
-    <div className="index-trend-widget" title={tooltip}>
-      <span className={`index-trend-badge ${badgeClass}`}>{badgeText}</span>
-      <div className="index-trend-body">
-        <svg className="index-trend-spark" viewBox={`0 0 ${W} ${H}`} width={W} height={H} aria-hidden="true">
-          {/* 昨收基準水平線 (黃色虛線) */}
-          <line
-            x1="2"
-            y1={yY}
-            x2={W - 2}
-            y2={yY}
-            stroke="#eab308"
-            strokeDasharray="2.5,2"
-            strokeWidth="1"
-            opacity="0.85"
-          />
+    <div className="yahoo-sparkline-widget" title={tooltip}>
+      <svg
+        className="yahoo-sparkline-svg"
+        viewBox={`0 0 ${W} ${H}`}
+        width={W}
+        height={H}
+        aria-hidden="true"
+      >
+        <defs>
+          {/* 上半部：高於昨收的紅色漸層 */}
+          <linearGradient id={`grad-up-${uid}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#ff5964" stopOpacity="0.45" />
+            <stop offset="90%" stopColor="#ff5964" stopOpacity="0.05" />
+          </linearGradient>
 
-          {/* 最高最低影線 */}
-          <line
-            x1={W / 2}
-            y1={yH}
-            x2={W / 2}
-            y2={yL}
-            stroke={candleColor}
-            strokeWidth="1.6"
+          {/* 下半部：低於昨收的綠色漸層 */}
+          <linearGradient id={`grad-down-${uid}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="10%" stopColor="#22c55e" stopOpacity="0.05" />
+            <stop offset="100%" stopColor="#22c55e" stopOpacity="0.45" />
+          </linearGradient>
+
+          {/* 基準線上方裁切區 (紅) */}
+          <clipPath id={`clip-above-${uid}`}>
+            <rect x="0" y="0" width={W} height={baseY} />
+          </clipPath>
+
+          {/* 基準線下方裁切區 (綠) */}
+          <clipPath id={`clip-below-${uid}`}>
+            <rect x="0" y={baseY} width={W} height={H - baseY} />
+          </clipPath>
+        </defs>
+
+        {/* 昨收基準水平線 (灰色虛線) */}
+        <line
+          x1="1"
+          y1={baseY}
+          x2={W - 1}
+          y2={baseY}
+          stroke="var(--border-color, #94a3b8)"
+          strokeDasharray="2.5,2"
+          strokeWidth="1"
+          opacity="0.8"
+        />
+
+        {/* 基準線上方部分：紅線 + 紅漸層填色 */}
+        <g clipPath={`url(#clip-above-${uid})`}>
+          <path d={areaD} fill={`url(#grad-up-${uid})`} />
+          <path
+            d={lineD}
+            fill="none"
+            stroke="#ff5964"
+            strokeWidth="1.5"
             strokeLinecap="round"
+            strokeLinejoin="round"
           />
+        </g>
 
-          {/* K 棒實體 (開盤 ~ 現價) */}
-          <rect
-            x={(W - 14) / 2}
-            y={bodyTop}
-            width="14"
-            height={bodyHeight}
-            rx="1.5"
-            fill={candleColor}
-            stroke={candleColor}
-            strokeWidth="0.5"
+        {/* 基準線下方部分：綠線 + 綠漸層填色 */}
+        <g clipPath={`url(#clip-below-${uid})`}>
+          <path d={areaD} fill={`url(#grad-down-${uid})`} />
+          <path
+            d={lineD}
+            fill="none"
+            stroke="#22c55e"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
           />
+        </g>
 
-          {/* 現價指示圓點 */}
-          <circle
-            cx={W / 2}
-            cy={yZ}
-            r="2.5"
-            fill="#ffffff"
-            stroke={candleColor}
-            strokeWidth="1.6"
-          />
-        </svg>
-
-        <div className="index-trend-labels">
-          <div className="index-trend-lbl high" title={`今日最高: ${fmt(h)}`}>
-            <span className="lbl-tag">高</span>
-            <span className="lbl-val">{fmtShort(h)}</span>
-          </div>
-          <div className="index-trend-lbl low" title={`今日最低: ${fmt(l)}`}>
-            <span className="lbl-tag">低</span>
-            <span className="lbl-val">{fmtShort(l)}</span>
-          </div>
-        </div>
-      </div>
+        {/* 最新價格點位小圓點 */}
+        <circle
+          cx={lastX}
+          cy={lastY}
+          r="2.5"
+          fill={pointColor}
+          stroke="var(--bg-card, #ffffff)"
+          strokeWidth="1"
+        />
+      </svg>
     </div>
   );
 };

@@ -76,6 +76,7 @@ export interface MarketIndexState {
   low?: number | null;
   volumeText?: string | null;
   volumeAmount?: number | null;
+  points?: number[];
 }
 
 export interface StockPosition {

@@ -567,7 +567,41 @@ body {
   white-space: nowrap;
 }
 
-/* ── 大盤市場脈動微型走勢元件 ── */
+/* ── 大盤市場脈動微型走勢元件 (Yahoo 雙色分時折線圖) ── */
+.yahoo-sparkline-widget {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 4px;
+  margin-left: 4px;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 6px;
+  user-select: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+  line-height: 1;
+}
+
+.yahoo-sparkline-widget:hover {
+  background: rgba(15, 23, 42, 0.7);
+  border-color: rgba(56, 189, 248, 0.45);
+}
+
+[data-theme='light'] .yahoo-sparkline-widget {
+  background: rgba(241, 245, 249, 0.8);
+  border-color: rgba(203, 213, 225, 0.8);
+}
+
+[data-theme='light'] .yahoo-sparkline-widget:hover {
+  background: #ffffff;
+  border-color: #94a3b8;
+}
+
+.yahoo-sparkline-svg {
+  display: block;
+  overflow: visible;
+}
+
 .index-trend-widget {
   display: inline-flex;
   align-items: center;

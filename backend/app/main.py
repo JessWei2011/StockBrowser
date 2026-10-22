@@ -12,6 +12,7 @@ from backend.app.services.shioaji_adapter import shioaji_adapter
 from backend.app.services.publisher import publisher
 from backend.app.services.watchlist_service import watchlist_service
 from backend.app.services.announcement_service import announcement_service
+from backend.app.services.yahoo_market_service import yahoo_market_service
 from backend.app.api.rest import router as rest_router
 from backend.app.api.ws import router as ws_router
 
@@ -42,11 +43,15 @@ async def lifespan(app: FastAPI):
 
     # 6. 啟動 1Hz 批次廣播
     await publisher.start()
+
+    # 7. 啟動 Yahoo 大盤分時走勢同步服務
+    await yahoo_market_service.start()
     
     logger.info("StockBrowser backend initialized and running.")
     yield
     
     logger.info("Shutting down StockBrowser application...")
+    await yahoo_market_service.stop()
     await publisher.stop()
     await announcement_service.stop()
     shioaji_adapter.stop()
