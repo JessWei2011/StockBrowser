@@ -13,3 +13,4 @@ dist/
 .DS_Store
 *.png
 *.pfx
+frontend/public/fonts/

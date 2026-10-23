@@ -1,3 +1,49 @@
+/* ── 台北黑體 (Taipei Sans TC) 本地與自託管字型定義 ── */
+@font-face {
+  font-family: 'Taipei Sans TC';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: local('Taipei Sans TC Beta Light'), local('TaipeiSansTCBeta-Light'),
+       url('/fonts/TaipeiSansTCBeta-Light.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Taipei Sans TC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Taipei Sans TC Beta Regular'), local('TaipeiSansTCBeta-Regular'), local('Taipei Sans TC Beta'),
+       url('/fonts/TaipeiSansTCBeta-Regular.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Taipei Sans TC';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: local('Taipei Sans TC Beta Regular'), local('TaipeiSansTCBeta-Regular'), local('Taipei Sans TC Beta'),
+       url('/fonts/TaipeiSansTCBeta-Regular.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Taipei Sans TC';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local('Taipei Sans TC Beta Bold'), local('TaipeiSansTCBeta-Bold'),
+       url('/fonts/TaipeiSansTCBeta-Bold.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Taipei Sans TC';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: local('Taipei Sans TC Beta Bold'), local('TaipeiSansTCBeta-Bold'),
+       url('/fonts/TaipeiSansTCBeta-Bold.ttf') format('truetype');
+}
+
 :root, [data-theme="light"] {
   --bg-main: #f8fafc;
   --bg-card: #ffffff;
@@ -59,11 +105,17 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: 'Hannotate TC', 'HannotateTC-W5', '手札體-繁', 'HanziPen TC', 'HanziPenTC-W3', '翩翩體 繁', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  letter-spacing: -0.65px;
   background-color: var(--bg-main);
   color: var(--text-main);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+button, input, select, textarea {
+  font-family: inherit;
 }
 
 .stock-browser-app {
@@ -542,15 +594,17 @@ body {
 .market-pulse-pill-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3.5px;
-  font-size: 9.5px;
-  font-weight: 750;
-  line-height: 1;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
   padding: 2px 7px;
   border-radius: 9999px;
   white-space: nowrap;
   user-select: none;
   margin-left: 2px;
+  letter-spacing: 0.3px;
+  -webkit-font-smoothing: subpixel-antialiased;
 }
 
 .market-pulse-pill-badge .badge-dot {
@@ -638,17 +692,18 @@ body {
 .index-closed-pill {
   display: inline-flex;
   align-items: center;
-  font-size: 10px;
-  font-weight: 750;
-  line-height: 1;
-  padding: 1.5px 5.5px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 1.5px 6px;
   border-radius: 9999px;
   background: rgba(148, 163, 184, 0.18);
   color: #94a3b8;
   border: 1px solid rgba(148, 163, 184, 0.35);
   margin-left: 2px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.3px;
   user-select: none;
+  -webkit-font-smoothing: subpixel-antialiased;
 }
 
 [data-theme='light'] .index-closed-pill {
