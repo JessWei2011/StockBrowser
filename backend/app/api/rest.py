@@ -129,6 +129,19 @@ async def get_calendar_events(
     m = month or now.month
     return await calendar_service.get_month_calendar(y, m)
 
+@router.get("/news")
+async def get_financial_news(date: Optional[str] = Query(None)):
+    """取得台股與重要財經新聞（支援滾動保留最新 5 個交易日，降冪排列）"""
+    from backend.app.services.news_service import news_service
+    return await news_service.get_news(target_date=date)
+
+@router.post("/news/refresh")
+async def refresh_financial_news():
+    """手動重新整理新聞 RSS 來源"""
+    from backend.app.services.news_service import news_service
+    await news_service.refresh_news()
+    return await news_service.get_news()
+
 @router.post("/system/refresh")
 async def refresh_system_quotes(force_reconnect: bool = False):
     """手動重新校正合約快取、持股庫存與今日快照，若 force_reconnect=True 則強制重設 Shioaji 連線與重新登入"""

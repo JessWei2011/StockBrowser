@@ -211,4 +211,17 @@ export async function fetchGlobalIndices(): Promise<import('../types').GlobalInd
   return res.json();
 }
 
+export async function fetchFinancialNews(date?: string): Promise<import('../types').FinancialNewsResponse> {
+  const qStr = date ? `?date=${encodeURIComponent(date)}` : '';
+  const res = await fetch(`${API_BASE}/api/v1/news${qStr}`);
+  if (!res.ok) throw new Error('無法取得財經新聞');
+  return res.json();
+}
+
+export async function refreshFinancialNews(): Promise<import('../types').FinancialNewsResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/news/refresh`, { method: 'POST' });
+  if (!res.ok) throw new Error('重新整理財經新聞失敗');
+  return res.json();
+}
+
 

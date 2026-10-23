@@ -255,7 +255,7 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
     const isExpanded = expandedEventIds.has(ev.id);
     const isTitleLong = ev.title.length > 100;
     const displayTitle = !isExpanded && isTitleLong ? `${ev.title.slice(0, 100)}...` : ev.title;
-    const hasLongContent = isTitleLong || (ev.detail && ev.detail.length > 80);
+    const hasDetail = Boolean(ev.detail && ev.detail.trim().length > 0);
 
     return (
       <div key={ev.id} className={`cal-event-card type-${ev.type} ${isExpanded ? 'is-expanded' : ''}`}>
@@ -295,7 +295,7 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
 
         <h4 className="cal-event-title">{displayTitle}</h4>
 
-        {ev.detail && (
+        {hasDetail && (
           <div className={`cal-event-detail-wrapper ${isExpanded ? 'expanded' : 'collapsed'}`}>
             <p className="cal-event-detail">
               {ev.detail}
@@ -303,7 +303,7 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
           </div>
         )}
 
-        {hasLongContent && (
+        {hasDetail && (
           <div className="cal-card-expand-bar">
             <button
               type="button"

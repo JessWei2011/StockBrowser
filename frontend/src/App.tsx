@@ -22,6 +22,7 @@ import { StockChartDrawer } from './components/StockChartDrawer';
 import { MarketIndexTrend } from './components/MarketIndexTrend';
 import { InvestmentCalendarModal } from './components/InvestmentCalendarModal';
 import { GlobalIndicesModal } from './components/GlobalIndicesModal';
+import { FinancialNewsModal } from './components/FinancialNewsModal';
 import './App.css';
 
 export const App: React.FC = () => {
@@ -39,6 +40,7 @@ export const App: React.FC = () => {
   const [pendingOrderCode, setPendingOrderCode] = useState<string | null>(null);
   const [selectedChartCode, setSelectedChartCode] = useState<string | null>(null);
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
+  const [isNewsModalOpen, setIsNewsModalOpen] = useState(false);
   const [upstream, setUpstream] = useState<UpstreamStatus>({
     connected: false,
     loggedIn: false,
@@ -393,6 +395,7 @@ export const App: React.FC = () => {
         onOpenCreateGroup={() => setModalState({ isOpen: true, mode: 'create' })}
         onOpenEditGroup={() => setModalState({ isOpen: true, mode: 'edit' })}
         onOpenCalendar={() => setIsCalendarModalOpen(true)}
+        onOpenNews={() => setIsNewsModalOpen(true)}
       />
 
       <GroupTabs
@@ -755,6 +758,11 @@ export const App: React.FC = () => {
         onClose={() => setIsGlobalIndicesModalOpen(false)}
         initialTab={marketModalTab}
         twIndices={marketIndices}
+      />
+
+      <FinancialNewsModal
+        isOpen={isNewsModalOpen}
+        onClose={() => setIsNewsModalOpen(false)}
       />
     </div>
   );

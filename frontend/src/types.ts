@@ -174,6 +174,23 @@ export interface BootstrapResponse {
   upstream: UpstreamStatus;
 }
 
+export interface FinancialNewsItem {
+  id: string;
+  source: string;
+  title: string;
+  date: string;
+  time: string;
+  detail?: string;
+  link?: string;
+}
+
+export interface FinancialNewsResponse {
+  dates: string[];
+  selectedDate: string;
+  totalCount: number;
+  news: FinancialNewsItem[];
+}
+
 export interface InstrumentSearchResult {
   code: string;
   name: string;

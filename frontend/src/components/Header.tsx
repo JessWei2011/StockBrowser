@@ -19,6 +19,7 @@ interface HeaderProps {
   onOpenCreateGroup: () => void;
   onOpenEditGroup: () => void;
   onOpenCalendar?: () => void;
+  onOpenNews?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -38,6 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCreateGroup,
   onOpenEditGroup,
   onOpenCalendar,
+  onOpenNews,
 }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<InstrumentSearchResult[]>([]);
@@ -213,6 +215,16 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={onOpenCalendar}
           >
             📅 行事曆
+          </button>
+        )}
+
+        {onOpenNews && (
+          <button
+            className="btn-action btn-news-action"
+            title="開啟即時財經新聞 (台股大盤、重點產業、即時頭條)"
+            onClick={onOpenNews}
+          >
+            📰 財經新聞
           </button>
         )}
 
