@@ -60,6 +60,21 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
   );
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
 
+  // 記錄使用者點擊展開全文的事件 ID 集合
+  const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(new Set());
+
+  const toggleExpandEvent = (id: string) => {
+    setExpandedEventIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
   const loadData = async (y: number, m: number) => {
     setIsLoading(true);
     setError(null);
@@ -236,64 +251,87 @@ export const InvestmentCalendarModal: React.FC<InvestmentCalendarModalProps> = (
     return allMonthEventsGrouped.reduce((acc, g) => acc + g.events.length, 0);
   }, [allMonthEventsGrouped]);
 
-  const renderEventCard = (ev: CalendarEvent) => (
-    <div key={ev.id} className={`cal-event-card type-${ev.type}`}>
-      <div className="cal-card-top">
-        <div className="cal-card-badges">
-          <span className={`cal-type-tag tag-${ev.type}`}>
-            {ev.type === 'futures'
-              ? '期指結算'
-              : ev.type === 'macro'
-              ? '美國總經'
-              : ev.type === 'exhibition'
-              ? '產業大展'
-              : '個股事件'}
-          </span>
-          <span className="cal-tag-pill">{formatEventTag(ev)}</span>
-          {ev.time && (
-            <span className="cal-time-pill">⏰ {ev.time}</span>
-          )}
+  const renderEventCard = (ev: CalendarEvent) => {
+    const isExpanded = expandedEventIds.has(ev.id);
+    const isTitleLong = ev.title.length > 100;
+    const displayTitle = !isExpanded && isTitleLong ? `${ev.title.slice(0, 100)}...` : ev.title;
+    const hasLongContent = isTitleLong || (ev.detail && ev.detail.length > 80);
+
+    return (
+      <div key={ev.id} className={`cal-event-card type-${ev.type} ${isExpanded ? 'is-expanded' : ''}`}>
+        <div className="cal-card-top">
+          <div className="cal-card-badges">
+            <span className={`cal-type-tag tag-${ev.type}`}>
+              {ev.type === 'futures'
+                ? '期指結算'
+                : ev.type === 'macro'
+                ? '美國總經'
+                : ev.type === 'exhibition'
+                ? '產業大展'
+                : '個股事件'}
+            </span>
+            <span className="cal-tag-pill">{formatEventTag(ev)}</span>
+            {ev.time && (
+              <span className="cal-time-pill">⏰ {ev.time}</span>
+            )}
+          </div>
+
+          <div className="cal-card-top-actions">
+            {ev.code && onSelectStock && (
+              <button
+                type="button"
+                className="cal-btn-view-stock"
+                onClick={() => {
+                  onClose();
+                  onSelectStock(ev.code!);
+                }}
+                title="開啟此個股技術圖表"
+              >
+                走勢圖 ↗
+              </button>
+            )}
+          </div>
         </div>
 
-        {ev.code && onSelectStock && (
-          <button
-            type="button"
-            className="cal-btn-view-stock"
-            onClick={() => {
-              onClose();
-              onSelectStock(ev.code!);
-            }}
-            title="開啟此個股技術圖表"
-          >
-            走勢圖 ↗
-          </button>
+        <h4 className="cal-event-title">{displayTitle}</h4>
+
+        {ev.detail && (
+          <div className={`cal-event-detail-wrapper ${isExpanded ? 'expanded' : 'collapsed'}`}>
+            <p className="cal-event-detail">
+              {ev.detail}
+            </p>
+          </div>
+        )}
+
+        {hasLongContent && (
+          <div className="cal-card-expand-bar">
+            <button
+              type="button"
+              className="cal-btn-toggle-expand"
+              onClick={() => toggleExpandEvent(ev.id)}
+            >
+              {isExpanded ? '收起全文 ▴' : '閱讀全文 ▾'}
+            </button>
+          </div>
+        )}
+
+        {(ev.forecast || ev.previous) && (
+          <div className="cal-macro-data-row">
+            {ev.forecast && (
+              <span className="data-pill forecast">
+                預測: <strong>{ev.forecast}</strong>
+              </span>
+            )}
+            {ev.previous && (
+              <span className="data-pill previous">
+                前值: <strong>{ev.previous}</strong>
+              </span>
+            )}
+          </div>
         )}
       </div>
-
-      <h4 className="cal-event-title">{ev.title}</h4>
-
-      {ev.detail && (
-        <p className="cal-event-detail">
-          {ev.detail}
-        </p>
-      )}
-
-      {(ev.forecast || ev.previous) && (
-        <div className="cal-macro-data-row">
-          {ev.forecast && (
-            <span className="data-pill forecast">
-              預測: <strong>{ev.forecast}</strong>
-            </span>
-          )}
-          {ev.previous && (
-            <span className="data-pill previous">
-              前值: <strong>{ev.previous}</strong>
-            </span>
-          )}
-        </div>
-      )}
-    </div>
-  );
+    );
+  };
 
   if (!isOpen) return null;
 
