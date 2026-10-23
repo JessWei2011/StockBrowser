@@ -2,6 +2,7 @@ import logging
 from backend.app.repositories import db
 from backend.app.services.quote_store import quote_store
 from backend.app.services.shioaji_adapter import shioaji_adapter, is_taiwan_market_open
+from backend.app.services.market_calendar_service import evaluate_tw_market_status
 from backend.app.services.publisher import publisher
 
 logger = logging.getLogger("watchlist_service")
@@ -83,6 +84,7 @@ class WatchlistService:
             "marketIndices": shioaji_adapter.market_indices,
             "indicators": indicators,
             "serverVersion": server_ver,
+            "marketCalendar": evaluate_tw_market_status(),
             "upstream": {
                 "connected": shioaji_adapter.is_connected,
                 "loggedIn": shioaji_adapter.is_logged_in,

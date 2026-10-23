@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { WatchlistGroup, QuoteState, UpstreamStatus, WebSocketMessage, StockPosition, StockAnnouncement, MarketIndexState, StockMaSummary } from './types';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import type { WatchlistGroup, QuoteState, UpstreamStatus, WebSocketMessage, StockPosition, StockAnnouncement, MarketIndexState, StockMaSummary, MarketCalendarStatus } from './types';
 import {
   fetchBootstrap,
   createGroup,
@@ -34,6 +34,7 @@ export const App: React.FC = () => {
   const [drawerTab, setDrawerTab] = useState<'vault' | 'vault_ledger' | 'order' | 'balance'>('vault');
   const [isVaultPasswordModalOpen, setIsVaultPasswordModalOpen] = useState(false);
   const [isGlobalIndicesModalOpen, setIsGlobalIndicesModalOpen] = useState(false);
+  const [marketModalTab, setMarketModalTab] = useState<'tw' | 'us' | 'asia'>('tw');
   const [orderTargetCode, setOrderTargetCode] = useState<string | null>(null);
   const [pendingOrderCode, setPendingOrderCode] = useState<string | null>(null);
   const [selectedChartCode, setSelectedChartCode] = useState<string | null>(null);
@@ -60,8 +61,61 @@ export const App: React.FC = () => {
   } | null>(null);
   const [marketIndices, setMarketIndices] = useState<Record<string, MarketIndexState> | null>(null);
   const [indicators, setIndicators] = useState<Record<string, StockMaSummary>>({});
+  const [marketCalendar, setMarketCalendar] = useState<MarketCalendarStatus | null>(null);
 
   const [announcements, setAnnouncements] = useState<Record<string, StockAnnouncement[]>>({});
+
+  // 判斷台股現貨與期貨市場是否處於開盤狀態與膠囊標籤資訊 (依據 TW_MARKET_HOLIDAY_DETECTION_GUIDE.md 權威判定)
+  const twMarketBadge = useMemo(() => {
+    // 1. 若後端已提供權威 marketCalendar，優先採用
+    if (marketCalendar) {
+      return {
+        isOpen: marketCalendar.isOpen,
+        badgeLabel: marketCalendar.badgeLabel,
+        badgeType: marketCalendar.badgeType,
+      };
+    }
+    // 2. 備援前端判定
+    const status = marketIndices?.TSE?.marketStatus;
+    if (status === 'open') return { isOpen: true, badgeLabel: '開盤中', badgeType: 'open' };
+    const now = new Date();
+    const twDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+    const day = twDate.getDay();
+    if (day === 0 || day === 6) return { isOpen: false, badgeLabel: '週末休市', badgeType: 'weekend' };
+    const mins = twDate.getHours() * 60 + twDate.getMinutes();
+    if (status === 'close' && mins >= 540 && mins < 810) {
+      return { isOpen: false, badgeLabel: '休市中', badgeType: 'closed' };
+    }
+    if (mins < 540) return { isOpen: false, badgeLabel: '未開盤', badgeType: 'closed' };
+    if (mins >= 810) return { isOpen: false, badgeLabel: '已收盤', badgeType: 'closed' };
+    return { isOpen: true, badgeLabel: '開盤中', badgeType: 'open' };
+  }, [marketCalendar, marketIndices?.TSE?.marketStatus]);
+
+  const txfMarketBadge = useMemo(() => {
+    // 若全市場天然災害休市或國定假日，期貨亦同步休市
+    if (marketCalendar && !marketCalendar.isOpen && (marketCalendar.badgeType === 'typhoon' || marketCalendar.badgeType === 'holiday')) {
+      return {
+        isOpen: false,
+        badgeLabel: marketCalendar.badgeLabel,
+        badgeType: marketCalendar.badgeType,
+      };
+    }
+    const status = marketIndices?.TXF?.marketStatus;
+    if (status === 'open') return { isOpen: true, badgeLabel: '交易中', badgeType: 'open' };
+    const now = new Date();
+    const twDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+    const day = twDate.getDay();
+    const mins = twDate.getHours() * 60 + twDate.getMinutes();
+    if (day === 0) return { isOpen: false, badgeLabel: '週末休市', badgeType: 'weekend' };
+    if (day === 6 && mins >= 300) return { isOpen: false, badgeLabel: '週末休市', badgeType: 'weekend' };
+    if (day === 1 && mins < 525) return { isOpen: false, badgeLabel: '未開盤', badgeType: 'closed' };
+    const isOpen = (mins >= 525 && mins < 825) || (mins >= 900) || (mins < 300);
+    return {
+      isOpen,
+      badgeLabel: isOpen ? '交易中' : '休市中',
+      badgeType: isOpen ? 'open' : 'closed',
+    };
+  }, [marketCalendar, marketIndices?.TXF?.marketStatus]);
 
   // 檢視模式：電腦預設為 'table' (完整表格)，手機預設為 'card' (兩行卡片)
   const [viewMode, setViewMode] = useState<'table' | 'card'>(() => {
@@ -111,6 +165,9 @@ export const App: React.FC = () => {
       }
       if (data.marketIndices) {
         setMarketIndices(data.marketIndices);
+      }
+      if (data.marketCalendar) {
+        setMarketCalendar(data.marketCalendar);
       }
       if (data.indicators) {
         setIndicators(data.indicators);
@@ -424,8 +481,19 @@ export const App: React.FC = () => {
             {marketIndices && (
               <div className="market-indices-summary">
                 {marketIndices.TSE && (
-                  <div className="index-pill">
+                  <div
+                    className="index-pill index-pill-clickable"
+                    onClick={() => {
+                      setMarketModalTab('tw');
+                      setIsGlobalIndicesModalOpen(true);
+                    }}
+                    title="點擊放大查看加權指數走勢圖與完整行情"
+                  >
                     <span className="index-label">加權</span>
+                    <span className={`market-pulse-pill-badge ${twMarketBadge.badgeType}`}>
+                      <span className="badge-dot" />
+                      {twMarketBadge.badgeLabel}
+                    </span>
                     <span
                       className={`index-val ${
                         marketIndices.TSE.change > 0
@@ -464,8 +532,19 @@ export const App: React.FC = () => {
                   </div>
                 )}
                 {marketIndices.OTC && (
-                  <div className="index-pill">
+                  <div
+                    className="index-pill index-pill-clickable"
+                    onClick={() => {
+                      setMarketModalTab('tw');
+                      setIsGlobalIndicesModalOpen(true);
+                    }}
+                    title="點擊放大查看櫃買指數走勢圖與完整行情"
+                  >
                     <span className="index-label">櫃買</span>
+                    <span className={`market-pulse-pill-badge ${twMarketBadge.badgeType}`}>
+                      <span className="badge-dot" />
+                      {twMarketBadge.badgeLabel}
+                    </span>
                     <span
                       className={`index-val ${
                         marketIndices.OTC.change > 0
@@ -503,9 +582,63 @@ export const App: React.FC = () => {
                     <MarketIndexTrend quote={marketIndices.OTC} />
                   </div>
                 )}
+                {marketIndices.TXF && marketIndices.TXF.price > 0 && (
+                  <div
+                    className="index-pill index-pill-clickable"
+                    onClick={() => {
+                      setMarketModalTab('tw');
+                      setIsGlobalIndicesModalOpen(true);
+                    }}
+                    title="點擊放大查看台指近（全）走勢圖與完整行情"
+                  >
+                    <span className="index-label">台指近(全)</span>
+                    <span className={`market-pulse-pill-badge ${txfMarketBadge.badgeType}`}>
+                      <span className="badge-dot" />
+                      {txfMarketBadge.badgeLabel}
+                    </span>
+                    <span
+                      className={`index-val ${
+                        marketIndices.TXF.change > 0
+                          ? 'color-up'
+                          : marketIndices.TXF.change < 0
+                          ? 'color-down'
+                          : 'color-neutral'
+                      }`}
+                    >
+                      {marketIndices.TXF.price.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                    </span>
+                    <span
+                      className={`index-chg ${
+                        marketIndices.TXF.change > 0
+                          ? 'color-up'
+                          : marketIndices.TXF.change < 0
+                          ? 'color-down'
+                          : 'color-neutral'
+                      }`}
+                    >
+                      {marketIndices.TXF.change > 0
+                        ? `▲${marketIndices.TXF.change.toFixed(0)}`
+                        : marketIndices.TXF.change < 0
+                        ? `▼${Math.abs(marketIndices.TXF.change).toFixed(0)}`
+                        : '0'}
+                      {' '}
+                      ({marketIndices.TXF.changePercent > 0 ? '+' : ''}
+                      {marketIndices.TXF.changePercent.toFixed(2)}%)
+                    </span>
+                    {marketIndices.TXF.volumeText && (
+                      <span className="index-vol" title="台指近(全)累積成交口數">
+                        口數 {marketIndices.TXF.volumeText}
+                      </span>
+                    )}
+                    <MarketIndexTrend quote={marketIndices.TXF} />
+                  </div>
+                )}
                 <button
                   className="index-pill btn-global-indices"
-                  onClick={() => setIsGlobalIndicesModalOpen(true)}
+                  onClick={() => {
+                    setMarketModalTab('us');
+                    setIsGlobalIndicesModalOpen(true);
+                  }}
                   title="查看美股四大指數與亞股(日韓)行情與分時走勢"
                 >
                   <span className="global-pill-icon">🌐</span>
@@ -620,6 +753,8 @@ export const App: React.FC = () => {
       <GlobalIndicesModal
         isOpen={isGlobalIndicesModalOpen}
         onClose={() => setIsGlobalIndicesModalOpen(false)}
+        initialTab={marketModalTab}
+        twIndices={marketIndices}
       />
     </div>
   );

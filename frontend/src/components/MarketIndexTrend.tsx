@@ -38,14 +38,24 @@ export const MarketIndexTrend: React.FC<MarketIndexTrendProps> = ({
       }
     }
 
-    // 若無歷史點位，以開高低現合成平滑示意走勢
+    // 若無歷史點位，以開高低現合成自然的擬真分時走勢 (避免生硬直線)
     if (list.length === 0) {
       if (o !== null && z !== null) {
-        if (h !== null && l !== null && (h > Math.max(o, z) || l < Math.min(o, z))) {
-          list.push(o, (o + h) / 2, h, (h + l) / 2, l, (l + z) / 2, z);
-        } else {
-          list.push(o, (o + z) / 2, z);
+        const highVal = h !== null ? h : Math.max(o, z);
+        const lowVal = l !== null ? l : Math.min(o, z);
+        const keyNodes = [o, highVal, lowVal, z];
+        for (let i = 0; i < keyNodes.length - 1; i++) {
+          const startVal = keyNodes[i];
+          const endVal = keyNodes[i + 1];
+          const steps = 6;
+          for (let s = 0; s < steps; s++) {
+            const progress = s / steps;
+            const wave = Math.sin(progress * Math.PI) * (highVal - lowVal) * 0.08;
+            const ease = (1 - Math.cos(progress * Math.PI)) / 2;
+            list.push(startVal + (endVal - startVal) * ease + wave);
+          }
         }
+        list.push(z);
       }
     } else if (z !== null) {
       // 確保最後一個點位精準貼齊即時現價
@@ -95,9 +105,33 @@ export const MarketIndexTrend: React.FC<MarketIndexTrendProps> = ({
     return [Math.round(x * 10) / 10, Math.round(cy * 10) / 10];
   });
 
-  const lineD = coords.reduce((acc, [x, cy], i) => `${acc} ${i === 0 ? 'M' : 'L'} ${x} ${cy}`, '');
+  // 採用 Catmull-Rom / Bézier 平滑貝茲曲線，確保線條自然圓潤且不失真
+  const buildSmoothPath = (pts: Array<[number, number]>) => {
+    if (pts.length < 2) return '';
+    if (pts.length === 2) {
+      return `M ${pts[0][0]} ${pts[0][1]} L ${pts[1][0]} ${pts[1][1]}`;
+    }
+    let d = `M ${pts[0][0]} ${pts[0][1]}`;
+    const tension = 0.65;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = i > 0 ? pts[i - 1] : pts[i];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = i < pts.length - 2 ? pts[i + 2] : p2;
 
-  // 封閉面積路徑 (由折線路徑 + 封閉回基準線 baseY)
+      const cp1x = Math.round((p1[0] + ((p2[0] - p0[0]) / 6) * tension) * 10) / 10;
+      const cp1y = Math.round((p1[1] + ((p2[1] - p0[1]) / 6) * tension) * 10) / 10;
+      const cp2x = Math.round((p2[0] - ((p3[0] - p1[0]) / 6) * tension) * 10) / 10;
+      const cp2y = Math.round((p2[1] - ((p3[1] - p1[1]) / 6) * tension) * 10) / 10;
+
+      d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2[0]} ${p2[1]}`;
+    }
+    return d;
+  };
+
+  const lineD = buildSmoothPath(coords);
+
+  // 封閉面積路徑 (由平滑曲線路徑 + 封閉回基準線 baseY)
   const firstX = coords[0][0];
   const lastX = coords[coords.length - 1][0];
   const lastY = coords[coords.length - 1][1];

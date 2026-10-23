@@ -103,7 +103,80 @@ class YahooMarketService:
                     "changePercent": float(quote.get("changePercent") or 0.0),
                     "turnoverM": quote.get("turnoverM"),
                     "points": valid_pts,
+                    "marketStatus": quote.get("marketStatus"),
                 }
+
+        # 1.1 解析台指期近一 (WTX& / 台指近（全）)
+        try:
+            pos_txf = html.find("台指期近一")
+            while pos_txf != -1:
+                q_pos = html.find("quote", pos_txf)
+                if q_pos != -1 and q_pos - pos_txf < 150:
+                    brace_pos = html.find("{", q_pos)
+                    raw_txf = html[brace_pos:]
+                    braces = 0
+                    end_idx = 0
+                    in_escape = False
+                    in_str = False
+                    for i, ch in enumerate(raw_txf):
+                        if ch == "\\" and not in_escape:
+                            in_escape = True
+                            continue
+                        if ch == '"' and not in_escape:
+                            in_str = not in_str
+                        elif not in_str:
+                            if ch == "{":
+                                braces += 1
+                            elif ch == "}":
+                                braces -= 1
+                                if braces == 0:
+                                    end_idx = i + 1
+                                    break
+                        in_escape = False
+                    clean_json = raw_txf[:end_idx].replace('\\"', '"').replace("\\\\", "\\")
+                    q_data = json.loads(clean_json)
+
+                    def get_num(field: str) -> float:
+                        v = q_data.get(field)
+                        if isinstance(v, dict):
+                            raw_val = v.get("raw")
+                            return float(raw_val) if raw_val is not None else 0.0
+                        if isinstance(v, (int, float)):
+                            return float(v)
+                        if isinstance(v, str):
+                            try:
+                                return float(v.replace(",", ""))
+                            except Exception:
+                                return 0.0
+                        return 0.0
+
+                    vol_raw = q_data.get("volume")
+                    try:
+                        vol = int(str(vol_raw).replace(",", ""))
+                    except Exception:
+                        vol = 0
+
+                    price = get_num("price")
+                    if price > 0:
+                        tw_result["TXF"] = {
+                            "code": "WTX&",
+                            "name": "台指近（全）",
+                            "price": price,
+                            "reference": get_num("previousClose"),
+                            "open": get_num("openPrice"),
+                            "high": get_num("dayHighPrice"),
+                            "low": get_num("dayLowPrice"),
+                            "change": get_num("change"),
+                            "changePercent": get_num("changePercent"),
+                            "volume": vol,
+                            "volumeText": f"{vol:,} 口",
+                            "points": [],
+                            "marketStatus": q_data.get("marketStatus"),
+                        }
+                    break
+                pos_txf = html.find("台指期近一", pos_txf + 1)
+        except Exception as e:
+            logger.warning(f"Error parsing TXF from Yahoo HTML: {e}")
 
         # 2. 解析美股 (道瓊、那斯達克、標普500、費半)
         us_data = data.get("us", {})
@@ -198,16 +271,14 @@ class YahooMarketService:
             return False
 
         updated = False
-        for key in ["TSE", "OTC"]:
+        for key in ["TSE", "OTC", "TXF"]:
             if key in tw_data and key in shioaji_adapter.market_indices:
                 info = tw_data[key]
                 target = shioaji_adapter.market_indices[key]
+                if "marketStatus" in info:
+                    target["marketStatus"] = info["marketStatus"]
 
-                if info.get("points"):
-                    target["points"] = info["points"]
-                    updated = True
-
-                if not target.get("price") or target["price"] == 0.0:
+                if key == "TXF":
                     target["price"] = info["price"]
                     target["change"] = info["change"]
                     target["changePercent"] = info["changePercent"]
@@ -219,16 +290,54 @@ class YahooMarketService:
                         target["high"] = info["high"]
                     if info.get("low"):
                         target["low"] = info["low"]
-                    updated = True
+                    if info.get("volumeText"):
+                        target["volumeText"] = info["volumeText"]
+                    if info.get("volume"):
+                        target["volumeAmount"] = info["volume"]
 
-                if not target.get("volumeText") and info.get("turnoverM"):
-                    try:
-                        amt_raw = float(info["turnoverM"]) * 100_000_000
-                        target["volumeText"] = f"{round(float(info['turnoverM']) / 100.0, 2):,.2f} 億"
-                        target["volumeAmount"] = amt_raw
+                    pts = target.setdefault("points", [])
+                    if not pts:
+                        o = target.get("open") or target["price"]
+                        h = target.get("high") or target["price"]
+                        l = target.get("low") or target["price"]
+                        p = target["price"]
+                        if p >= o:
+                            seed = [o, (o + l) / 2, l, (l + h) / 2, h, (h + p) / 2, p]
+                        else:
+                            seed = [o, (o + h) / 2, h, (h + l) / 2, l, (l + p) / 2, p]
+                        target["points"] = [round(x, 2) for x in seed if x > 0]
+                    elif pts[-1] != target["price"]:
+                        pts.append(round(target["price"], 2))
+                        if len(pts) > 500:
+                            target["points"] = pts[-500:]
+                    updated = True
+                else:
+                    if info.get("points"):
+                        target["points"] = info["points"]
                         updated = True
-                    except Exception:
-                        pass
+
+                    if not target.get("price") or target["price"] == 0.0:
+                        target["price"] = info["price"]
+                        target["change"] = info["change"]
+                        target["changePercent"] = info["changePercent"]
+                        if info.get("reference"):
+                            target["reference"] = info["reference"]
+                        if info.get("open"):
+                            target["open"] = info["open"]
+                        if info.get("high"):
+                            target["high"] = info["high"]
+                        if info.get("low"):
+                            target["low"] = info["low"]
+                        updated = True
+
+                    if not target.get("volumeText") and info.get("turnoverM"):
+                        try:
+                            amt_raw = float(info["turnoverM"]) * 100_000_000
+                            target["volumeText"] = f"{round(float(info['turnoverM']) / 100.0, 2):,.2f} 億"
+                            target["volumeAmount"] = amt_raw
+                            updated = True
+                        except Exception:
+                            pass
 
         if updated:
             shioaji_adapter.indices_dirty = True
@@ -256,12 +365,21 @@ class YahooMarketService:
                 pass
 
     async def _loop(self):
-        """定期背景同步當日走勢折線圖點位 (開盤時段每 30 秒，非開盤時段每 2 分鐘)"""
+        """定期背景同步當日走勢折線圖點位 (交易時段每 30 秒，週末或離峰空檔每 2 分鐘)"""
         logger.info("YahooMarketService background loop started.")
         while self._running:
             try:
-                from backend.app.services.shioaji_adapter import is_taiwan_market_open
-                interval = 30.0 if is_taiwan_market_open() else 120.0
+                # 判斷是否處於交易時段 (台股現貨 08:30~13:45 或 夜盤期貨/歐美股市 15:00~翌日 05:00)
+                from datetime import timedelta
+                now_tw = datetime.now(timezone(timedelta(hours=8)))
+                weekday = now_tw.weekday()
+                hm = now_tw.hour * 60 + now_tw.minute
+                # 週六 05:00 後至週一 08:30 前完全休市
+                is_weekend = (weekday == 5 and hm >= 5 * 60) or (weekday == 6) or (weekday == 0 and hm < 8 * 60 + 30)
+                # 平日換盤空檔 (05:00~08:30, 13:45~14:50)
+                is_break = (5 * 60 <= hm < 8 * 60 + 30) or (13 * 60 + 45 <= hm < 14 * 60 + 50)
+                interval = 120.0 if (is_weekend or is_break) else 30.0
+
                 await asyncio.sleep(interval)
                 await self.update_indices_once()
             except asyncio.CancelledError:

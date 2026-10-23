@@ -13,21 +13,30 @@ from backend.app.settings import settings
 from backend.app.services.quote_store import quote_store
 from backend.app.domain.models import InstrumentSearchResult
 
+from backend.app.services.market_calendar_service import (
+    evaluate_tw_market_status,
+    check_twse_emergency_closure,
+    get_tw_annual_holidays,
+)
+
 logger = logging.getLogger("shioaji_adapter")
 
 def is_taiwan_market_open() -> bool:
-    """判斷台股現貨盤中交易時段 (週一至週五 09:00 ~ 13:30)"""
-    tz_tw = timezone(timedelta(hours=8))
-    now_tw = datetime.now(tz_tw)
-    if now_tw.weekday() >= 5:
-        return False
-    current_minutes = now_tw.hour * 60 + now_tw.minute
-    return (9 * 60) <= current_minutes <= (13 * 60 + 30)
+    """判斷台股現貨盤中交易時段 (結合證交所天然災害、颱風假、國定假日與盤中時段)"""
+    return evaluate_tw_market_status().get("isOpen", False)
 
 def is_taiwan_trial_matching() -> bool:
-    """判斷目前是否處於台股試撮時段 (盤中營業日 08:30~09:00 開盤前試撮 或 13:25~13:30 收盤前試撮)"""
+    """判斷目前是否處於台股試撮時段 (若休市則非試撮；開盤日 08:30~09:00 或 13:25~13:30)"""
+    # 檢查今日是否為國定假日或重大天然災害休市
+    is_closed, _, _ = check_twse_emergency_closure()
+    if is_closed:
+        return False
     tz_tw = timezone(timedelta(hours=8))
     now_tw = datetime.now(tz_tw)
+    today_str = now_tw.strftime("%Y-%m-%d")
+    holidays = get_tw_annual_holidays()
+    if today_str in holidays:
+        return False
     if now_tw.weekday() >= 5:
         return False
     t = now_tw.time()
@@ -40,9 +49,16 @@ def is_taiwan_trial_matching() -> bool:
     return False
 
 def is_taiwan_trading_or_trial_day_hours() -> bool:
-    """判斷是否處於台股營業日之交易或試撮時段 (週一至週五 08:30 ~ 13:35，此期間嚴禁執行任何盤後模擬)"""
+    """判斷是否處於台股營業日之交易或試撮時段 (週一至週五 08:30 ~ 13:35，非休市日)"""
+    is_closed, _, _ = check_twse_emergency_closure()
+    if is_closed:
+        return False
     tz_tw = timezone(timedelta(hours=8))
     now_tw = datetime.now(tz_tw)
+    today_str = now_tw.strftime("%Y-%m-%d")
+    holidays = get_tw_annual_holidays()
+    if today_str in holidays:
+        return False
     if now_tw.weekday() >= 5:
         return False
     current_minutes = now_tw.hour * 60 + now_tw.minute
@@ -247,6 +263,7 @@ class ShioajiAdapter:
         self.market_indices: dict[str, dict[str, Any]] = {
             "TSE": {"code": "IX0001", "name": "加權指數", "price": 0.0, "change": 0.0, "changePercent": 0.0, "reference": None, "open": None, "high": None, "low": None, "volumeText": None, "volumeAmount": None, "points": []},
             "OTC": {"code": "IX0043", "name": "櫃買指數", "price": 0.0, "change": 0.0, "changePercent": 0.0, "reference": None, "open": None, "high": None, "low": None, "volumeText": None, "volumeAmount": None, "points": []},
+            "TXF": {"code": "WTX&", "name": "台指近（全）", "price": 0.0, "change": 0.0, "changePercent": 0.0, "reference": None, "open": None, "high": None, "low": None, "volumeText": None, "volumeAmount": None, "points": []},
         }
         self.indices_dirty = False
         self.stock_positions_detail: list[dict[str, Any]] = []

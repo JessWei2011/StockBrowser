@@ -1,14 +1,23 @@
 import React, { useState, useEffect, useId } from 'react';
-import type { GlobalIndexItem, GlobalIndicesResponse } from '../types';
+import type { GlobalIndicesResponse, MarketIndexState } from '../types';
 import { fetchGlobalIndices } from '../services/api';
 
 interface GlobalIndicesModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialTab?: 'tw' | 'us' | 'asia';
+  twIndices?: Record<string, MarketIndexState> | null;
+}
+
+interface SparklineInput {
+  reference: number;
+  price: number;
+  open?: number | null;
+  points?: number[];
 }
 
 // 專屬大尺寸 Yahoo 風格分時走勢卡片折線圖元件
-const YahooCardSparkline: React.FC<{ item: GlobalIndexItem }> = ({ item }) => {
+const YahooCardSparkline: React.FC<{ item: SparklineInput }> = ({ item }) => {
   const uid = useId().replace(/:/g, '');
   const W = 280;
   const H = 64;
@@ -115,11 +124,23 @@ const YahooCardSparkline: React.FC<{ item: GlobalIndexItem }> = ({ item }) => {
   );
 };
 
-export const GlobalIndicesModal: React.FC<GlobalIndicesModalProps> = ({ isOpen, onClose }) => {
-  const [activeTab, setActiveTab] = useState<'us' | 'asia'>('us');
+export const GlobalIndicesModal: React.FC<GlobalIndicesModalProps> = ({
+  isOpen,
+  onClose,
+  initialTab = 'tw',
+  twIndices,
+}) => {
+  const [activeTab, setActiveTab] = useState<'tw' | 'us' | 'asia'>(initialTab);
   const [data, setData] = useState<GlobalIndicesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<string>('');
+
+  // 每次開啟時切換至指定的初始分頁
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
 
   const loadData = async () => {
     try {
@@ -144,8 +165,6 @@ export const GlobalIndicesModal: React.FC<GlobalIndicesModalProps> = ({ isOpen, 
 
   if (!isOpen) return null;
 
-  const currentList: GlobalIndexItem[] = data ? (activeTab === 'us' ? data.us : data.asia) : [];
-
   const fmt = (num?: number | null) =>
     typeof num === 'number' && Number.isFinite(num)
       ? num.toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -158,10 +177,10 @@ export const GlobalIndicesModal: React.FC<GlobalIndicesModalProps> = ({ isOpen, 
         <div className="global-modal-header">
           <div className="global-modal-title-group">
             <h2 className="global-modal-title">
-              <span className="global-modal-icon">🌐</span> 國際股市行情
+              <span className="global-modal-icon">📈</span> 大盤與國際指數走勢
             </h2>
             <span className="global-modal-subtitle">
-              {lastRefreshed ? `更新時間: ${lastRefreshed}` : '即時同步中'}
+              {lastRefreshed ? `最後同步時間: ${lastRefreshed}` : '即時同步中'}
             </span>
           </div>
 
@@ -180,87 +199,302 @@ export const GlobalIndicesModal: React.FC<GlobalIndicesModalProps> = ({ isOpen, 
           </div>
         </div>
 
-        {/* 頁籤切換 (美股 / 亞股) */}
+        {/* 頁籤切換 (台股 / 美股 / 亞股) */}
         <div className="global-modal-tabs">
+          <button
+            className={`global-tab-btn ${activeTab === 'tw' ? 'active' : ''}`}
+            onClick={() => setActiveTab('tw')}
+          >
+            🇹🇼 台股 (加權 / 櫃買 / 台指全)
+          </button>
           <button
             className={`global-tab-btn ${activeTab === 'us' ? 'active' : ''}`}
             onClick={() => setActiveTab('us')}
           >
-            美股主要指數 ({data?.us?.length || 4})
+            🇺🇸 美股主要指數 ({data?.us?.length || 4})
           </button>
           <button
             className={`global-tab-btn ${activeTab === 'asia' ? 'active' : ''}`}
             onClick={() => setActiveTab('asia')}
           >
-            亞股（日韓）({data?.asia?.length || 2})
+            🌏 亞股（日韓）({data?.asia?.length || 2})
           </button>
         </div>
 
         {/* 卡片網格 (Yahoo 樣式) */}
-        <div className="global-cards-grid">
-          {currentList.map((item) => {
-            const isUp = item.change > 0;
-            const isDown = item.change < 0;
-            const chgColor = isUp ? 'color-up' : isDown ? 'color-down' : 'color-neutral';
-            const chgSign = isUp ? '▲' : isDown ? '▼' : '';
+        <div className={`global-cards-grid grid-${activeTab}`}>
+          {activeTab === 'tw' && (
+            <>
+              {/* 1. 台股上市加權指數 */}
+              {twIndices?.TSE && (() => {
+                const tse = twIndices.TSE;
+                const isUp = tse.change > 0;
+                const isDown = tse.change < 0;
+                const chgColor = isUp ? 'color-up' : isDown ? 'color-down' : 'color-neutral';
+                const chgSign = isUp ? '▲' : isDown ? '▼' : '';
+                const ref = tse.reference || (tse.price ? tse.price - tse.change : tse.price);
 
-            return (
-              <div key={item.symbol} className="yahoo-index-card">
-                {/* 卡片頭部：名稱 + 現價與漲跌幅 */}
-                <div className="yahoo-card-header">
-                  <div className="yahoo-card-title-col">
-                    <span className="yahoo-card-name">{item.name}</span>
-                    <span className="yahoo-card-symbol">{item.symbol}</span>
-                  </div>
+                return (
+                  <div className="yahoo-index-card">
+                    <div className="yahoo-card-header">
+                      <div className="yahoo-card-title-col">
+                        <span className="yahoo-card-name">上市（加權指數）</span>
+                        <span className="yahoo-card-symbol">{tse.code || 'IX0001'}</span>
+                        {tse.volumeText && (
+                          <span className="yahoo-card-vol">成交 {tse.volumeText}</span>
+                        )}
+                      </div>
 
-                  <div className="yahoo-card-price-col">
-                    <div className={`yahoo-card-price ${chgColor}`}>
-                      {fmt(item.price)}
+                      <div className="yahoo-card-price-col">
+                        <div className={`yahoo-card-price ${chgColor}`}>
+                          {fmt(tse.price)}
+                        </div>
+                        <div className={`yahoo-card-change ${chgColor}`}>
+                          <span>
+                            {chgSign} {fmt(Math.abs(tse.change))}
+                          </span>
+                          <span>
+                            ({tse.changePercent > 0 ? '+' : ''}
+                            {tse.changePercent.toFixed(2)}%)
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div className={`yahoo-card-change ${chgColor}`}>
-                      <span>
-                        {chgSign} {fmt(Math.abs(item.change))}
-                      </span>
-                      <span>
-                        ({item.changePercent > 0 ? '+' : ''}
-                        {item.changePercent.toFixed(2)}%)
-                      </span>
+
+                    <div className="yahoo-card-chart-area">
+                      <YahooCardSparkline
+                        item={{
+                          reference: ref,
+                          price: tse.price,
+                          open: tse.open,
+                          points: tse.points,
+                        }}
+                      />
+                    </div>
+
+                    <div className="yahoo-card-stats-grid">
+                      <div className="yahoo-stat-item">
+                        <span className="yahoo-stat-label">開盤</span>
+                        <span className="yahoo-stat-val">{fmt(tse.open)}</span>
+                      </div>
+                      <div className="yahoo-stat-item">
+                        <span className="yahoo-stat-label">昨收</span>
+                        <span className="yahoo-stat-val">{fmt(ref)}</span>
+                      </div>
+                      <div className="yahoo-stat-item">
+                        <span className="yahoo-stat-label">最高</span>
+                        <span className="yahoo-stat-val">{fmt(tse.high)}</span>
+                      </div>
+                      <div className="yahoo-stat-item">
+                        <span className="yahoo-stat-label">最低</span>
+                        <span className="yahoo-stat-val">{fmt(tse.low)}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* 2. 台股上櫃櫃買指數 */}
+              {twIndices?.OTC && (() => {
+                const otc = twIndices.OTC;
+                const isUp = otc.change > 0;
+                const isDown = otc.change < 0;
+                const chgColor = isUp ? 'color-up' : isDown ? 'color-down' : 'color-neutral';
+                const chgSign = isUp ? '▲' : isDown ? '▼' : '';
+                const ref = otc.reference || (otc.price ? otc.price - otc.change : otc.price);
+
+                return (
+                  <div className="yahoo-index-card">
+                    <div className="yahoo-card-header">
+                      <div className="yahoo-card-title-col">
+                        <span className="yahoo-card-name">上櫃（櫃買指數）</span>
+                        <span className="yahoo-card-symbol">{otc.code || 'IX0043'}</span>
+                        {otc.volumeText && (
+                          <span className="yahoo-card-vol">成交 {otc.volumeText}</span>
+                        )}
+                      </div>
+
+                      <div className="yahoo-card-price-col">
+                        <div className={`yahoo-card-price ${chgColor}`}>
+                          {fmt(otc.price)}
+                        </div>
+                        <div className={`yahoo-card-change ${chgColor}`}>
+                          <span>
+                            {chgSign} {fmt(Math.abs(otc.change))}
+                          </span>
+                          <span>
+                            ({otc.changePercent > 0 ? '+' : ''}
+                            {otc.changePercent.toFixed(2)}%)
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="yahoo-card-chart-area">
+                      <YahooCardSparkline
+                        item={{
+                          reference: ref,
+                          price: otc.price,
+                          open: otc.open,
+                          points: otc.points,
+                        }}
+                      />
+                    </div>
+
+                    <div className="yahoo-card-stats-grid">
+                      <div className="yahoo-stat-item">
+                        <span className="yahoo-stat-label">開盤</span>
+                        <span className="yahoo-stat-val">{fmt(otc.open)}</span>
+                      </div>
+                      <div className="yahoo-stat-item">
+                        <span className="yahoo-stat-label">昨收</span>
+                        <span className="yahoo-stat-val">{fmt(ref)}</span>
+                      </div>
+                      <div className="yahoo-stat-item">
+                        <span className="yahoo-stat-label">最高</span>
+                        <span className="yahoo-stat-val">{fmt(otc.high)}</span>
+                      </div>
+                      <div className="yahoo-stat-item">
+                        <span className="yahoo-stat-label">最低</span>
+                        <span className="yahoo-stat-val">{fmt(otc.low)}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* 3. 台指近（全） */}
+              {twIndices?.TXF && (() => {
+                const txf = twIndices.TXF;
+                const isUp = txf.change > 0;
+                const isDown = txf.change < 0;
+                const chgColor = isUp ? 'color-up' : isDown ? 'color-down' : 'color-neutral';
+                const chgSign = isUp ? '▲' : isDown ? '▼' : '';
+                const ref = txf.reference || (txf.price ? txf.price - txf.change : txf.price);
+
+                return (
+                  <div className="yahoo-index-card">
+                    <div className="yahoo-card-header">
+                      <div className="yahoo-card-title-col">
+                        <span className="yahoo-card-name">台指近（全）</span>
+                        <span className="yahoo-card-symbol">{txf.code || 'WTX&'}</span>
+                        {txf.volumeText && (
+                          <span className="yahoo-card-vol">成交 {txf.volumeText}</span>
+                        )}
+                      </div>
+
+                      <div className="yahoo-card-price-col">
+                        <div className={`yahoo-card-price ${chgColor}`}>
+                          {fmt(txf.price)}
+                        </div>
+                        <div className={`yahoo-card-change ${chgColor}`}>
+                          <span>
+                            {chgSign} {fmt(Math.abs(txf.change))}
+                          </span>
+                          <span>
+                            ({txf.changePercent > 0 ? '+' : ''}
+                            {txf.changePercent.toFixed(2)}%)
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="yahoo-card-chart-area">
+                      <YahooCardSparkline
+                        item={{
+                          reference: ref,
+                          price: txf.price,
+                          open: txf.open,
+                          points: txf.points,
+                        }}
+                      />
+                    </div>
+
+                    <div className="yahoo-card-stats-grid">
+                      <div className="yahoo-stat-item">
+                        <span className="yahoo-stat-label">開盤</span>
+                        <span className="yahoo-stat-val">{fmt(txf.open)}</span>
+                      </div>
+                      <div className="yahoo-stat-item">
+                        <span className="yahoo-stat-label">昨收</span>
+                        <span className="yahoo-stat-val">{fmt(ref)}</span>
+                      </div>
+                      <div className="yahoo-stat-item">
+                        <span className="yahoo-stat-label">最高</span>
+                        <span className="yahoo-stat-val">{fmt(txf.high)}</span>
+                      </div>
+                      <div className="yahoo-stat-item">
+                        <span className="yahoo-stat-label">最低</span>
+                        <span className="yahoo-stat-val">{fmt(txf.low)}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </>
+          )}
+
+          {activeTab !== 'tw' &&
+            (activeTab === 'us' ? data?.us || [] : data?.asia || []).map((item) => {
+              const isUp = item.change > 0;
+              const isDown = item.change < 0;
+              const chgColor = isUp ? 'color-up' : isDown ? 'color-down' : 'color-neutral';
+              const chgSign = isUp ? '▲' : isDown ? '▼' : '';
+
+              return (
+                <div key={item.symbol} className="yahoo-index-card">
+                  <div className="yahoo-card-header">
+                    <div className="yahoo-card-title-col">
+                      <span className="yahoo-card-name">{item.name}</span>
+                      <span className="yahoo-card-symbol">{item.symbol}</span>
+                    </div>
+
+                    <div className="yahoo-card-price-col">
+                      <div className={`yahoo-card-price ${chgColor}`}>
+                        {fmt(item.price)}
+                      </div>
+                      <div className={`yahoo-card-change ${chgColor}`}>
+                        <span>
+                          {chgSign} {fmt(Math.abs(item.change))}
+                        </span>
+                        <span>
+                          ({item.changePercent > 0 ? '+' : ''}
+                          {item.changePercent.toFixed(2)}%)
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="yahoo-card-chart-area">
+                    <YahooCardSparkline item={item} />
+                  </div>
+
+                  <div className="yahoo-card-stats-grid">
+                    <div className="yahoo-stat-item">
+                      <span className="yahoo-stat-label">開盤</span>
+                      <span className="yahoo-stat-val">{fmt(item.open)}</span>
+                    </div>
+                    <div className="yahoo-stat-item">
+                      <span className="yahoo-stat-label">昨收</span>
+                      <span className="yahoo-stat-val">{fmt(item.reference)}</span>
+                    </div>
+                    <div className="yahoo-stat-item">
+                      <span className="yahoo-stat-label">最高</span>
+                      <span className="yahoo-stat-val">{fmt(item.high)}</span>
+                    </div>
+                    <div className="yahoo-stat-item">
+                      <span className="yahoo-stat-label">最低</span>
+                      <span className="yahoo-stat-val">{fmt(item.low)}</span>
                     </div>
                   </div>
                 </div>
-
-                {/* 卡片中間：Yahoo 雙色走勢圖 */}
-                <div className="yahoo-card-chart-area">
-                  <YahooCardSparkline item={item} />
-                </div>
-
-                {/* 卡片底部：2×2 數據 (開盤、昨收、最高、最低) */}
-                <div className="yahoo-card-stats-grid">
-                  <div className="yahoo-stat-item">
-                    <span className="yahoo-stat-label">開盤</span>
-                    <span className="yahoo-stat-val">{fmt(item.open)}</span>
-                  </div>
-                  <div className="yahoo-stat-item">
-                    <span className="yahoo-stat-label">昨收</span>
-                    <span className="yahoo-stat-val">{fmt(item.reference)}</span>
-                  </div>
-                  <div className="yahoo-stat-item">
-                    <span className="yahoo-stat-label">最高</span>
-                    <span className="yahoo-stat-val">{fmt(item.high)}</span>
-                  </div>
-                  <div className="yahoo-stat-item">
-                    <span className="yahoo-stat-label">最低</span>
-                    <span className="yahoo-stat-val">{fmt(item.low)}</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
         </div>
 
         {/* 底部備註 */}
         <div className="global-modal-footer">
-          <span>數據來源：Yahoo 財經行情 ｜ 分時走勢圖依昨收為基準線，上方紅色、下方綠色</span>
+          <span>數據來源：永豐金即時報價 & Yahoo 財經 ｜ 分時走勢圖以昨日收盤為基準線，上方紅色、下方綠色</span>
         </div>
       </div>
     </div>

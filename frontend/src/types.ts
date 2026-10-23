@@ -47,6 +47,13 @@ export interface WatchlistGroup {
   items: WatchlistItem[];
 }
 
+export interface MarketCalendarStatus {
+  isOpen: boolean;
+  badgeLabel: string;
+  badgeType: 'typhoon' | 'holiday' | 'weekend' | 'closed' | 'open' | string;
+  reason?: string;
+}
+
 export interface UpstreamStatus {
   connected: boolean;
   loggedIn: boolean;
@@ -77,6 +84,7 @@ export interface MarketIndexState {
   volumeText?: string | null;
   volumeAmount?: number | null;
   points?: number[];
+  marketStatus?: string | null;
 }
 
 export interface GlobalIndexItem {
@@ -160,6 +168,7 @@ export interface BootstrapResponse {
   positions?: StockPosition[];
   wealthSummary?: WealthSummary;
   marketIndices?: Record<string, MarketIndexState>;
+  marketCalendar?: MarketCalendarStatus;
   indicators?: Record<string, StockMaSummary>;
   serverVersion: number;
   upstream: UpstreamStatus;

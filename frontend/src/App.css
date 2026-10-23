@@ -537,6 +537,138 @@ body {
   font-size: 13px;
 }
 
+/* ── 開休市膠囊通知標籤 (參照 TW_MARKET_HOLIDAY_DETECTION_GUIDE.md) ── */
+.market-pulse-pill-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3.5px;
+  font-size: 9.5px;
+  font-weight: 750;
+  line-height: 1;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  white-space: nowrap;
+  user-select: none;
+  margin-left: 2px;
+}
+
+.market-pulse-pill-badge .badge-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+/* 颱風假／重大天然災害休市 */
+.market-pulse-pill-badge.typhoon {
+  background: rgba(239, 68, 68, 0.22);
+  color: #fda4af;
+  border: 1px solid rgba(244, 63, 94, 0.6);
+}
+
+[data-theme='light'] .market-pulse-pill-badge.typhoon {
+  background: #ffe4e6;
+  color: #e11d48;
+  border-color: #fda4af;
+}
+
+/* 國定假日休市 */
+.market-pulse-pill-badge.holiday {
+  background: rgba(239, 68, 68, 0.16);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+}
+
+[data-theme='light'] .market-pulse-pill-badge.holiday {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+/* 週末休市 */
+.market-pulse-pill-badge.weekend {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fcd34d;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+}
+
+[data-theme='light'] .market-pulse-pill-badge.weekend {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fcd34d;
+}
+
+/* 常態非盤中時段（未開盤/已收盤/休市中） */
+.market-pulse-pill-badge.closed {
+  background: rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+}
+
+[data-theme='light'] .market-pulse-pill-badge.closed {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
+/* 開盤中（含小圓點呼吸動畫） */
+.market-pulse-pill-badge.open {
+  background: rgba(34, 197, 94, 0.16);
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.45);
+}
+
+[data-theme='light'] .market-pulse-pill-badge.open {
+  background: #dcfce7;
+  color: #15803d;
+  border-color: #86efac;
+}
+
+.market-pulse-pill-badge.open .badge-dot {
+  animation: market-pulse-breathe 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes market-pulse-breathe {
+  from { opacity: 0.4; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1.15); }
+}
+
+.index-closed-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1;
+  padding: 1.5px 5.5px;
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.18);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  margin-left: 2px;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+[data-theme='light'] .index-closed-pill {
+  background: rgba(203, 213, 225, 0.55);
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
+/* ── 可點擊大盤膠囊 (點擊放大走勢圖) ── */
+.index-pill.index-pill-clickable {
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.index-pill.index-pill-clickable:hover {
+  border-color: #38bdf8;
+  background-color: var(--bg-card-hover, rgba(56, 189, 248, 0.08));
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(56, 189, 248, 0.18);
+}
+
 /* ── 國際股市膠囊按鈕 ── */
 .btn-global-indices {
   cursor: pointer;
@@ -6446,6 +6578,19 @@ body {
   color: var(--text-muted);
   font-family: var(--font-mono, monospace);
   font-weight: 600;
+}
+
+.yahoo-card-vol {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-top: 4px;
+  background: var(--badge-bg, rgba(148, 163, 184, 0.15));
+  padding: 1px 7px;
+  border-radius: 6px;
+  display: inline-block;
+  align-self: flex-start;
+  font-feature-settings: 'tnum';
 }
 
 .yahoo-card-price-col {
