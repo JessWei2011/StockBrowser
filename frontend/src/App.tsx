@@ -23,6 +23,7 @@ import { MarketIndexTrend } from './components/MarketIndexTrend';
 import { InvestmentCalendarModal } from './components/InvestmentCalendarModal';
 import { GlobalIndicesModal } from './components/GlobalIndicesModal';
 import { FinancialNewsModal } from './components/FinancialNewsModal';
+import { MobileNavBar, type MobileNavTab } from './components/MobileNavBar';
 import './App.css';
 
 export const App: React.FC = () => {
@@ -145,6 +146,42 @@ export const App: React.FC = () => {
   const handleToggleViewMode = (mode: 'table' | 'card') => {
     setViewMode(mode);
     localStorage.setItem('stock_browser_view_mode', mode);
+  };
+
+  // 卡片排序整理模式 (關閉時卡片純淨無箭頭，開啟時提供 ↑ ↓ ✕ 順序微調)
+  const [isReorderMode, setIsReorderMode] = useState(false);
+
+  // 手機底部導覽列狀態聯動
+  const activeMobileTab: MobileNavTab = useMemo(() => {
+    if (isDrawerOpen) {
+      if (drawerTab === 'order') return 'order';
+      return 'vault';
+    }
+    return 'watchlist';
+  }, [isDrawerOpen, drawerTab]);
+
+  const handleSelectMobileTab = (tab: MobileNavTab) => {
+    if (tab === 'watchlist') {
+      setIsDrawerOpen(false);
+    } else if (tab === 'vault') {
+      if (!isVaultAuthenticated()) {
+        setIsVaultPasswordModalOpen(true);
+        return;
+      }
+      setDrawerTab('vault');
+      setIsDrawerOpen(true);
+    } else if (tab === 'order') {
+      if (!isVaultAuthenticated()) {
+        setIsVaultPasswordModalOpen(true);
+        return;
+      }
+      setDrawerTab('order');
+      setIsDrawerOpen(true);
+    } else if (tab === 'calendar') {
+      setIsCalendarModalOpen(true);
+    } else if (tab === 'news') {
+      setIsNewsModalOpen(true);
+    }
   };
 
   const flashTimerRef = useRef<number | null>(null);
@@ -459,6 +496,16 @@ export const App: React.FC = () => {
             <div className="view-mode-header-row">
               <div className="view-mode-count">
                 本組合共 <strong>{activeGroup?.items.length || 0}</strong> 檔商品
+                {viewMode === 'card' && (
+                  <button
+                    type="button"
+                    className={`btn-reorder-toggle ${isReorderMode ? 'active' : ''}`}
+                    onClick={() => setIsReorderMode((prev) => !prev)}
+                    title={isReorderMode ? '完成排序並返回簡潔模式' : '切換排序整理模式'}
+                  >
+                    {isReorderMode ? '✓ 完成' : '⇅ 排序'}
+                  </button>
+                )}
               </div>
               <div className="view-mode-toggle">
                 <span className="view-toggle-label">檢視模式：</span>
@@ -679,6 +726,7 @@ export const App: React.FC = () => {
                 onMoveItem={handleMoveStock}
                 onSelectStock={(code) => setSelectedChartCode(code)}
                 onOpenOrder={handleOpenOrder}
+                isReorderMode={isReorderMode}
               />
             )}
           </main>
@@ -763,6 +811,12 @@ export const App: React.FC = () => {
       <FinancialNewsModal
         isOpen={isNewsModalOpen}
         onClose={() => setIsNewsModalOpen(false)}
+      />
+
+      <MobileNavBar
+        activeTab={activeMobileTab}
+        onSelectTab={handleSelectMobileTab}
+        positionsCount={positions.length}
       />
     </div>
   );

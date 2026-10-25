@@ -59,7 +59,7 @@ function calcPositionMetrics(
 
 export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   isOpen,
-  onClose: _onClose,
+  onClose,
   activeTab,
   onChangeTab,
   positions,
@@ -665,6 +665,17 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
               🔒 上鎖
             </button>
           )}
+          {onClose && (
+            <button
+              type="button"
+              className="btn-sidebar-close"
+              onClick={onClose}
+              title="關閉視窗"
+              aria-label="關閉視窗"
+            >
+              ✕
+            </button>
+          )}
         </div>
       </div>
 
@@ -810,73 +821,87 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                         onDragEnd={handleDragEnd}
                         onDrop={(e) => handleDrop(e, idx)}
                       >
-                        {vaultSortMode === 'custom' && (
-                          <div className="sidebar-reorder-controls" onClick={(e) => e.stopPropagation()}>
-                            <span className="drag-handle sidebar-drag-handle" title="按住拖曳排序">⠿</span>
-                            <button
-                              type="button"
-                              className="btn-order-arrow btn-sidebar-arrow"
-                              title="往上移"
-                              disabled={idx === 0}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleMovePosition(idx, -1);
-                              }}
+                        <div className="vault-card-row-main">
+                          {vaultSortMode === 'custom' && (
+                            <div className="sidebar-reorder-controls" onClick={(e) => e.stopPropagation()}>
+                              <span className="drag-handle sidebar-drag-handle" title="按住拖曳排序">⠿</span>
+                              <button
+                                type="button"
+                                className="btn-order-arrow btn-sidebar-arrow"
+                                title="往上移"
+                                disabled={idx === 0}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleMovePosition(idx, -1);
+                                }}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-order-arrow btn-sidebar-arrow"
+                                title="往下移"
+                                disabled={idx === sortedPositions.length - 1}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleMovePosition(idx, 1);
+                                }}
+                              >
+                                ↓
+                              </button>
+                            </div>
+                          )}
+
+                          <div className="flat-card-stock">
+                            <span
+                              className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
+                              title={isOtc ? '上櫃股票' : '上市股票'}
                             >
-                              ↑
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-order-arrow btn-sidebar-arrow"
-                              title="往下移"
-                              disabled={idx === sortedPositions.length - 1}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleMovePosition(idx, 1);
-                              }}
-                            >
-                              ↓
-                            </button>
+                              {isOtc ? '櫃' : '市'}
+                            </span>
+                            <span className="flat-stock-name" title={pos.name || pos.code}>
+                              {pos.name || pos.code}
+                            </span>
+                            <span className={`flat-stock-code ${isOtc ? 'code-otc' : 'code-tse'}`}>
+                              {pos.code}
+                            </span>
                           </div>
-                        )}
 
-                        <div className="flat-card-stock">
-                          <span
-                            className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
-                            title={isOtc ? '上櫃股票' : '上市股票'}
+                          <div className="vault-card-pnl-roi-group">
+                            <div className={`flat-card-pnl ${pnlClass}`} title="損益試算 (已扣手續費與稅金)">
+                              {pnl > 0 ? '+' : ''}{Math.round(pnl).toLocaleString()}
+                              <span className="flat-unit">元</span>
+                            </div>
+
+                            <div className={`flat-card-roi ${roiClass}`} title="報酬率">
+                              {roi > 0 ? '+' : ''}{roi.toFixed(2)}%
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="vault-card-row-sub">
+                          <div className="vault-card-sub-info">
+                            <div className="flat-card-qty" title={`剩餘股數: ${Math.round(pos.quantity).toLocaleString()} 股`}>
+                              <span className="sub-lbl">庫存</span>
+                              <span className="flat-qty-num">{Math.round(pos.quantity).toLocaleString()}</span>
+                              <span className="flat-unit">股</span>
+                            </div>
+                            <div className="vault-card-price-info">
+                              <span className="sub-lbl">現價</span>
+                              <span className="sub-val">{currPrice.toFixed(2)}</span>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            className="btn-order-shortcut"
+                            title={`帶入「${pos.name || pos.code}」現有 ${Math.round(pos.quantity).toLocaleString()} 股至財神筆快速下單`}
+                            onClick={() => handleSelectToOrder(pos.code, pos.quantity)}
                           >
-                            {isOtc ? '櫃' : '市'}
-                          </span>
-                          <span className="flat-stock-name" title={pos.name || pos.code}>
-                            {pos.name || pos.code}
-                          </span>
-                          <span className={`flat-stock-code ${isOtc ? 'code-otc' : 'code-tse'}`}>
-                            {pos.code}
-                          </span>
+                            <span>下單</span>
+                            <span className="order-shortcut-arrow">↗</span>
+                          </button>
                         </div>
-
-                        <div className="flat-card-qty" title={`剩餘股數: ${Math.round(pos.quantity).toLocaleString()} 股`}>
-                          <span className="flat-qty-num">{Math.round(pos.quantity).toLocaleString()}</span>
-                          <span className="flat-unit">股</span>
-                        </div>
-
-                        <div className={`flat-card-pnl ${pnlClass}`} title="損益試算 (已扣手續費與稅金)">
-                          {pnl > 0 ? '+' : ''}{Math.round(pnl).toLocaleString()}
-                          <span className="flat-unit">元</span>
-                        </div>
-
-                        <div className={`flat-card-roi ${roiClass}`} title="報酬率">
-                          {roi > 0 ? '+' : ''}{roi.toFixed(2)}%
-                        </div>
-
-                        <button
-                          className="btn-order-shortcut"
-                          title={`帶入「${pos.name || pos.code}」現有 ${Math.round(pos.quantity).toLocaleString()} 股至財神筆快速下單`}
-                          onClick={() => handleSelectToOrder(pos.code, pos.quantity)}
-                        >
-                          <span>下單</span>
-                          <span className="order-shortcut-arrow">↗</span>
-                        </button>
                       </div>
                     );
                   })}
@@ -990,76 +1015,89 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                         onDragEnd={handleDragEnd}
                         onDrop={(e) => handleDrop(e, idx)}
                       >
-                        {vaultSortMode === 'custom' && (
-                          <div className="sidebar-reorder-controls" onClick={(e) => e.stopPropagation()}>
-                            <span className="drag-handle sidebar-drag-handle" title="按住拖曳排序">⠿</span>
-                            <button
-                              type="button"
-                              className="btn-order-arrow btn-sidebar-arrow"
-                              title="往上移"
-                              disabled={idx === 0}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleMovePosition(idx, -1);
-                              }}
+                        <div className="vault-card-row-main">
+                          {vaultSortMode === 'custom' && (
+                            <div className="sidebar-reorder-controls" onClick={(e) => e.stopPropagation()}>
+                              <span className="drag-handle sidebar-drag-handle" title="按住拖曳排序">⠿</span>
+                              <button
+                                type="button"
+                                className="btn-order-arrow btn-sidebar-arrow"
+                                title="往上移"
+                                disabled={idx === 0}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleMovePosition(idx, -1);
+                                }}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-order-arrow btn-sidebar-arrow"
+                                title="往下移"
+                                disabled={idx === sortedPositions.length - 1}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleMovePosition(idx, 1);
+                                }}
+                              >
+                                ↓
+                              </button>
+                            </div>
+                          )}
+
+                          <div className="flat-card-stock">
+                            <span
+                              className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
+                              title={isOtc ? '上櫃股票' : '上市股票'}
                             >
-                              ↑
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-order-arrow btn-sidebar-arrow"
-                              title="往下移"
-                              disabled={idx === sortedPositions.length - 1}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleMovePosition(idx, 1);
-                              }}
-                            >
-                              ↓
-                            </button>
+                              {isOtc ? '櫃' : '市'}
+                            </span>
+                            <span className="flat-stock-name" title={pos.name || pos.code}>
+                              {pos.name || pos.code}
+                            </span>
+                            <span className={`flat-stock-code ${isOtc ? 'code-otc' : 'code-tse'}`}>
+                              {pos.code}
+                            </span>
                           </div>
-                        )}
 
-                        <div className="flat-card-stock">
-                          <span
-                            className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
-                            title={isOtc ? '上櫃股票' : '上市股票'}
+                          <div className="vault-card-price-pct-group">
+                            <div className={`flat-card-price ${lastClass}`} title="整股成交價">
+                              {last !== null ? last.toFixed(2) : '—'}
+                            </div>
+                            <div className={`flat-card-pct ${changeClass}`} title="當日漲跌幅">
+                              {pct === null || isNaN(pct)
+                                ? '—'
+                                : pct > 0
+                                ? `+${pct.toFixed(2)}%`
+                                : `${pct.toFixed(2)}%`}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="vault-card-row-sub">
+                          <div className="vault-card-sub-info">
+                            <div className={`flat-card-oddlot ${oddLotClass}`} title="盤中零股成交價">
+                              <span className="oddlot-prefix">零股</span>
+                              {oddLot !== null && oddLot > 0 ? oddLot.toFixed(2) : '—'}
+                            </div>
+                            <div className="flat-card-qty" title={`剩餘股數: ${Math.round(pos.quantity).toLocaleString()} 股`}>
+                              <span className="sub-lbl">庫存</span>
+                              <span className="flat-qty-num">{Math.round(pos.quantity).toLocaleString()}</span>
+                              <span className="flat-unit">股</span>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            className="btn-order-shortcut"
+                            title={`帶入「${pos.name || pos.code}」快速下單`}
+                            onClick={() => handleSelectToOrder(pos.code, pos.quantity)}
                           >
-                            {isOtc ? '櫃' : '市'}
-                          </span>
-                          <span className="flat-stock-name" title={pos.name || pos.code}>
-                            {pos.name || pos.code}
-                          </span>
-                          <span className={`flat-stock-code ${isOtc ? 'code-otc' : 'code-tse'}`}>
-                            {pos.code}
-                          </span>
+                            <span>下單</span>
+                            <span className="order-shortcut-arrow">↗</span>
+                          </button>
                         </div>
-
-                        <div className={`flat-card-price ${lastClass}`} title="整股成交價">
-                          {last !== null ? last.toFixed(2) : '—'}
-                        </div>
-
-                        <div className={`flat-card-oddlot ${oddLotClass}`} title="盤中零股成交價">
-                          <span className="oddlot-prefix">零</span>
-                          {oddLot !== null && oddLot > 0 ? oddLot.toFixed(2) : '—'}
-                        </div>
-
-                        <div className={`flat-card-pct ${changeClass}`} title="當日漲跌幅">
-                          {pct === null || isNaN(pct)
-                            ? '—'
-                            : pct > 0
-                            ? `+${pct.toFixed(2)}%`
-                            : `${pct.toFixed(2)}%`}
-                        </div>
-
-                        <button
-                          className="btn-order-shortcut"
-                          title={`帶入「${pos.name || pos.code}」快速下單`}
-                          onClick={() => handleSelectToOrder(pos.code, pos.quantity)}
-                        >
-                          <span>下單</span>
-                          <span className="order-shortcut-arrow">↗</span>
-                        </button>
                       </div>
                     );
                   })}

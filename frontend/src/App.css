@@ -1979,17 +1979,40 @@ button, input, select, textarea {
 /* 行動版 RWD */
 @media (max-width: 768px) {
   .app-header {
-    padding: 10px 16px;
+    padding: 8px 12px;
+    gap: 8px;
   }
   .search-input {
     width: 140px;
   }
+  /* 手機端由底部導覽列承載行事曆與新聞，隱藏頂部擁擠的按鈕 */
+  .btn-calendar-action,
+  .btn-news-action {
+    display: none !important;
+  }
+  /* 手機端由底部導覽列承載財神庫，頂部頁籤欄隱藏龐大按鈕，將橫向滑動空間全數讓給自選群組 */
+  .btn-drawer-trigger {
+    display: none !important;
+  }
+  .tabs-bar-left {
+    width: 100% !important;
+  }
+  .tabs-list {
+    width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+  }
+  .tabs-list::-webkit-scrollbar {
+    display: none;
+  }
+
   .view-mode-bar {
     display: flex !important;
     flex-direction: column !important;
-    align-items: flex-start !important;
-    padding: 10px 16px !important;
-    gap: 8px !important;
+    align-items: stretch !important;
+    padding: 6px 12px !important;
+    gap: 6px !important;
   }
   .view-mode-bar .view-mode-header-row {
     display: flex !important;
@@ -2004,20 +2027,39 @@ button, input, select, textarea {
   .view-mode-bar .wealth-pnl-summary {
     align-self: flex-start !important;
   }
+
+  /* ── 大盤微型水平滑動看板 (TradingView / 富途風格：永不垂直折行) ── */
   .view-mode-bar .market-indices-summary {
-    align-self: flex-start !important;
-    flex-wrap: wrap !important;
-    gap: 6px !important;
+    align-self: stretch !important;
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    scroll-snap-type: x mandatory;
+    gap: 8px !important;
+    padding: 2px 2px 6px 2px !important;
+    scrollbar-width: none !important;
   }
-  .index-pill {
-    padding: 2.5px 8px !important;
+  .view-mode-bar .market-indices-summary::-webkit-scrollbar {
+    display: none !important;
+  }
+  .view-mode-bar .index-pill {
+    flex: 0 0 auto !important;
+    scroll-snap-align: start;
+    white-space: nowrap !important;
+    padding: 5px 10px !important;
+    border-radius: 6px !important;
     font-size: 12.5px !important;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
   }
   .index-chg {
     font-size: 11px !important;
   }
   .main-content {
-    padding: 8px 10px;
+    padding: 6px 8px;
   }
   .count-info {
     display: none;
@@ -2028,61 +2070,59 @@ button, input, select, textarea {
   .metric-cell {
     min-width: 60px;
   }
-  /* 兩行卡片模式手機端緊湊排版 */
+
+  /* 兩行卡片模式手機端緊湊現代排版 (絕不斷句、無無故折行) */
   .flat-stock-item {
-    padding: 8px 10px;
+    padding: 9px 12px;
   }
   .flat-row-primary {
+    gap: 8px;
+    margin-bottom: 5px;
+    align-items: center;
+  }
+  .flat-stock-id {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .flat-id-row {
     gap: 6px;
-    margin-bottom: 6px;
+    min-width: 0;
+    align-items: center;
+  }
+  .flat-code {
+    font-size: 15.5px;
+    letter-spacing: -0.3px;
+  }
+  .flat-name {
+    font-size: 14px;
+    font-weight: 600;
   }
   .flat-primary-right {
-    gap: 5px;
+    gap: 6px;
+    flex: 0 0 auto;
   }
   .flat-price-display {
-    gap: 4px;
+    gap: 6px;
   }
   .flat-price-val {
-    font-size: 17px;
+    font-size: 16.5px;
   }
-  .flat-oddlot-price {
-    font-size: 10.5px;
+  .flat-pct-badge {
+    min-width: 60px;
+    height: 26px;
+    font-size: 11.5px;
+    color: #ffffff !important;
   }
-  .flat-chg-stack {
-    min-width: 44px;
+  .flat-row-metrics-modern {
+    padding-top: 5px;
+    gap: 6px;
   }
-  .flat-chg-num {
+  .flat-metric-item {
     font-size: 11px;
   }
-  .flat-pct-num {
-    font-size: 10px;
-  }
-  .flat-primary-right .btn-order-shortcut {
-    padding: 2px 6px;
-    font-size: 10px;
-    height: 22px;
-  }
-  .flat-row-metrics {
-    padding-top: 5px;
-    gap: 3px;
-  }
-  .flat-label {
-    font-size: 9px;
-  }
-  .flat-val {
+  .btn-order-shortcut-modern {
+    padding: 2px 7px;
     font-size: 10.5px;
-  }
-  .flat-row-footer {
-    padding-top: 3px;
-    min-height: 22px;
-  }
-  .flat-actions {
-    gap: 1px;
-  }
-  .btn-flat-action {
-    width: 20px;
-    height: 20px;
-    font-size: 10px;
   }
 }
 
@@ -2856,20 +2896,312 @@ button, input, select, textarea {
   }
 }
 
+@media (min-width: 769px) {
+  .vault-card-row-main,
+  .vault-card-row-sub,
+  .vault-card-pnl-roi-group,
+  .vault-card-price-pct-group,
+  .vault-card-sub-info {
+    display: contents !important;
+  }
+  .vault-card-price-info,
+  .sub-lbl {
+    display: none !important;
+  }
+}
+
 @media (max-width: 768px) {
+  /* 手機端側邊欄開啟時絕不垂直推擠下方自選股清單，改採現代全螢幕浮層抽屜形式 */
   .app-workspace.sidebar-open {
-    flex-direction: column;
+    flex-direction: row !important;
   }
   .assistant-sidebar {
-    width: 100% !important;
-    min-width: 100% !important;
-    max-width: 100% !important;
-    border-right: none;
-    border-bottom: 1px solid var(--border-color);
-    max-height: 55vh;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    min-width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100% !important;
+    max-height: 100dvh !important;
+    z-index: 1000 !important;
+    border-radius: 0 !important;
+    border: none !important;
+    background-color: var(--bg-main) !important;
+    animation: mobileSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.45) !important;
+    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)) !important;
+    overflow-x: hidden !important;
+    box-sizing: border-box !important;
   }
   .sidebar-resizer {
-    display: none;
+    display: none !important;
+  }
+
+  /* ── 手機端側邊欄頂部 Header 與分頁滑動 ── */
+  .sidebar-header {
+    padding: 8px 10px !important;
+    gap: 8px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .sidebar-tabs {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    gap: 4px !important;
+    flex-wrap: nowrap !important;
+  }
+  .sidebar-tabs::-webkit-scrollbar {
+    display: none !important;
+  }
+  .sidebar-tab-btn {
+    padding: 5px 8px !important;
+    font-size: 11.5px !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    gap: 4px !important;
+  }
+  .sidebar-tab-btn .sidebar-tab-title {
+    font-size: 11.5px !important;
+  }
+  .btn-sidebar-lock {
+    padding: 4px 8px !important;
+    font-size: 11px !important;
+    white-space: nowrap !important;
+  }
+
+  /* ── 手機端內容區域完全防溢位 (消除超出顯示範圍問題) ── */
+  .sidebar-body {
+    padding: 10px 12px !important;
+    overflow-x: hidden !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .sidebar-vault-content,
+  .sidebar-vault-list {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+    gap: 10px !important;
+  }
+
+  /* 總未實現損益摘要卡片 */
+  .sidebar-vault-summary {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .sidebar-summary-card {
+    padding: 8px 10px !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+  }
+  .sidebar-summary-label {
+    font-size: 10.5px !important;
+  }
+  .sidebar-summary-val {
+    font-size: 14.5px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  /* 排序按鈕列 */
+  .vault-sort-bar {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 6px !important;
+    padding: 4px 0 8px 0 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .vault-sort-title {
+    font-size: 12px !important;
+    font-weight: 600 !important;
+  }
+  .vault-sort-btn-group {
+    display: flex !important;
+    gap: 6px !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    width: 100% !important;
+  }
+  .vault-sort-btn-group::-webkit-scrollbar {
+    display: none !important;
+  }
+  .vault-sort-pill {
+    padding: 3px 8px !important;
+    font-size: 11px !important;
+    white-space: nowrap !important;
+    flex: 0 0 auto !important;
+  }
+
+  /* 隱藏桌機專用表格標題列 */
+  .sidebar-vault-col-header {
+    display: none !important;
+  }
+
+  /* ── 財神庫/財神簿手機兩行式自適應卡片 (徹底杜絕水平爆版溢位) ── */
+  .sidebar-stock-card.flat-card {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    padding: 10px 12px !important;
+    gap: 6px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .vault-card-row-main {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    width: 100% !important;
+    gap: 8px !important;
+    min-width: 0 !important;
+  }
+
+  .vault-card-row-sub {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    width: 100% !important;
+    padding-top: 5px !important;
+    border-top: 1px dashed var(--border-subtle) !important;
+    min-width: 0 !important;
+  }
+
+  .flat-card-stock {
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    overflow: hidden !important;
+  }
+
+  .flat-stock-name {
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    color: var(--text-main) !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+  }
+
+  .flat-stock-code {
+    font-size: 12px !important;
+    font-family: var(--font-mono) !important;
+    color: var(--text-secondary) !important;
+    flex-shrink: 0 !important;
+  }
+
+  .vault-card-pnl-roi-group,
+  .vault-card-price-pct-group {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .flat-card-pnl {
+    min-width: auto !important;
+    font-size: 13.5px !important;
+    font-weight: 700 !important;
+    font-feature-settings: 'tnum' !important;
+  }
+
+  .flat-card-roi,
+  .flat-card-pct {
+    min-width: auto !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    padding: 2.5px 6px !important;
+    border-radius: 4px !important;
+    color: #ffffff !important;
+    line-height: 1 !important;
+  }
+
+  .flat-card-roi.color-up,
+  .flat-card-pct.color-up {
+    background-color: #ef4444 !important;
+  }
+
+  .flat-card-roi.color-down,
+  .flat-card-pct.color-down {
+    background-color: #22c55e !important;
+  }
+
+  .flat-card-roi.color-neutral,
+  .flat-card-pct.color-neutral {
+    background-color: var(--bg-hover) !important;
+    color: var(--text-muted) !important;
+  }
+
+  .flat-card-price {
+    min-width: auto !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    font-feature-settings: 'tnum' !important;
+  }
+
+  .vault-card-sub-info {
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+    font-size: 11px !important;
+    color: var(--text-muted) !important;
+    min-width: 0 !important;
+  }
+
+  .sub-lbl {
+    font-size: 9.5px !important;
+    color: var(--text-muted) !important;
+    margin-right: 2px !important;
+  }
+
+  .sub-val {
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    font-feature-settings: 'tnum' !important;
+    color: var(--text-sub) !important;
+  }
+
+  .flat-card-qty,
+  .flat-card-oddlot {
+    min-width: auto !important;
+    font-size: 11px !important;
+  }
+
+  .btn-order-shortcut {
+    padding: 2.5px 8px !important;
+    font-size: 10.5px !important;
+    height: 22px !important;
+    line-height: 1 !important;
+  }
+}
+
+@keyframes mobileSlideUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0.8;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
   }
 }
 
@@ -7204,6 +7536,256 @@ button, input, select, textarea {
   }
   .news-cards-three-col-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ==================== 行動端現代化 UI/UX 增強架構 (TradingView 風格) ==================== */
+
+/* 側邊欄關閉按鈕 */
+.btn-sidebar-close {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-sub);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s ease;
+}
+
+.btn-sidebar-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-main);
+  border-color: var(--text-muted);
+}
+
+/* 排序切換按鈕 */
+.btn-reorder-toggle {
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-sub);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-left: 8px;
+}
+
+.btn-reorder-toggle.active {
+  background: #38bdf8;
+  color: #ffffff;
+  border-color: #38bdf8;
+  font-weight: 600;
+}
+
+/* 卡片第二行現代化排版 (量能、高低區間、均線/零股、快速下單) */
+.flat-price-main-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.flat-chg-sub {
+  font-size: 11px;
+  font-weight: 600;
+  font-feature-settings: 'tnum';
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.flat-pct-badge {
+  min-width: 62px;
+  height: 28px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  font-feature-settings: 'tnum';
+  color: #ffffff !important;
+  line-height: 1;
+}
+
+.flat-pct-badge.color-up {
+  background-color: #ef4444 !important;
+  color: #ffffff !important;
+}
+
+.flat-pct-badge.color-down {
+  background-color: #22c55e !important;
+  color: #ffffff !important;
+}
+
+.flat-pct-badge.color-neutral {
+  background-color: var(--bg-hover) !important;
+  color: var(--text-muted) !important;
+}
+
+.flat-row-metrics-modern {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 6px;
+  margin-top: 2px;
+  border-top: 1px dashed var(--border-subtle);
+}
+
+.flat-metric-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.flat-metric-lbl {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.flat-metric-val {
+  font-size: 11.5px;
+  font-feature-settings: 'tnum';
+  font-weight: 600;
+}
+
+.flat-metric-val.vol-val {
+  color: #0284c7;
+  font-weight: 700;
+}
+
+[data-theme='dark'] .flat-metric-val.vol-val {
+  color: #38bdf8;
+}
+
+.range-sep {
+  margin: 0 2px;
+  color: var(--text-muted);
+}
+
+.btn-order-shortcut-modern {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2.5px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-sub);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-order-shortcut-modern:hover {
+  border-color: #38bdf8;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.flat-row-reorder-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 6px;
+  margin-top: 6px;
+  border-top: 1px solid var(--border-color);
+}
+
+.reorder-prompt {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* 手機底部主導覽列 (Bottom Navigation Bar) */
+.mobile-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 54px;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background-color: var(--bg-card);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    align-items: stretch;
+    justify-content: space-around;
+    z-index: 990;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.08);
+  }
+
+  .mobile-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px 0;
+    transition: color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-nav-item.active {
+    color: #38bdf8;
+    font-weight: 600;
+  }
+
+  .mobile-nav-icon {
+    font-size: 18px;
+    line-height: 1;
+  }
+
+  .mobile-nav-label {
+    font-size: 10.5px;
+    line-height: 1;
+  }
+
+  .mobile-nav-icon-wrapper {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .mobile-nav-badge {
+    position: absolute;
+    top: -4px;
+    right: -8px;
+    font-size: 9px;
+    background: var(--text-muted);
+    color: #fff;
+    padding: 1px 4px;
+    border-radius: 8px;
+    line-height: 1;
+    font-weight: 700;
+  }
+
+  .mobile-nav-badge.badge-active-orders {
+    background: #ef4444;
+  }
+
+  /* 為手機預留底部導覽高度，避免內容被遮擋 */
+  .stock-browser-app {
+    padding-bottom: calc(54px + env(safe-area-inset-bottom, 0px));
   }
 }
 
