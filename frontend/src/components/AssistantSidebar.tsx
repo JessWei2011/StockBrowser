@@ -776,9 +776,9 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                   <div className="sidebar-vault-col-header">
                     {vaultSortMode === 'custom' && <span className="col-h-reorder">排序</span>}
                     <span className="col-h-stock">商品</span>
-                    <span className="col-h-qty">股數</span>
                     <span className="col-h-pnl">損益試算</span>
                     <span className="col-h-roi">報酬率</span>
+                    <span className="col-h-qty">股數</span>
                     <span className="col-h-action">操作</span>
                   </div>
                   {sortedPositions.map((pos, idx) => {
@@ -968,8 +968,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     {vaultSortMode === 'custom' && <span className="col-h-reorder">排序</span>}
                     <span className="col-h-stock">商品</span>
                     <span className="col-h-last-price">成交價</span>
-                    <span className="col-h-oddlot-price">零股價</span>
                     <span className="col-h-change-pct">漲跌幅</span>
+                    <span className="col-h-oddlot-price">零股價</span>
                     <span className="col-h-action">操作</span>
                   </div>
                   {sortedPositions.map((pos, idx) => {
@@ -1078,13 +1078,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                         <div className="vault-card-row-sub">
                           <div className="vault-card-sub-info">
                             <div className={`flat-card-oddlot ${oddLotClass}`} title="盤中零股成交價">
-                              <span className="oddlot-prefix">零股</span>
                               {oddLot !== null && oddLot > 0 ? oddLot.toFixed(2) : '—'}
-                            </div>
-                            <div className="flat-card-qty" title={`剩餘股數: ${Math.round(pos.quantity).toLocaleString()} 股`}>
-                              <span className="sub-lbl">庫存</span>
-                              <span className="flat-qty-num">{Math.round(pos.quantity).toLocaleString()}</span>
-                              <span className="flat-unit">股</span>
                             </div>
                           </div>
 
