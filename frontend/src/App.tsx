@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import type { WatchlistGroup, QuoteState, UpstreamStatus, WebSocketMessage, StockPosition, StockAnnouncement, MarketIndexState, StockMaSummary, MarketCalendarStatus } from './types';
+import type { WatchlistGroup, WatchlistItem, QuoteState, UpstreamStatus, WebSocketMessage, StockPosition, StockAnnouncement, MarketIndexState, StockMaSummary, MarketCalendarStatus } from './types';
 import {
   fetchBootstrap,
   createGroup,
   updateGroup,
   deleteGroup,
+  reorderGroups,
   addItem,
   removeItem,
   reorderItems,
@@ -24,19 +25,27 @@ import { InvestmentCalendarModal } from './components/InvestmentCalendarModal';
 import { GlobalIndicesModal } from './components/GlobalIndicesModal';
 import { FinancialNewsModal } from './components/FinancialNewsModal';
 import { MobileNavBar, type MobileNavTab } from './components/MobileNavBar';
+import { loadBootstrapCache, saveBootstrapCache } from './services/storageCache';
 import './App.css';
 
 export const App: React.FC = () => {
-  const [groups, setGroups] = useState<WatchlistGroup[]>([]);
-  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
-  const [quotes, setQuotes] = useState<Record<string, QuoteState>>({});
-  const [positions, setPositions] = useState<StockPosition[]>([]);
+  // 載入本地快取資料（實現 0 秒秒開、無需等待載入轉圈）
+  const cachedBootstrap = useMemo(() => loadBootstrapCache(), []);
+
+  const [groups, setGroups] = useState<WatchlistGroup[]>(() => cachedBootstrap?.groups || []);
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(() => {
+    if (!cachedBootstrap?.groups || cachedBootstrap.groups.length === 0) return null;
+    const firstWatchlist = cachedBootstrap.groups.find((g) => g.id !== 'g-vault' && g.name !== '財神庫');
+    return firstWatchlist?.id || cachedBootstrap.groups[0]?.id || null;
+  });
+  const [quotes, setQuotes] = useState<Record<string, QuoteState>>(() => cachedBootstrap?.quotes || {});
+  const [positions, setPositions] = useState<StockPosition[]>(() => cachedBootstrap?.positions || []);
   const [dirtyCodes, setDirtyCodes] = useState<Set<string>>(new Set());
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<'vault' | 'vault_ledger' | 'order' | 'balance'>('vault');
   const [isVaultPasswordModalOpen, setIsVaultPasswordModalOpen] = useState(false);
   const [isGlobalIndicesModalOpen, setIsGlobalIndicesModalOpen] = useState(false);
-  const [marketModalTab, setMarketModalTab] = useState<'tw' | 'us' | 'asia'>('tw');
+  const [marketModalTab, setMarketModalTab] = useState<'all' | 'tw' | 'us' | 'asia'>('all');
   const [orderTargetCode, setOrderTargetCode] = useState<string | null>(null);
   const [pendingOrderCode, setPendingOrderCode] = useState<string | null>(null);
   const [selectedChartCode, setSelectedChartCode] = useState<string | null>(null);
@@ -61,12 +70,12 @@ export const App: React.FC = () => {
     totalCost: number;
     totalMarketValue: number;
     returnPercent: number;
-  } | null>(null);
-  const [marketIndices, setMarketIndices] = useState<Record<string, MarketIndexState> | null>(null);
-  const [indicators, setIndicators] = useState<Record<string, StockMaSummary>>({});
-  const [marketCalendar, setMarketCalendar] = useState<MarketCalendarStatus | null>(null);
+  } | null>(() => cachedBootstrap?.wealthSummary || null);
+  const [marketIndices, setMarketIndices] = useState<Record<string, MarketIndexState> | null>(() => cachedBootstrap?.marketIndices || null);
+  const [indicators, setIndicators] = useState<Record<string, StockMaSummary>>(() => cachedBootstrap?.indicators || {});
+  const [marketCalendar, setMarketCalendar] = useState<MarketCalendarStatus | null>(() => cachedBootstrap?.marketCalendar || null);
 
-  const [announcements, setAnnouncements] = useState<Record<string, StockAnnouncement[]>>({});
+  const [announcements, setAnnouncements] = useState<Record<string, StockAnnouncement[]>>(() => cachedBootstrap?.announcements || {});
 
   // 判斷台股現貨與期貨市場是否處於開盤狀態與膠囊標籤資訊 (依據 TW_MARKET_HOLIDAY_DETECTION_GUIDE.md 權威判定)
   const twMarketBadge = useMemo(() => {
@@ -93,32 +102,6 @@ export const App: React.FC = () => {
     if (mins >= 810) return { isOpen: false, badgeLabel: '已收盤', badgeType: 'closed' };
     return { isOpen: true, badgeLabel: '開盤中', badgeType: 'open' };
   }, [marketCalendar, marketIndices?.TSE?.marketStatus]);
-
-  const txfMarketBadge = useMemo(() => {
-    // 若全市場天然災害休市或國定假日，期貨亦同步休市
-    if (marketCalendar && !marketCalendar.isOpen && (marketCalendar.badgeType === 'typhoon' || marketCalendar.badgeType === 'holiday')) {
-      return {
-        isOpen: false,
-        badgeLabel: marketCalendar.badgeLabel,
-        badgeType: marketCalendar.badgeType,
-      };
-    }
-    const status = marketIndices?.TXF?.marketStatus;
-    if (status === 'open') return { isOpen: true, badgeLabel: '交易中', badgeType: 'open' };
-    const now = new Date();
-    const twDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
-    const day = twDate.getDay();
-    const mins = twDate.getHours() * 60 + twDate.getMinutes();
-    if (day === 0) return { isOpen: false, badgeLabel: '週末休市', badgeType: 'weekend' };
-    if (day === 6 && mins >= 300) return { isOpen: false, badgeLabel: '週末休市', badgeType: 'weekend' };
-    if (day === 1 && mins < 525) return { isOpen: false, badgeLabel: '未開盤', badgeType: 'closed' };
-    const isOpen = (mins >= 525 && mins < 825) || (mins >= 900) || (mins < 300);
-    return {
-      isOpen,
-      badgeLabel: isOpen ? '交易中' : '休市中',
-      badgeType: isOpen ? 'open' : 'closed',
-    };
-  }, [marketCalendar, marketIndices?.TXF?.marketStatus]);
 
   // 檢視模式：電腦預設為 'table' (完整表格)，手機預設為 'card' (兩行卡片)
   const [viewMode, setViewMode] = useState<'table' | 'card'>(() => {
@@ -185,40 +168,52 @@ export const App: React.FC = () => {
   };
 
   const flashTimerRef = useRef<number | null>(null);
+  const inFlightBootstrapRef = useRef<Promise<void> | null>(null);
+  const watchlistChangedTimerRef = useRef<number | null>(null);
 
-  // 載入初始 Bootstrap
+  // 載入初始 Bootstrap（具備在途請求去重防禦）
   const loadBootstrap = useCallback(async () => {
-    try {
-      const data = await fetchBootstrap();
-      setGroups(data.groups);
-      setQuotes((prev) => ({ ...prev, ...data.quotes }));
-      if (data.announcements) {
-        setAnnouncements(data.announcements);
-      }
-      if (data.positions) {
-        setPositions(data.positions);
-      }
-      setUpstream(data.upstream);
-      if (data.wealthSummary) {
-        setWealthSummary(data.wealthSummary);
-      }
-      if (data.marketIndices) {
-        setMarketIndices(data.marketIndices);
-      }
-      if (data.marketCalendar) {
-        setMarketCalendar(data.marketCalendar);
-      }
-      if (data.indicators) {
-        setIndicators(data.indicators);
-      }
-      setActiveGroupId((prev) => {
-        if (prev && prev !== 'g-vault' && data.groups.some((g) => g.id === prev && g.name !== '財神庫')) return prev;
-        const firstWatchlist = data.groups.find((g) => g.id !== 'g-vault' && g.name !== '財神庫');
-        return firstWatchlist?.id || data.groups[0]?.id || null;
-      });
-    } catch (e) {
-      console.error('Failed to load bootstrap data:', e);
+    if (inFlightBootstrapRef.current) {
+      return inFlightBootstrapRef.current;
     }
+    const promise = (async () => {
+      try {
+        const data = await fetchBootstrap();
+        saveBootstrapCache(data);
+        setGroups(data.groups);
+        setQuotes((prev) => ({ ...prev, ...data.quotes }));
+        if (data.announcements) {
+          setAnnouncements(data.announcements);
+        }
+        if (data.positions) {
+          setPositions(data.positions);
+        }
+        setUpstream(data.upstream);
+        if (data.wealthSummary) {
+          setWealthSummary(data.wealthSummary);
+        }
+        if (data.marketIndices) {
+          setMarketIndices(data.marketIndices);
+        }
+        if (data.marketCalendar) {
+          setMarketCalendar(data.marketCalendar);
+        }
+        if (data.indicators) {
+          setIndicators(data.indicators);
+        }
+        setActiveGroupId((prev) => {
+          if (prev && prev !== 'g-vault' && data.groups.some((g) => g.id === prev && g.name !== '財神庫')) return prev;
+          const firstWatchlist = data.groups.find((g) => g.id !== 'g-vault' && g.name !== '財神庫');
+          return firstWatchlist?.id || data.groups[0]?.id || null;
+        });
+      } catch (e) {
+        console.error('Failed to load bootstrap data:', e);
+      } finally {
+        inFlightBootstrapRef.current = null;
+      }
+    })();
+    inFlightBootstrapRef.current = promise;
+    return promise;
   }, []);
 
   useEffect(() => {
@@ -240,9 +235,11 @@ export const App: React.FC = () => {
         if (msg.positions) setPositions(msg.positions);
         if (msg.wealthSummary) setWealthSummary(msg.wealthSummary);
         if (msg.marketIndices) setMarketIndices(msg.marketIndices);
+        if (msg.upstream) setUpstream((prev) => ({ ...prev, ...msg.upstream }));
       } else if (msg.type === 'quote_delta') {
         if (msg.wealthSummary) setWealthSummary(msg.wealthSummary);
         if (msg.marketIndices) setMarketIndices(msg.marketIndices);
+        if (msg.upstream) setUpstream((prev) => ({ ...prev, ...msg.upstream }));
 
         if (msg.quotes && msg.quotes.length > 0) {
           const changedCodes = new Set<string>();
@@ -263,8 +260,14 @@ export const App: React.FC = () => {
           }, 700);
         }
       } else if (msg.type === 'watchlist_changed') {
-        // 自選清單異動，重新抓取 bootstrap
-        loadBootstrap();
+        // 自選清單異動：防抖 400ms 避免短時間並發請求風暴
+        if (watchlistChangedTimerRef.current) {
+          window.clearTimeout(watchlistChangedTimerRef.current);
+        }
+        watchlistChangedTimerRef.current = window.setTimeout(() => {
+          loadBootstrap();
+          watchlistChangedTimerRef.current = null;
+        }, 400);
       }
     });
 
@@ -285,6 +288,7 @@ export const App: React.FC = () => {
       wsClient.disconnect();
       document.removeEventListener('visibilitychange', handleVisibility);
       if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+      if (watchlistChangedTimerRef.current) window.clearTimeout(watchlistChangedTimerRef.current);
     };
   }, [loadBootstrap]);
 
@@ -292,18 +296,121 @@ export const App: React.FC = () => {
   const watchlistGroups = groups.filter((g) => g.id !== 'g-vault' && g.name !== '財神庫');
   const activeGroup = watchlistGroups.find((g) => g.id === activeGroupId) || watchlistGroups[0] || null;
 
-  // 新增個股
-  const handleAddStock = async (code: string) => {
+  // 新增個股 (樂觀更新，立即在 < 16ms 內更新 UI，消除重載全量 bootstrap)
+  const handleAddStock = async (
+    code: string,
+    meta?: { name?: string; exchange?: string; securityType?: string }
+  ) => {
     if (!activeGroup) return;
-    await addItem(activeGroup.id, code);
-    await loadBootstrap();
+    const cleanCode = code.trim().toUpperCase();
+
+    // 1. 本地防呆檢查：系統群組保護
+    if (activeGroup.id === 'g-wealth' || activeGroup.id === 'g-vault' || activeGroup.name === '財神簿' || activeGroup.name === '財神庫' || activeGroup.isSystemGroup) {
+      throw new Error('『財神簿』由永豐證券庫存自動同步，請切換至自選組合以新增個股');
+    }
+
+    // 2. 本地重複檢查
+    if (activeGroup.items.some((it) => it.code === cleanCode)) {
+      throw new Error(`商品 ${cleanCode} 已在此自選組合「${activeGroup.name}」中`);
+    }
+
+    // 3. 訂閱配額檢查
+    const allCurrentCodes = new Set(groups.flatMap((g) => g.items.map((i) => i.code)));
+    if (!allCurrentCodes.has(cleanCode) && upstream.subscribedCount >= upstream.maxAllowed) {
+      throw new Error(`已達到自選股上限 (${upstream.maxAllowed} 檔)，無法再訂閱新商品`);
+    }
+
+    // 4. 建立暫時性樂觀項目
+    const tempId = `temp-${Date.now()}-${cleanCode}`;
+    const optimisticItem: WatchlistItem = {
+      id: tempId,
+      groupId: activeGroup.id,
+      code: cleanCode,
+      name: meta?.name || cleanCode,
+      exchange: meta?.exchange || 'TSE',
+      securityType: meta?.securityType || 'STOCK',
+      position: activeGroup.items.length,
+    };
+
+    // 5. 立即更新 UI (樂觀更新，< 16ms 呈現)
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id === activeGroup.id) {
+          return { ...g, items: [...g.items, optimisticItem] };
+        }
+        return g;
+      })
+    );
+
+    try {
+      // 6. 背景呼叫 API 新增
+      const realItem = await addItem(activeGroup.id, cleanCode);
+
+      // 7. 將暫時項目替換為後端確認之完整項目，消除 loadBootstrap 重載
+      setGroups((prev) =>
+        prev.map((g) => {
+          if (g.id === activeGroup.id) {
+            return {
+              ...g,
+              items: g.items.map((it) => (it.id === tempId ? realItem : it)),
+            };
+          }
+          return g;
+        })
+      );
+    } catch (err: any) {
+      // 8. 失敗時回滾樂觀更新
+      setGroups((prev) =>
+        prev.map((g) => {
+          if (g.id === activeGroup.id) {
+            return {
+              ...g,
+              items: g.items.filter((it) => it.id !== tempId),
+            };
+          }
+          return g;
+        })
+      );
+      throw err;
+    }
   };
 
-  // 移除個股
+  // 移除個股 (樂觀更新，消除 loadBootstrap 重載)
   const handleRemoveStock = async (code: string) => {
     if (!activeGroup) return;
-    await removeItem(activeGroup.id, code);
-    await loadBootstrap();
+    const removedItem = activeGroup.items.find((it) => it.code === code);
+    if (!removedItem) return;
+
+    // 立即從 UI 移除
+    setGroups((prev) =>
+      prev.map((g) => {
+        if (g.id === activeGroup.id) {
+          return {
+            ...g,
+            items: g.items.filter((it) => it.code !== code),
+          };
+        }
+        return g;
+      })
+    );
+
+    try {
+      await removeItem(activeGroup.id, code);
+    } catch (err: any) {
+      // 失敗時回滾還原
+      setGroups((prev) =>
+        prev.map((g) => {
+          if (g.id === activeGroup.id) {
+            return {
+              ...g,
+              items: [...g.items, removedItem].sort((a, b) => a.position - b.position),
+            };
+          }
+          return g;
+        })
+      );
+      throw err;
+    }
   };
 
   // 移動排序
@@ -388,6 +495,22 @@ export const App: React.FC = () => {
   const handleDeleteGroup = async (id: string) => {
     await deleteGroup(id);
     await loadBootstrap();
+  };
+
+  const handleReorderGroups = async (nextGroupIds: string[]) => {
+    // 樂觀更新
+    setGroups((prev) => {
+      const groupMap = new Map(prev.map((g) => [g.id, g]));
+      const systemGroups = prev.filter((g) => g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神簿' || g.isSystemGroup);
+      const customReordered = nextGroupIds.map((id) => groupMap.get(id)).filter(Boolean) as typeof prev;
+      const remaining = prev.filter((g) => !systemGroups.some((sg) => sg.id === g.id) && !nextGroupIds.includes(g.id));
+      return [...systemGroups, ...customReordered, ...remaining];
+    });
+    try {
+      await reorderGroups(nextGroupIds);
+    } catch (e: any) {
+      console.error('Failed to reorder groups:', e);
+    }
   };
 
   // 點選任一個股最右側下單按鈕：需財神庫密碼通過後方可開啟財神筆
@@ -494,17 +617,32 @@ export const App: React.FC = () => {
           {/* 視圖切換列與市場損益資訊列 */}
           <div className={`view-mode-bar ${viewMode === 'card' ? 'view-mode-card' : 'view-mode-table'}`}>
             <div className="view-mode-header-row">
-              <div className="view-mode-count">
-                本組合共 <strong>{activeGroup?.items.length || 0}</strong> 檔商品
-                {viewMode === 'card' && (
-                  <button
-                    type="button"
-                    className={`btn-reorder-toggle ${isReorderMode ? 'active' : ''}`}
-                    onClick={() => setIsReorderMode((prev) => !prev)}
-                    title={isReorderMode ? '完成排序並返回簡潔模式' : '切換排序整理模式'}
-                  >
-                    {isReorderMode ? '✓ 完成' : '⇅ 排序'}
-                  </button>
+              <div className="view-mode-header-left">
+                <div className="view-mode-count">
+                  本組合共 <strong>{activeGroup?.items.length || 0}</strong> 檔商品
+                  {viewMode === 'card' && (
+                    <button
+                      type="button"
+                      className={`btn-reorder-toggle ${isReorderMode ? 'active' : ''}`}
+                      onClick={() => setIsReorderMode((prev) => !prev)}
+                      title={isReorderMode ? '完成排序並返回簡潔模式' : '切換排序整理模式'}
+                    >
+                      {isReorderMode ? '✓ 完成' : '⇅ 排序'}
+                    </button>
+                  )}
+                </div>
+                {twMarketBadge && (
+                  <div className="market-status-badge-container">
+                    <span
+                      className={`market-pulse-pill-badge ${twMarketBadge.badgeType}`}
+                      onClick={() => setIsCalendarModalOpen(true)}
+                      style={{ cursor: 'pointer' }}
+                      title="點擊查看台股市場開休市與交易日曆"
+                    >
+                      <span className="badge-dot" />
+                      {twMarketBadge.badgeLabel}
+                    </span>
+                  </div>
                 )}
               </div>
               <div className="view-mode-toggle">
@@ -540,10 +678,6 @@ export const App: React.FC = () => {
                     title="點擊放大查看加權指數走勢圖與完整行情"
                   >
                     <span className="index-label">加權</span>
-                    <span className={`market-pulse-pill-badge ${twMarketBadge.badgeType}`}>
-                      <span className="badge-dot" />
-                      {twMarketBadge.badgeLabel}
-                    </span>
                     <span
                       className={`index-val ${
                         marketIndices.TSE.change > 0
@@ -591,10 +725,6 @@ export const App: React.FC = () => {
                     title="點擊放大查看櫃買指數走勢圖與完整行情"
                   >
                     <span className="index-label">櫃買</span>
-                    <span className={`market-pulse-pill-badge ${twMarketBadge.badgeType}`}>
-                      <span className="badge-dot" />
-                      {twMarketBadge.badgeLabel}
-                    </span>
                     <span
                       className={`index-val ${
                         marketIndices.OTC.change > 0
@@ -642,10 +772,6 @@ export const App: React.FC = () => {
                     title="點擊放大查看台指近（全）走勢圖與完整行情"
                   >
                     <span className="index-label">台指近(全)</span>
-                    <span className={`market-pulse-pill-badge ${txfMarketBadge.badgeType}`}>
-                      <span className="badge-dot" />
-                      {txfMarketBadge.badgeLabel}
-                    </span>
                     <span
                       className={`index-val ${
                         marketIndices.TXF.change > 0
@@ -686,10 +812,10 @@ export const App: React.FC = () => {
                 <button
                   className="index-pill btn-global-indices"
                   onClick={() => {
-                    setMarketModalTab('us');
+                    setMarketModalTab('all');
                     setIsGlobalIndicesModalOpen(true);
                   }}
-                  title="查看美股四大指數與亞股(日韓)行情與分時走勢"
+                  title="查看國際股市（美股四大指數、亞股日韓）與台股大盤走勢"
                 >
                   <span className="global-pill-icon">🌐</span>
                   <span className="global-pill-title">美股 / 亞股</span>
@@ -764,6 +890,7 @@ export const App: React.FC = () => {
         onCreateGroup={handleCreateGroup}
         onRenameGroup={handleRenameGroup}
         onDeleteGroup={handleDeleteGroup}
+        onReorderGroups={handleReorderGroups}
       />
 
       <VaultPasswordModal
@@ -806,6 +933,7 @@ export const App: React.FC = () => {
         onClose={() => setIsGlobalIndicesModalOpen(false)}
         initialTab={marketModalTab}
         twIndices={marketIndices}
+        twMarketStatus={twMarketBadge}
       />
 
       <FinancialNewsModal

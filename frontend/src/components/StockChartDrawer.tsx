@@ -268,27 +268,31 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
     const upColor = '#ef4444'; // 紅漲
     const downColor = '#10b981'; // 綠跌
 
-    const realTotal = data.kline.length;
+    // 嚴格過濾休市日或無成交量平盤假 K 棒（Volume <= 0 且開高低收一致）
+    const kline = (data.kline || []).filter(
+      (k) => k.volume > 0 || k.open !== k.close || k.high !== k.low
+    );
+    const realTotal = kline.length;
     // 擴充 X 軸日期並增加 35 根未來緩衝留白槽位，以實現放大置中與右側邊界舒適視野
-    const expandedDates = data.kline.map((k) => k.date).concat(new Array(BUFFER_DAYS).fill(''));
+    const expandedDates = kline.map((k) => k.date).concat(new Array(BUFFER_DAYS).fill(''));
 
     // ECharts K線格式: [open, close, lowest, highest]
-    const candles = data.kline.map((k) => [k.open, k.close, k.low, k.high]);
-    const volumes = data.kline.map((k) => ({
+    const candles = kline.map((k) => [k.open, k.close, k.low, k.high]);
+    const volumes = kline.map((k) => ({
       value: k.volume,
       itemStyle: {
         color: k.close >= k.open ? upColor : downColor,
       },
     }));
 
-    const ma5 = data.kline.map((k) => k.ma5 ?? null);
-    const ma10 = data.kline.map((k) => k.ma10 ?? null);
-    const ma20 = data.kline.map((k) => k.ma20 ?? null);
-    const ma60 = data.kline.map((k) => k.ma60 ?? null);
+    const ma5 = kline.map((k) => k.ma5 ?? null);
+    const ma10 = kline.map((k) => k.ma10 ?? null);
+    const ma20 = kline.map((k) => k.ma20 ?? null);
+    const ma60 = kline.map((k) => k.ma60 ?? null);
 
-    const bollUp = data.kline.map((k) => k.boll_up ?? null);
-    const bollMid = data.kline.map((k) => k.boll_mid ?? null);
-    const bollDown = data.kline.map((k) => k.boll_down ?? null);
+    const bollUp = kline.map((k) => k.boll_up ?? null);
+    const bollMid = kline.map((k) => k.boll_mid ?? null);
+    const bollDown = kline.map((k) => k.boll_down ?? null);
 
     // 計算預設顯示範圍：近 60 根或全部，採用 StockCenter 置中算法
     const initBars = Math.min(60, realTotal);
@@ -311,7 +315,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
           const p0 = params[0];
           const idx = p0.dataIndex;
           if (idx >= realTotal) return '';
-          const k = data.kline[idx];
+          const k = kline[idx];
           if (!k) return '';
 
           const chg = k.close - k.open;
@@ -485,7 +489,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
 
     // 初始與延遲更新 TradingView / StockCenter 右側價格徽章
     const refreshBadges = () => {
-      updateRightPriceBadges(chart, dom, data.kline, currentPrice);
+      updateRightPriceBadges(chart, dom, kline, currentPrice);
     };
 
     refreshBadges();

@@ -60,3 +60,13 @@ def test_gap_fill_preserves_continuous_dates():
     idx_12 = dates.index("10/12")
     idx_13 = dates.index("10/13")
     assert idx_13 == idx_12 + 1
+
+def test_backfill_skips_zero_volume_holiday_bars():
+    # 測試對 2330 進行回補時，休市日（如 10/23 颱風假 Volume=0）不得被作為 K 棒回補
+    bars = [
+        KlineBar(date="10/21", open=2425.0, high=2435.0, low=2400.0, close=2420.0, volume=22322.0),
+        KlineBar(date="10/22", open=2435.0, high=2435.0, low=2385.0, close=2385.0, volume=22930.0),
+    ]
+    backfill_missing_kline_bars("2330", bars)
+    dates = [b.date for b in bars]
+    assert "10/23" not in dates, "10/23 為休市日且成交量為 0，嚴禁畫入 K 線圖"

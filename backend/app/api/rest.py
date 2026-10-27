@@ -1,3 +1,4 @@
+import asyncio
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from backend.app.services.watchlist_service import watchlist_service
@@ -9,6 +10,7 @@ from backend.app.domain.models import (
     UpdateGroupRequest,
     AddItemRequest,
     ReorderItemsRequest,
+    ReorderGroupsRequest,
     InstrumentSearchResult,
     PlaceOrderRequest,
     OrderItem,
@@ -60,6 +62,11 @@ async def create_group(body: CreateGroupRequest):
     group = await watchlist_service.create_group(body.name.strip())
     return group
 
+@router.patch("/groups/order")
+async def reorder_groups(body: ReorderGroupsRequest):
+    await watchlist_service.reorder_groups(body.group_ids)
+    return {"status": "ok"}
+
 @router.patch("/groups/{group_id}")
 async def update_group(group_id: str, body: UpdateGroupRequest):
     if group_id in ("g-vault", "g-wealth"):
@@ -84,11 +91,18 @@ async def add_item(group_id: str, body: AddItemRequest):
     try:
         item = await watchlist_service.add_item(group_id, code)
         return item
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail="自選群組不存在")
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        detail_msg = str(e)
+        if "已存在於此群組" in detail_msg or "already exists" in detail_msg:
+            raise HTTPException(status_code=409, detail="該股票已存在於此群組中，無需重複新增")
+        raise HTTPException(status_code=400, detail=detail_msg)
     except Exception as e:
         if "UNIQUE constraint failed" in str(e):
-            raise HTTPException(status_code=409, detail="Stock already exists in this group")
+            raise HTTPException(status_code=409, detail="該股票已存在於此群組中，無需重複新增")
+        if "FOREIGN KEY constraint failed" in str(e):
+            raise HTTPException(status_code=404, detail="自選群組不存在")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/groups/{group_id}/items/{code}")
@@ -147,9 +161,8 @@ async def refresh_system_quotes(force_reconnect: bool = False):
     """手動重新校正合約快取、持股庫存與今日快照，若 force_reconnect=True 則強制重設 Shioaji 連線與重新登入"""
     if force_reconnect:
         await shioaji_adapter.reconnect()
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, shioaji_adapter.refresh_contracts_and_snapshots)
-    await watchlist_service.sync_wealth_book()
+    await shioaji_adapter.run_in_broker_executor(shioaji_adapter.refresh_contracts_and_snapshots)
+    await watchlist_service.sync_wealth_book(force=True)
     from backend.app.services.publisher import publisher
     await publisher.broadcast_watchlist_changed()
     return {"status": "ok", "message": "Contracts, snapshots, indices, and positions refreshed", "reconnected": force_reconnect}
@@ -194,7 +207,8 @@ async def get_stock_indicators(codes: str = Query("")):
 @router.post("/orders/place")
 async def place_order(body: PlaceOrderRequest):
     try:
-        res = shioaji_adapter.place_order(
+        res = await shioaji_adapter.run_in_broker_executor(
+            shioaji_adapter.place_order,
             code=body.code,
             action=body.action,
             quantity=body.quantity,
@@ -210,13 +224,13 @@ async def place_order(body: PlaceOrderRequest):
 @router.get("/orders", response_model=list[OrderItem])
 async def get_orders():
     """查詢今日所有證券委託單與成交狀態"""
-    return shioaji_adapter.fetch_orders()
+    return await shioaji_adapter.run_in_broker_executor(shioaji_adapter.fetch_orders)
 
 @router.post("/orders/clear")
 async def clear_orders():
     """手動清空今日委託單紀錄"""
     try:
-        return shioaji_adapter.clear_orders()
+        return await shioaji_adapter.run_in_broker_executor(shioaji_adapter.clear_orders)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -224,7 +238,7 @@ async def clear_orders():
 async def cancel_order(order_id: str):
     """取消特定委託單"""
     try:
-        return shioaji_adapter.cancel_order(order_id)
+        return await shioaji_adapter.run_in_broker_executor(shioaji_adapter.cancel_order, order_id)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -232,7 +246,8 @@ async def cancel_order(order_id: str):
 async def update_order(order_id: str, body: UpdateOrderRequest):
     """修改委託價格或委託數量(減量)"""
     try:
-        return shioaji_adapter.update_order(
+        return await shioaji_adapter.run_in_broker_executor(
+            shioaji_adapter.update_order,
             order_id=order_id,
             new_price=body.newPrice,
             new_qty=body.newQty,
@@ -251,7 +266,7 @@ async def get_account_balance():
         raw_mode = await get_setting("account_capital_mode")
         capital_mode = raw_mode if raw_mode in ("before_t0", "after_t0") else "after_t0"
 
-        settlements_raw = shioaji_adapter.fetch_settlements()
+        settlements_raw = await shioaji_adapter.run_in_broker_executor(shioaji_adapter.fetch_settlements)
         
         t0_amt = 0.0
         t0_date = ""
@@ -301,7 +316,7 @@ async def get_account_balance():
             t2_remaining = round(t1_remaining + (t2_amt / 10000.0), 4)
 
         # 取得今日買賣明細並拼裝算式 (a + b - c)
-        raw_deals = shioaji_adapter.fetch_today_deals_breakdown()
+        raw_deals = await asyncio.to_thread(shioaji_adapter.fetch_today_deals_breakdown)
         t2_trade_details: list[SettlementTradeDetail] = []
         formula_parts = []
         for rd in raw_deals:

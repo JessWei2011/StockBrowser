@@ -15,7 +15,7 @@ interface HeaderProps {
   onToggleTheme: () => void;
   onRefresh: () => void;
   onForceReconnect?: () => void;
-  onAddStock: (code: string) => Promise<void>;
+  onAddStock: (code: string, meta?: { name?: string; exchange?: string; securityType?: string }) => Promise<void>;
   onOpenCreateGroup: () => void;
   onOpenEditGroup: () => void;
   onOpenCalendar?: () => void;
@@ -45,25 +45,62 @@ export const Header: React.FC<HeaderProps> = ({
   const [results, setResults] = useState<InstrumentSearchResult[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const isSubmittingRef = useRef(false);
+  const toastTimerRef = useRef<number | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  const showToast = (text: string, type: 'success' | 'error') => {
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    setToast({ text, type });
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 4000);
+  };
+
   useEffect(() => {
-    if (!query.trim()) {
+    return () => {
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
+  // 搜尋自動完成：使用 100ms 防抖與 AbortController 防範非同步競爭
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed) {
       setResults([]);
       setShowDropdown(false);
       return;
     }
+
+    let isActive = true;
+    const controller = new AbortController();
+
     const timer = setTimeout(async () => {
       try {
-        const data = await searchInstruments(query.trim());
-        setResults(data);
-        setShowDropdown(data.length > 0);
-      } catch (e) {
-        console.error('Search error:', e);
+        const data = await searchInstruments(trimmed, controller.signal);
+        if (isActive) {
+          setResults(data);
+          setShowDropdown(data.length > 0);
+        }
+      } catch (e: any) {
+        if (e.name !== 'AbortError' && isActive) {
+          console.error('Search error:', e);
+        }
       }
-    }, 250);
+    }, 100);
 
-    return () => clearTimeout(timer);
+    return () => {
+      isActive = false;
+      controller.abort();
+      clearTimeout(timer);
+    };
   }, [query]);
 
   // 點選外部關閉下拉選單
@@ -77,23 +114,69 @@ export const Header: React.FC<HeaderProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleAdd = async (codeToAdd?: string) => {
-    const code = (codeToAdd || query).trim().toUpperCase();
-    if (!code || !currentGroupId || isAdding) return;
+  const handleAdd = async (explicitCode?: string, itemMeta?: InstrumentSearchResult) => {
+    if (isSubmittingRef.current || isAdding) return;
+
+    const raw = (explicitCode || query).trim().toUpperCase();
+    if (!raw || !currentGroupId) return;
+
+    let codeToSubmit = raw;
+    let meta = itemMeta;
+
+    // 若使用者輸入的是代號格式 (4-6 位英數字)，優先以輸入之代號為準
+    const isCodeFormat = /^[0-9A-Z]{4,6}$/.test(raw);
+    if (!explicitCode && !isCodeFormat && results.length > 0) {
+      codeToSubmit = results[0].code;
+      meta = results[0];
+    } else if (!meta && results.length > 0) {
+      meta = results.find((r) => r.code === codeToSubmit);
+    }
+
     try {
+      isSubmittingRef.current = true;
       setIsAdding(true);
-      await onAddStock(code);
-      setQuery('');
       setShowDropdown(false);
+
+      await onAddStock(codeToSubmit, meta);
+      setQuery('');
+      setResults([]);
+      const stockDisplayName = meta?.name ? `${codeToSubmit} (${meta.name})` : codeToSubmit;
+      showToast(`已成功新增 ${stockDisplayName}`, 'success');
     } catch (e: any) {
-      alert(e.message || '新增失敗');
+      showToast(e.message || '新增失敗', 'error');
     } finally {
+      isSubmittingRef.current = false;
       setIsAdding(false);
     }
   };
 
   return (
     <header className="app-header">
+      {/* 獨立固定於右上角的全域通知 Toast，絕不遮擋搜尋列與下拉選單 */}
+      {toast && (
+        <div
+          className={`header-toast header-toast-${toast.type}`}
+          role="alert"
+          onClick={() => setToast(null)}
+          title="點擊關閉通知"
+        >
+          <span className="header-toast-icon">
+            {toast.type === 'success' ? '✓' : '⚠️'}
+          </span>
+          <span className="header-toast-text">{toast.text}</span>
+          <button
+            className="header-toast-close"
+            onClick={(e) => {
+              e.stopPropagation();
+              setToast(null);
+            }}
+            title="關閉"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <div className="header-left">
         <h1 className="app-title">我的自選</h1>
         <div className="search-container" ref={dropdownRef}>
@@ -103,19 +186,29 @@ export const Header: React.FC<HeaderProps> = ({
               className="search-input"
               placeholder="請輸入股號或商品名稱"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onFocus={() => results.length > 0 && setShowDropdown(true)}
+              onChange={(e) => {
+                if (toast) setToast(null);
+                setQuery(e.target.value);
+              }}
+              onFocus={() => {
+                if (toast) setToast(null);
+                if (results.length > 0 && query.trim()) setShowDropdown(true);
+              }}
+              onClick={() => {
+                if (toast) setToast(null);
+                if (results.length > 0 && query.trim()) setShowDropdown(true);
+              }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  handleAdd(results[0]?.code);
-                }
+                if (e.nativeEvent.isComposing || e.key !== 'Enter') return;
+                e.preventDefault();
+                handleAdd();
               }}
             />
             {!isWealthGroup && (
               <button
                 className="btn-add-stock"
                 disabled={!query.trim() || !currentGroupId || isAdding}
-                onClick={() => handleAdd(results[0]?.code || query)}
+                onClick={() => handleAdd()}
                 title="新增至目前組合"
               >
                 {isAdding ? '新增中...' : '新增個股'}
@@ -133,7 +226,8 @@ export const Header: React.FC<HeaderProps> = ({
                   <div
                     key={item.code}
                     className="dropdown-item"
-                    onClick={() => handleAdd(item.code)}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleAdd(item.code, item)}
                   >
                     <span className="dropdown-code">{item.code}</span>
                     <span className="dropdown-name">{item.name}</span>
@@ -158,36 +252,31 @@ export const Header: React.FC<HeaderProps> = ({
 
       <div className="header-right">
         {(() => {
-          // 盤中行情新鮮度檢測 (若開盤中且最後報價超過 20 秒未更新，視為行情斷線/停滯)
-          const nowTs = Date.now();
-          const lastTs = lastQuoteTime ? new Date(lastQuoteTime).getTime() : 0;
-          const isStale = isMarketOpen && (!lastQuoteTime || (nowTs - lastTs > 20000));
+          // 券商行情與連線狀態判定 (由後端連線心跳與 WebSocket 權威決定，杜絕客戶端時鐘偏差引發的頻繁閃爍)
           const isOffline = !wsConnected || !upstreamConnected;
 
           let badgeClass = 'live';
           let statusText = '即時同步';
-          let badgeTitle = '報價正常跳動中';
+          let badgeTitle = lastQuoteTime
+            ? `報價跳動中 (最後更新: ${new Date(lastQuoteTime).toLocaleTimeString()})，點擊可手動校正`
+            : '報價正常跳動中 (點擊可手動校正)';
 
           if (isOffline) {
             badgeClass = 'danger';
-            statusText = wsConnected ? '行情斷線 (點擊重置)' : '伺服器重連中';
+            statusText = wsConnected ? '行情斷線 (點擊重置)' : '伺服器重連中...';
             badgeTitle = '券商行情未連線，點擊以強制重新連線';
-          } else if (isStale) {
-            badgeClass = 'danger pulse-danger';
-            statusText = '行情逾時 (點擊重置)';
-            badgeTitle = '盤中超過 20 秒無即時行情，點擊以強制重置連線';
           } else if (!isMarketOpen) {
             badgeClass = 'closed';
             statusText = '已收盤 (模擬/快照)';
-            badgeTitle = '目前非盤中交易時段';
+            badgeTitle = '目前非盤中交易時段 (點擊可立即手動校正)';
           }
 
           return (
             <div
-              className={`status-badge ${isStale || isOffline ? 'status-badge-clickable' : ''}`}
+              className={`status-badge ${isOffline ? 'status-badge-clickable' : ''}`}
               title={badgeTitle}
               onClick={() => {
-                if ((isStale || isOffline) && onForceReconnect) {
+                if (isOffline && onForceReconnect) {
                   onForceReconnect();
                 } else {
                   onRefresh();

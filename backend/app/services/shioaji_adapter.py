@@ -1,4 +1,6 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import functools
 import logging
 import os
 from pathlib import Path
@@ -6,12 +8,14 @@ import random
 import re
 import urllib.request
 import json
-from datetime import datetime, date, timezone, timedelta, time
+import time
+from datetime import datetime, date, timezone, timedelta, time as dtime
 from typing import Optional, Any
 import shioaji as sj
 from backend.app.settings import settings
 from backend.app.services.quote_store import quote_store
 from backend.app.domain.models import InstrumentSearchResult
+from backend.app.repositories.db import _LoopBoundLock
 
 from backend.app.services.market_calendar_service import (
     evaluate_tw_market_status,
@@ -41,10 +45,10 @@ def is_taiwan_trial_matching() -> bool:
         return False
     t = now_tw.time()
     # 08:30 ~ 09:00 開盤前試撮
-    if time(8, 30) <= t < time(9, 0):
+    if dtime(8, 30) <= t < dtime(9, 0):
         return True
     # 13:25 ~ 13:30 收盤前試撮
-    if time(13, 25) <= t < time(13, 30):
+    if dtime(13, 25) <= t < dtime(13, 30):
         return True
     return False
 
@@ -280,11 +284,26 @@ class ShioajiAdapter:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._last_odd_fetch_date: Optional[str] = None
         self._last_morning_sync_date: Optional[str] = None
+        self._last_preopen_warmup_date: Optional[str] = None
         self._orders_cleared_at: Optional[datetime] = None
         self._last_reconnect_attempt_ts: float = 0.0
         self.stock_account: Any = None
         self.ca_activated: bool = False
         self._order_modified_prices: dict[str, float] = {}
+        self._reconnect_lock = _LoopBoundLock()
+        # 專屬券商執行緒池：單一背景執行緒嚴格序列化外部券商網路 I/O，徹底杜絕 Shioaji C++ 底層跨執行緒競爭或 GIL 互鎖 (deadlock)
+        self._broker_executor: ThreadPoolExecutor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="shioaji_broker"
+        )
+
+    async def run_in_broker_executor(self, func, *args, **kwargs):
+        """保證所有外部券商 API 呼叫皆在單一 broker_executor 序列化執行"""
+        loop = asyncio.get_running_loop()
+        if kwargs:
+            pfunc = functools.partial(func, *args, **kwargs)
+            return await loop.run_in_executor(self._broker_executor, pfunc)
+        return await loop.run_in_executor(self._broker_executor, func, *args)
 
     async def _fetch_and_apply_closing_odd_lots(self) -> bool:
         """非同步向 TWSE / TPEx 抓取最新盤後零股行情並更新進 quote_store"""
@@ -343,29 +362,40 @@ class ShioajiAdapter:
             logger.error(f"Failed to refresh contracts and snapshots: {e}", exc_info=True)
 
     async def _morning_sync_scheduler_loop(self):
-        """營業日開盤前自動排程：08:30 ~ 08:50 自動執行全新連線重建、登入、合約與快照更新"""
+        """營業日開盤前自動排程：08:30 ~ 08:50 及 08:58 自動執行全新連線重建、登入、合約與快照更新"""
         logger.info("Morning sync scheduler loop started.")
         while True:
             try:
-                await asyncio.sleep(30.0)
+                await asyncio.sleep(20.0)
                 tz_tw = timezone(timedelta(hours=8))
                 now_tw = datetime.now(tz_tw)
                 today_str = now_tw.strftime("%Y-%m-%d")
 
                 is_weekday = (now_tw.weekday() < 5)
                 current_minutes = now_tw.hour * 60 + now_tw.minute
-                # 營業日 08:30 開始執行開盤前重新登入連線與行情快照刷新
+                # 1. 營業日 08:30 開始執行開盤前重新登入連線與行情快照刷新
                 is_morning_window = (8 * 60 + 30 <= current_minutes <= 8 * 60 + 55)
 
                 if is_weekday and is_morning_window and self._last_morning_sync_date != today_str:
                     logger.info(f"Triggering scheduled 08:30 morning reconnect & sync for {today_str}...")
                     self._last_morning_sync_date = today_str
-                    # 1. 執行完整的重新登入與連線重建 (重設底層 Solace 報價連線)
+                    # 執行完整的重新登入與連線重建 (重設底層 Solace 報價連線)
                     await self.reconnect()
-                    # 2. 刷新最新合約、基準昨收與當日最新 snapshot
+                    # 刷新最新合約、基準昨收與當日最新 snapshot
                     loop = asyncio.get_running_loop()
-                    await loop.run_in_executor(None, self.refresh_contracts_and_snapshots)
+                    await loop.run_in_executor(self._broker_executor, self.refresh_contracts_and_snapshots)
                     logger.info(f"Scheduled 08:30 morning reconnect & sync completed for {today_str}.")
+
+                # 2. 營業日 08:58 ~ 09:00 開盤前 2 分鐘暖機檢查，確保底層報價連線處於活躍連線狀態
+                is_preopen_window = (8 * 60 + 58 <= current_minutes < 9 * 60)
+                if is_weekday and is_preopen_window and self._last_preopen_warmup_date != today_str:
+                    logger.info(f"Triggering scheduled 08:58 pre-market opening warm-up for {today_str}...")
+                    self._last_preopen_warmup_date = today_str
+                    if not self.is_connected or not self.is_logged_in:
+                        await self.reconnect()
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(self._broker_executor, self.refresh_contracts_and_snapshots)
+                    logger.info(f"Scheduled 08:58 pre-market warm-up completed for {today_str}.")
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -435,35 +465,60 @@ class ShioajiAdapter:
             self._mock_task = asyncio.create_task(self._mock_ticks_loop())
 
     async def _heartbeat_watchdog_loop(self):
-        """盤中即時行情心跳守護任務：若盤中超過 35 秒完全無報價跳動，自動觸發重連自癒"""
+        """盤中即時行情心跳守護任務：若盤中斷線或超過時限完全無報價跳動，自動觸發重連自癒"""
         logger.info("Heartbeat watchdog loop started.")
         while True:
             try:
                 await asyncio.sleep(10.0)
-                # 只有在台股真正開盤時段 (09:00 ~ 13:30) 且有訂閱股票時才進行檢測
-                if is_taiwan_market_open() and self.subscribed_codes and self.is_logged_in:
+                # 判斷台股現貨盤中交易時段 (09:00 ~ 13:30) 或 開盤前試撮 (08:30 ~ 09:00)
+                is_open = is_taiwan_market_open()
+                is_trial = is_taiwan_trial_matching()
+
+                if is_open or is_trial:
                     now_ts = time.time()
-                    # 避免重連間隔過密，至少間隔 60 秒
-                    if (now_ts - self._last_reconnect_attempt_ts) > 60.0:
-                        # 檢查最後一次收到報價的時間
-                        last_ts = 0.0
-                        if self.last_quote_time:
-                            try:
-                                dt = datetime.fromisoformat(self.last_quote_time)
-                                last_ts = dt.timestamp()
-                            except Exception:
-                                pass
-                        
-                        silence_duration = now_ts - last_ts
-                        if silence_duration > 35.0:
+                    # 情況 A: 交易或試撮時段內未連線或未登入 -> 主動自動連線/登入
+                    if not self.is_connected or not self.is_logged_in:
+                        if (now_ts - self._last_reconnect_attempt_ts) > 30.0:
                             logger.warning(
-                                f"Heartbeat watchdog detected market silence for {silence_duration:.1f}s during trading hours! "
-                                "Triggering auto-reconnect..."
+                                "Market is active/trial matching but Shioaji is not connected/logged in! "
+                                "Triggering auto-connect..."
                             )
                             self._last_reconnect_attempt_ts = now_ts
                             await self.reconnect()
                             loop = asyncio.get_running_loop()
-                            await loop.run_in_executor(None, self.refresh_contracts_and_snapshots)
+                            await loop.run_in_executor(self._broker_executor, self.refresh_contracts_and_snapshots)
+                        continue
+
+                    # 情況 B: 盤中交易時段 (09:00 ~ 13:30) 且有訂閱股票 -> 檢測行情心跳
+                    if is_open and self.subscribed_codes and self.is_logged_in:
+                        if (now_ts - self._last_reconnect_attempt_ts) > 60.0:
+                            last_ts = 0.0
+                            if self.last_quote_time:
+                                try:
+                                    if isinstance(self.last_quote_time, (int, float)):
+                                        last_ts = float(self.last_quote_time)
+                                    else:
+                                        dt = datetime.fromisoformat(str(self.last_quote_time))
+                                        last_ts = dt.timestamp()
+                                except Exception:
+                                    pass
+
+                            tz_tw = timezone(timedelta(hours=8))
+                            now_tw = datetime.now(tz_tw)
+                            t = now_tw.time()
+                            # 09:00 ~ 09:05 開盤前 5 分鐘容許寬限期 90 秒，避免剛開盤少數個股未立即撮合造成頻繁重連
+                            silence_threshold = 90.0 if dtime(9, 0) <= t < dtime(9, 5) else 35.0
+
+                            silence_duration = now_ts - last_ts
+                            if silence_duration > silence_threshold:
+                                logger.warning(
+                                    f"Heartbeat watchdog detected market silence for {silence_duration:.1f}s "
+                                    f"(threshold: {silence_threshold}s) during trading hours! Triggering auto-reconnect..."
+                                )
+                                self._last_reconnect_attempt_ts = now_ts
+                                await self.reconnect()
+                                loop = asyncio.get_running_loop()
+                                await loop.run_in_executor(self._broker_executor, self.refresh_contracts_and_snapshots)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -502,19 +557,26 @@ class ShioajiAdapter:
                 lambda: asyncio.create_task(self.reconnect())
             )
 
-    async def reconnect(self):
-        if getattr(self, "_reconnecting", False):
-            return
-        self._reconnecting = True
-        logger.info("Attempting to reconnect to Shioaji...")
+    def _sync_reconnect(self) -> bool:
+        """在專屬券商執行緒中同步重設 Shioaji 連線、登入並重新訂閱（保證無跨執行緒競爭）"""
+        logger.info("Executing synchronous reconnect in broker thread...")
         try:
-            try:
-                if self.api:
+            if self.api:
+                try:
                     self.api.logout()
-            except Exception:
-                pass
-            await asyncio.sleep(2.0)
+                except Exception as e:
+                    logger.debug(f"Error during api.logout(): {e}")
+
+            import time as _t
+            _t.sleep(1.0)
             self.api = sj.Shioaji(simulation=settings.SJ_SIMULATION)
+
+            if not (settings.SJ_API_KEY and settings.SJ_SECRET_KEY):
+                logger.warning("SJ_API_KEY / SJ_SECRET_KEY not set during reconnect.")
+                self.is_connected = False
+                self.is_logged_in = False
+                return False
+
             accounts = self.api.login(
                 api_key=settings.SJ_API_KEY,
                 secret_key=settings.SJ_SECRET_KEY,
@@ -522,7 +584,7 @@ class ShioajiAdapter:
             )
             self.is_logged_in = True
             self.is_connected = True
-            logger.info("Shioaji re-login succeeded.")
+            logger.info(f"Shioaji re-login succeeded. Accounts: {len(accounts)}")
 
             stock_accounts = [
                 acc for acc in accounts
@@ -535,23 +597,35 @@ class ShioajiAdapter:
                 logger.info(f"Locked stock trading account on reconnect: {self.stock_account.broker_id}-{self.stock_account.account_id}")
 
             self._activate_ca_if_needed()
-            
+
             self.api.set_on_quote_stk_v1_callback(self._on_quote_callback)
             self.api.set_on_quote_idx_v1_callback(self._on_index_quote_callback)
             self.api.set_on_tick_stk_v1_callback(self._on_tick_callback)
             self.api.set_session_down_callback(self._on_session_down)
-            
+
             self._init_and_subscribe_indices()
-            
+
             codes_to_resub = set(self.subscribed_codes)
             self.subscribed_codes.clear()
             self.subscribe_codes(codes_to_resub)
             logger.info(f"Reconnected and successfully resubscribed {len(codes_to_resub)} stocks.")
+            return True
         except Exception as e:
             logger.error(f"Reconnect failed: {e}", exc_info=True)
             self.is_connected = False
-        finally:
-            self._reconnecting = False
+            self.is_logged_in = False
+            return False
+
+    async def reconnect(self) -> bool:
+        """非同步重新連線永豐 API，採用 _reconnect_lock 確保防重入並於 broker_executor 序列化執行"""
+        async with self._reconnect_lock:
+            now_ts = time.time()
+            if self.is_connected and (now_ts - self._last_reconnect_attempt_ts) < 10.0:
+                logger.info("Skipping reconnect as it was performed very recently.")
+                return True
+            self._last_reconnect_attempt_ts = now_ts
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(self._broker_executor, self._sync_reconnect)
 
     def stop(self):
         if self._odd_lots_scheduler_task:
@@ -569,6 +643,11 @@ class ShioajiAdapter:
                 logger.warning(f"Error during Shioaji logout: {e}")
         self.is_connected = False
         self.is_logged_in = False
+        if hasattr(self, "_broker_executor") and self._broker_executor:
+            try:
+                self._broker_executor.shutdown(wait=False, cancel_futures=True)
+            except Exception as e:
+                logger.warning(f"Error shutting down broker executor: {e}")
 
     def _build_contracts_cache(self):
         """讀取 TSE 與 OTC 合約並快取，同時更新證交所/櫃買處置公告快取"""
@@ -695,6 +774,27 @@ class ShioajiAdapter:
             return codes, summary
         except Exception as e:
             logger.error(f"Failed to fetch stock positions from Shioaji: {e}", exc_info=True)
+            return [], {}
+
+    async def async_fetch_stock_positions(self, timeout: float = 3.0) -> tuple[list[str], dict[str, Any]]:
+        """非同步執行緒隔離索取持股庫存，絕不阻塞主 asyncio 事件迴圈"""
+        # 快速短路檢查：未配置 API 金鑰或未連線登入時，無需派發至執行緒池
+        if not settings.SJ_API_KEY or not settings.SJ_SECRET_KEY:
+            return [], {}
+        if not self.api or not self.is_logged_in or not getattr(self.api, "stock_account", None):
+            return [], {}
+
+        try:
+            loop = asyncio.get_running_loop()
+            return await asyncio.wait_for(
+                loop.run_in_executor(self._broker_executor, self.fetch_stock_positions),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"fetch_stock_positions timed out after {timeout}s")
+            return [], {}
+        except Exception as e:
+            logger.error(f"Error in async_fetch_stock_positions: {e}")
             return [], {}
 
     def get_positions_detail(self) -> list[dict[str, Any]]:
@@ -994,6 +1094,7 @@ class ShioajiAdapter:
                     pts.append(round(close_p, 2))
 
                 self.indices_dirty = True
+                self.last_quote_time = datetime.now(timezone(timedelta(hours=8))).isoformat()
         except Exception as e:
             logger.debug(f"Error parsing index quote callback: {e}")
 
@@ -1032,8 +1133,13 @@ class ShioajiAdapter:
             is_sim = is_taiwan_trial_matching()
 
             dt = getattr(quote, "datetime", None)
-            source_ts = dt.isoformat() if isinstance(dt, datetime) else None
-            self.last_quote_time = source_ts or datetime.now(timezone.utc).isoformat()
+            if isinstance(dt, datetime):
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
+                source_ts = dt.isoformat()
+            else:
+                source_ts = datetime.now(timezone(timedelta(hours=8))).isoformat()
+            self.last_quote_time = source_ts
 
             # 取得即時漲跌與計算昨收參考價 (重要：動態自我校正過期昨收)
             chg_price = safe_float(getattr(quote, "price_chg", None))
@@ -1074,12 +1180,18 @@ class ShioajiAdapter:
             close_p = safe_float(getattr(tick, "close", None))
             if close_p is not None and close_p > 0:
                 dt = getattr(tick, "datetime", None)
-                source_ts = dt.isoformat() if isinstance(dt, datetime) else None
+                if isinstance(dt, datetime):
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
+                    source_ts = dt.isoformat()
+                else:
+                    source_ts = datetime.now(timezone(timedelta(hours=8))).isoformat()
                 quote_store.update_quote(
                     code=code,
                     odd_lot_last=close_p,
                     odd_lot_source_ts=source_ts
                 )
+                self.last_quote_time = source_ts
         except Exception as e:
             logger.debug(f"Error parsing odd lot tick callback: {e}")
 
@@ -1178,6 +1290,36 @@ class ShioajiAdapter:
                         pass
                 self.subscribed_codes.discard(code)
                 quote_store.remove_quote(code)
+
+    async def async_subscribe_codes(self, codes: set[str], timeout: float = 3.0):
+        """非同步執行緒隔離訂閱行情與批次快照，絕不阻塞主 asyncio 事件迴圈"""
+        if not codes:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            await asyncio.wait_for(
+                loop.run_in_executor(self._broker_executor, self.subscribe_codes, codes),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"subscribe_codes timed out after {timeout}s for codes: {codes}")
+        except Exception as e:
+            logger.error(f"Error in async_subscribe_codes: {e}")
+
+    async def async_unsubscribe_codes(self, codes: set[str], timeout: float = 3.0):
+        """非同步執行緒隔離退訂行情，絕不阻塞主 asyncio 事件迴圈"""
+        if not codes:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            await asyncio.wait_for(
+                loop.run_in_executor(self._broker_executor, self.unsubscribe_codes, codes),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"unsubscribe_codes timed out after {timeout}s for codes: {codes}")
+        except Exception as e:
+            logger.error(f"Error in async_unsubscribe_codes: {e}")
 
     def _fetch_snapshots(self, codes: list[str]):
         """透過一次性 snapshot 初始化個股資料"""

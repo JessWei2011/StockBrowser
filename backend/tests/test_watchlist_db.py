@@ -41,3 +41,20 @@ async def test_watchlist_db_crud(tmp_path):
     await db.delete_group(new_group.id)
     groups_final = await db.get_all_groups()
     assert all(g.id != new_group.id for g in groups_final)
+
+    # 測試多群組多次連續重新排序
+    g_a = await db.create_group("群組A")
+    g_b = await db.create_group("群組B")
+    g_c = await db.create_group("群組C")
+    
+    # 第一次排序: B, C, A
+    await db.reorder_groups([g_b.id, g_c.id, g_a.id])
+    groups_reordered1 = await db.get_all_groups()
+    custom_ids_1 = [g.id for g in groups_reordered1 if g.id in (g_a.id, g_b.id, g_c.id)]
+    assert custom_ids_1 == [g_b.id, g_c.id, g_a.id]
+
+    # 第二次連續排序: C, A, B
+    await db.reorder_groups([g_c.id, g_a.id, g_b.id])
+    groups_reordered2 = await db.get_all_groups()
+    custom_ids_2 = [g.id for g in groups_reordered2 if g.id in (g_a.id, g_b.id, g_c.id)]
+    assert custom_ids_2 == [g_c.id, g_a.id, g_b.id]

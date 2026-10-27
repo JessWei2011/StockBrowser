@@ -10,12 +10,16 @@ class QuoteWebSocketClient {
   private reconnectDelay = 1000;
   private reconnectTimer: number | null = null;
   private pingInterval: number | null = null;
+  private pongTimeoutTimer: number | null = null;
+  private lastPongTime: number = Date.now();
   private shouldConnect = false;
+  private visibilityListenerAttached = false;
 
   public isConnected = false;
 
   public connect() {
     this.shouldConnect = true;
+    this.setupVisibilityListener();
     this.cleanup();
 
     const loc = window.location;
@@ -28,14 +32,20 @@ class QuoteWebSocketClient {
 
       this.ws.onopen = () => {
         this.isConnected = true;
+        this.lastPongTime = Date.now();
         this.reconnectDelay = 1000;
         this.notifyStatus(true);
         this.startHeartbeat();
       };
 
       this.ws.onmessage = (event) => {
+        this.lastPongTime = Date.now();
+        this.clearPongTimeout();
         try {
           const data: WebSocketMessage = JSON.parse(event.data);
+          if (data.type === 'pong') {
+            return;
+          }
           this.notifyMessage(data);
         } catch (e) {
           console.error('Failed to parse WebSocket message:', e);
@@ -63,8 +73,29 @@ class QuoteWebSocketClient {
     this.cleanup();
   }
 
+  public forceReconnect() {
+    this.cleanup();
+    this.reconnectDelay = 1000;
+    this.connect();
+  }
+
+  private setupVisibilityListener() {
+    if (this.visibilityListenerAttached || typeof document === 'undefined') return;
+    this.visibilityListenerAttached = true;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && this.shouldConnect) {
+        const isStale = Date.now() - this.lastPongTime > 30000;
+        if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN || isStale) {
+          console.log('[WebSocket] Page visible and connection is disconnected or stale, reconnecting...');
+          this.forceReconnect();
+        }
+      }
+    });
+  }
+
   private cleanup() {
     this.stopHeartbeat();
+    this.clearPongTimeout();
     if (this.reconnectTimer) {
       window.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -74,7 +105,11 @@ class QuoteWebSocketClient {
       this.ws.onmessage = null;
       this.ws.onclose = null;
       this.ws.onerror = null;
-      this.ws.close();
+      try {
+        this.ws.close();
+      } catch (e) {
+        // Ignore close error during teardown
+      }
       this.ws = null;
     }
   }
@@ -93,8 +128,25 @@ class QuoteWebSocketClient {
     this.pingInterval = window.setInterval(() => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify({ type: 'ping' }));
+        this.startPongTimeout();
       }
     }, 20000);
+  }
+
+  private startPongTimeout() {
+    this.clearPongTimeout();
+    this.pongTimeoutTimer = window.setTimeout(() => {
+      console.warn('[WebSocket] Pong heartbeat timeout (10s), forcing reconnection...');
+      this.clearPongTimeout();
+      this.forceReconnect();
+    }, 10000);
+  }
+
+  private clearPongTimeout() {
+    if (this.pongTimeoutTimer) {
+      window.clearTimeout(this.pongTimeoutTimer);
+      this.pongTimeoutTimer = null;
+    }
   }
 
   private stopHeartbeat() {
@@ -102,6 +154,7 @@ class QuoteWebSocketClient {
       window.clearInterval(this.pingInterval);
       this.pingInterval = null;
     }
+    this.clearPongTimeout();
   }
 
   public onMessage(handler: MessageHandler) {

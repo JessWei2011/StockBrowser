@@ -1,9 +1,10 @@
 import asyncio
 import json
 import logging
-import urllib.request
+import requests
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("yahoo_market")
 
@@ -15,6 +16,102 @@ GLOBAL_NAMES = {
     "^N225": ("日經225", "Nikkei 225"),
     "^KS11": ("南韓KOSPI", "KOSPI"),
 }
+
+
+def evaluate_market_session(
+    symbol: str,
+    meta: dict[str, Any] | None = None,
+    quote: dict[str, Any] | None = None,
+) -> tuple[str, str, str]:
+    """依據時區、開盤時間與 Yahoo meta 判定全球指數即時開休市狀態。
+
+    回傳: (market_status, status_label, trading_hours)
+    """
+    meta = meta or {}
+    quote = quote or {}
+    now_ts = datetime.now(timezone.utc).timestamp()
+
+    if symbol in ("^DJI", "^IXIC", "^GSPC", "^SOX"):
+        try:
+            tz = ZoneInfo("America/New_York")
+        except Exception:
+            tz = timezone.utc
+        dt = datetime.now(tz)
+        is_dst = dt.tzname() == "EDT"
+        tw_hours = "台北 21:30~04:00 (夏令)" if is_dst else "台北 22:30~05:00 (冬令)"
+        hours_desc = f"{tw_hours} ｜ 美東 09:30~16:00"
+
+        # 優先讀取 Yahoo currentTradingPeriod 精確判斷（可自動對應休市假期）
+        curr = meta.get("currentTradingPeriod", {})
+        reg = curr.get("regular", {})
+        pre = curr.get("pre", {})
+        post = curr.get("post", {})
+        if reg.get("start") and reg.get("end") and reg["start"] < reg["end"]:
+            if reg["start"] <= now_ts < reg["end"]:
+                return "open", "盤中交易", hours_desc
+            if pre.get("start") and pre.get("end") and pre["start"] <= now_ts < pre["end"]:
+                return "pre", "盤前交易", hours_desc
+            if post.get("start") and post.get("end") and post["start"] <= now_ts < post["end"]:
+                return "post", "盤後交易", hours_desc
+
+        if dt.weekday() >= 5:
+            return "weekend", "週末休市", hours_desc
+
+        mins = dt.hour * 60 + dt.minute
+        if 4 * 60 <= mins < 9 * 60 + 30:
+            return "pre", "盤前交易", hours_desc
+        elif 9 * 60 + 30 <= mins < 16 * 60:
+            return "open", "盤中交易", hours_desc
+        elif 16 * 60 <= mins < 20 * 60:
+            return "post", "盤後交易", hours_desc
+        elif mins >= 16 * 60:
+            return "closed", "已收盤", hours_desc
+        else:
+            return "closed", "未開盤", hours_desc
+
+    elif symbol == "^N225":
+        try:
+            tz = ZoneInfo("Asia/Tokyo")
+        except Exception:
+            tz = timezone.utc
+        dt = datetime.now(tz)
+        hours_desc = "台北 08:00~14:30 (10:30~11:30午休) ｜ 東京 09:00~15:30"
+
+        if dt.weekday() >= 5:
+            return "weekend", "週末休市", hours_desc
+
+        mins = dt.hour * 60 + dt.minute
+        if mins < 9 * 60:
+            return "closed", "未開盤", hours_desc
+        elif 9 * 60 <= mins < 11 * 60 + 30:
+            return "open", "早盤交易", hours_desc
+        elif 11 * 60 + 30 <= mins < 12 * 60 + 30:
+            return "lunch", "午間休市", hours_desc
+        elif 12 * 60 + 30 <= mins < 15 * 60 + 30:
+            return "open", "午盤交易", hours_desc
+        else:
+            return "closed", "已收盤", hours_desc
+
+    elif symbol == "^KS11":
+        try:
+            tz = ZoneInfo("Asia/Seoul")
+        except Exception:
+            tz = timezone.utc
+        dt = datetime.now(tz)
+        hours_desc = "台北 08:00~14:30 (全日無午休) ｜ 首爾 09:00~15:30"
+
+        if dt.weekday() >= 5:
+            return "weekend", "週末休市", hours_desc
+
+        mins = dt.hour * 60 + dt.minute
+        if mins < 9 * 60:
+            return "closed", "未開盤", hours_desc
+        elif 9 * 60 <= mins < 15 * 60 + 30:
+            return "open", "盤中交易", hours_desc
+        else:
+            return "closed", "已收盤", hours_desc
+
+    return "closed", "休市中", ""
 
 class YahooMarketService:
     def __init__(self):
@@ -38,9 +135,15 @@ class YahooMarketService:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
         }
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            html = resp.read().decode("utf-8")
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                logger.warning(f"Yahoo market fetch returned HTTP status {resp.status_code}")
+                return {}, self._global_indices
+            html = resp.text
+        except Exception as e:
+            logger.warning(f"Yahoo market requests.get failed: {e}")
+            return {}, self._global_indices
 
         pos = html.find("marketIndexBoard")
         if pos == -1:
@@ -194,6 +297,7 @@ class YahooMarketService:
                     if c is not None and isinstance(c, (int, float))
                 ]
                 zh_name, en_name = GLOBAL_NAMES.get(sym, (meta.get("name") or sym, sym))
+                m_status, m_label, m_hours = evaluate_market_session(sym, meta, quote)
                 us_list.append({
                     "symbol": sym,
                     "name": zh_name,
@@ -206,6 +310,9 @@ class YahooMarketService:
                     "change": float(quote.get("change") or 0.0),
                     "changePercent": float(quote.get("changePercent") or 0.0),
                     "points": valid_pts,
+                    "marketStatus": m_status,
+                    "statusLabel": m_label,
+                    "tradingHours": m_hours,
                 })
 
         # 3. 解析亞股（日經225、南韓KOSPI）
@@ -224,6 +331,7 @@ class YahooMarketService:
                     if c is not None and isinstance(c, (int, float))
                 ]
                 zh_name, en_name = GLOBAL_NAMES.get(sym, (meta.get("name") or sym, sym))
+                m_status, m_label, m_hours = evaluate_market_session(sym, meta, quote)
                 asia_list.append({
                     "symbol": sym,
                     "name": zh_name,
@@ -236,20 +344,70 @@ class YahooMarketService:
                     "change": float(quote.get("change") or 0.0),
                     "changePercent": float(quote.get("changePercent") or 0.0),
                     "points": valid_pts,
+                    "marketStatus": m_status,
+                    "statusLabel": m_label,
+                    "tradingHours": m_hours,
                 })
 
         now_iso_str = datetime.now(timezone.utc).isoformat()
+        us_open = any(item.get("marketStatus") == "open" for item in us_list)
+        us_pre = any(item.get("marketStatus") == "pre" for item in us_list)
+        us_post = any(item.get("marketStatus") == "post" for item in us_list)
+        us_weekend = all(item.get("marketStatus") == "weekend" for item in us_list) if us_list else False
+        us_summary_label = (
+            "盤中交易" if us_open else (
+                "盤前交易" if us_pre else (
+                    "盤後交易" if us_post else (
+                        "週末休市" if us_weekend else "已收盤"
+                    )
+                )
+            )
+        )
+
+        asia_open = any(item.get("marketStatus") == "open" for item in asia_list)
+        asia_lunch = any(item.get("marketStatus") == "lunch" for item in asia_list)
+        asia_weekend = all(item.get("marketStatus") == "weekend" for item in asia_list) if asia_list else False
+        asia_summary_label = (
+            "日韓盤中" if all(item.get("marketStatus") == "open" for item in asia_list) else (
+                "盤中交易" if asia_open else (
+                    "午間休市" if asia_lunch else (
+                        "週末休市" if asia_weekend else "已收盤"
+                    )
+                )
+            )
+        )
+
         global_result = {
+            "tw": tw_result,
             "us": us_list,
             "asia": asia_list,
             "updatedAt": now_iso_str,
+            "marketSummary": {
+                "us": {
+                    "isOpen": us_open,
+                    "status": "open" if us_open else ("pre" if us_pre else ("post" if us_post else ("weekend" if us_weekend else "closed"))),
+                    "label": us_summary_label,
+                    "hours": "台北 21:30~04:00 (夏令) / 22:30~05:00 (冬令)",
+                },
+                "asia": {
+                    "isOpen": asia_open,
+                    "status": "open" if asia_open else ("lunch" if asia_lunch else ("weekend" if asia_weekend else "closed")),
+                    "label": asia_summary_label,
+                    "hours": "日股 08:00~14:30 (10:30~11:30午休) ｜ 韓股 08:00~14:30",
+                },
+            },
         }
 
         return tw_result, global_result
 
     def get_global_indices(self) -> dict[str, Any]:
-        """取得快取的國際指數"""
-        return self._global_indices
+        """取得快取的國際指數（包含台股三大指數、美股四大指數、亞股日韓）"""
+        res = dict(self._global_indices)
+        from backend.app.services.shioaji_adapter import shioaji_adapter
+        # 優先合併 Shioaji 即時的台股三大指數，若無則保留 Yahoo 抓取之 tw
+        shioaji_tw = {k: v for k, v in shioaji_adapter.market_indices.items() if v.get("price") and v["price"] > 0}
+        res["tw"] = shioaji_tw or res.get("tw") or {}
+        return res
 
     async def fetch_all_indices_async(self) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
         loop = asyncio.get_running_loop()
@@ -265,6 +423,8 @@ class YahooMarketService:
 
         tw_data, global_data = await self.fetch_all_indices_async()
         if global_data.get("us") or global_data.get("asia"):
+            if tw_data:
+                global_data["tw"] = tw_data
             self._global_indices = global_data
 
         if not tw_data:

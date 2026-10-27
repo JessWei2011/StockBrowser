@@ -15,20 +15,24 @@ _TW_HOLIDAYS_CACHE: Dict[str, Any] = {"year": None, "holidays": {}, "timestamp":
 _TW_HOLIDAYS_LOCK = threading.Lock()
 
 
-def check_twse_emergency_closure() -> Tuple[bool, str, str]:
-    """檢查證交所最新新聞公告，判定今日是否有天然災害或重大臨時休市（如颱風假）。
+def check_twse_emergency_closure(target_date: datetime.date | None = None) -> Tuple[bool, str, str]:
+    """檢查證交所最新新聞公告，判定指定日期（預設為今日台北時間）是否有天然災害或重大臨時休市（如颱風假）。
 
     回傳: (is_closed, closed_reason, closed_type)
     """
     now = time.time()
-    with _TWSE_CLOSURE_LOCK:
-        if now - _TWSE_CLOSURE_CACHE["timestamp"] < 300 and _TWSE_CLOSURE_CACHE["timestamp"] > 0:
-            return _TWSE_CLOSURE_CACHE["closed"], _TWSE_CLOSURE_CACHE["reason"], _TWSE_CLOSURE_CACHE["type"]
-
     today_taipei = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
-    roc_year = today_taipei.year - 1911
-    month = today_taipei.month
-    day = today_taipei.day
+    is_for_today = (target_date is None or target_date == today_taipei.date())
+
+    if is_for_today:
+        with _TWSE_CLOSURE_LOCK:
+            if now - _TWSE_CLOSURE_CACHE["timestamp"] < 300 and _TWSE_CLOSURE_CACHE["timestamp"] > 0:
+                return _TWSE_CLOSURE_CACHE["closed"], _TWSE_CLOSURE_CACHE["reason"], _TWSE_CLOSURE_CACHE["type"]
+
+    chk_date = target_date if target_date is not None else today_taipei.date()
+    roc_year = chk_date.year - 1911
+    month = chk_date.month
+    day = chk_date.day
     date_patterns = [
         f"{roc_year}年{month}月{day}日",
         f"{roc_year}年{month:02d}月{day:02d}日",
@@ -66,11 +70,13 @@ def check_twse_emergency_closure() -> Tuple[bool, str, str]:
     except Exception as e:
         logger.warning(f"Failed to check TWSE emergency closure: {e}")
 
-    with _TWSE_CLOSURE_LOCK:
-        _TWSE_CLOSURE_CACHE["timestamp"] = now
-        _TWSE_CLOSURE_CACHE["closed"] = is_closed
-        _TWSE_CLOSURE_CACHE["reason"] = reason
-        _TWSE_CLOSURE_CACHE["type"] = closure_type
+    if is_for_today:
+        with _TWSE_CLOSURE_LOCK:
+            _TWSE_CLOSURE_CACHE["timestamp"] = now
+            _TWSE_CLOSURE_CACHE["closed"] = is_closed
+            _TWSE_CLOSURE_CACHE["reason"] = reason
+            _TWSE_CLOSURE_CACHE["type"] = closure_type
+
     return is_closed, reason, closure_type
 
 

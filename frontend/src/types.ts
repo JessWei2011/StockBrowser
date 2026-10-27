@@ -99,12 +99,28 @@ export interface GlobalIndexItem {
   change: number;
   changePercent: number;
   points: number[];
+  marketStatus?: 'open' | 'closed' | 'weekend' | 'lunch' | 'pre' | 'post' | string;
+  statusLabel?: string;
+  tradingHours?: string;
+}
+
+export interface MarketSummaryItem {
+  isOpen: boolean;
+  status: 'open' | 'closed' | 'weekend' | 'lunch' | 'pre' | 'post' | string;
+  label: string;
+  hours?: string;
 }
 
 export interface GlobalIndicesResponse {
+  tw?: Record<string, MarketIndexState>;
   us: GlobalIndexItem[];
   asia: GlobalIndexItem[];
   updatedAt: string;
+  marketSummary?: {
+    tw?: MarketSummaryItem;
+    us?: MarketSummaryItem;
+    asia?: MarketSummaryItem;
+  };
 }
 
 export interface StockPosition {
@@ -211,6 +227,7 @@ export type WebSocketMessage =
       positions?: StockPosition[];
       wealthSummary?: WealthSummary;
       marketIndices?: Record<string, MarketIndexState>;
+      upstream?: UpstreamStatus;
     }
   | {
       type: 'quote_delta';
@@ -219,6 +236,7 @@ export type WebSocketMessage =
       quotes: QuoteState[];
       wealthSummary?: WealthSummary;
       marketIndices?: Record<string, MarketIndexState>;
+      upstream?: UpstreamStatus;
     }
   | {
       type: 'watchlist_changed';

@@ -1,3 +1,4 @@
+import concurrent.futures
 import json
 import logging
 import threading
@@ -15,6 +16,10 @@ def now_iso() -> str:
 CACHE_DIR = BASE_DIR / "data"
 ODD_CACHE_FILE = CACHE_DIR / "odd_quotes_cache.json"
 
+_disk_writer_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="quote_store_disk_writer"
+)
+
 class QuoteStore:
     def __init__(self, cache_file: Optional[Path] = None):
         self._lock = threading.Lock()
@@ -23,6 +28,7 @@ class QuoteStore:
         self._server_version: int = 0
         self._odd_cache: dict[str, float] = {}
         self._cache_file = cache_file or ODD_CACHE_FILE
+        self._last_save_future: Optional[concurrent.futures.Future] = None
         self._load_odd_cache()
 
     def _load_odd_cache(self):
@@ -37,14 +43,31 @@ class QuoteStore:
             logger.warning(f"Failed to load odd quotes cache: {e}")
 
     def _save_odd_cache_locked(self):
+        """非同步委派背景執行緒寫入硬碟快取，絕不於持有 self._lock 期間執行同步磁碟 I/O"""
+        cache_snapshot = dict(self._odd_cache)
+        self._last_save_future = _disk_writer_executor.submit(
+            self._write_cache_disk, self._cache_file, cache_snapshot
+        )
+
+    @staticmethod
+    def _write_cache_disk(target_file: Path, data: dict):
         try:
-            self._cache_file.parent.mkdir(parents=True, exist_ok=True)
-            temp_file = self._cache_file.with_suffix(".tmp")
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            temp_file = target_file.with_suffix(f".tmp.{threading.get_ident()}")
             with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(self._odd_cache, f)
-            temp_file.replace(self._cache_file)
+                json.dump(data, f)
+            temp_file.replace(target_file)
         except Exception as e:
             logger.warning(f"Failed to save odd quotes cache: {e}")
+
+    def flush_cache(self, timeout: float = 2.0):
+        """等待所有已排程的快取寫入完成 (供測試或關閉時同步調用)"""
+        fut = getattr(self, "_last_save_future", None)
+        if fut:
+            try:
+                fut.result(timeout=timeout)
+            except Exception:
+                pass
 
     def update_odd_lot_batch(self, odd_lots: dict[str, float]):
         with self._lock:

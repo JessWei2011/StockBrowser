@@ -82,6 +82,9 @@ class AddItemRequest(BaseModel):
 class ReorderItemsRequest(BaseModel):
     codes: list[str]
 
+class ReorderGroupsRequest(BaseModel):
+    group_ids: list[str]
+
 class InstrumentSearchResult(BaseModel):
     code: str
     name: str

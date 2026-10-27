@@ -7,7 +7,7 @@ import json
 import re
 import concurrent.futures
 import aiosqlite
-import yfinance as yf
+from bs4 import BeautifulSoup
 
 from backend.app.settings import settings
 from backend.app.repositories import db
@@ -175,8 +175,8 @@ class AnnouncementService:
         # 4. 抓取證交所與櫃買中心除權除息預告
         exdiv_items = await loop.run_in_executor(self._executor, self._fetch_twse_exdividend, wanted_codes)
         tpex_exdiv_items = await loop.run_in_executor(self._executor, self._fetch_tpex_exdividend, wanted_codes)
-        # 5. 抓取個股財報與行事曆 (yfinance)
-        calendar_items = await loop.run_in_executor(self._executor, self._fetch_yfinance_calendar, wanted_codes)
+        # 5. 抓取官方確認之個股法人說明會與財報公告（100% 官方申報，絕不使用演算法模型推估）
+        official_briefing_items = await loop.run_in_executor(self._executor, self._fetch_official_briefings_and_events, wanted_codes)
 
         # 彙整合併
         combined_by_code: dict[str, list[dict]] = {}
@@ -191,7 +191,7 @@ class AnnouncementService:
             tpex_revenue_items,
             exdiv_items,
             tpex_exdiv_items,
-            calendar_items,
+            official_briefing_items,
         ]
 
         seen_ids = set()
@@ -398,14 +398,28 @@ class AnnouncementService:
                         if d_obj and (today - d_obj).days > 3:
                             continue
 
+                        subj_clean = subj.replace("\r\n", " ")
+                        is_briefing = any(k in subj_clean for k in ["法人說明會", "法說會", "投資人說明會"])
+                        is_financial_report = any(k in subj_clean for k in ["董事會通過", "提報董事會", "董事會決議提報"]) and any(k in subj_clean for k in ["財務報告", "財務報表", "季報", "年報"])
+
+                        if is_briefing:
+                            tag_str = "法說重訊"
+                            cat_str = "briefing"
+                        elif is_financial_report:
+                            tag_str = "財報重訊"
+                            cat_str = "earnings"
+                        else:
+                            tag_str = "重訊"
+                            cat_str = "news"
+
                         results.append({
                             "id": f"news-{c}-{date_raw}-{time_raw}",
                             "code": c,
-                            "tag": "重訊",
-                            "title": subj.replace("\r\n", " "),
+                            "tag": tag_str,
+                            "title": subj_clean,
                             "date": fmt_date,
                             "detail": desc.replace("\r\n", "\n").strip(),
-                            "category": "news",
+                            "category": cat_str,
                         })
         except Exception as e:
             logger.warning(f"Error fetching TWSE material news: {e}")
@@ -438,14 +452,28 @@ class AnnouncementService:
                         if d_obj and (today - d_obj).days > 3:
                             continue
 
+                        subj_clean = subj.replace("\r\n", " ")
+                        is_briefing = any(k in subj_clean for k in ["法人說明會", "法說會", "投資人說明會"])
+                        is_financial_report = any(k in subj_clean for k in ["董事會通過", "提報董事會", "董事會決議提報"]) and any(k in subj_clean for k in ["財務報告", "財務報表", "季報", "年報"])
+
+                        if is_briefing:
+                            tag_str = "法說重訊"
+                            cat_str = "briefing"
+                        elif is_financial_report:
+                            tag_str = "財報重訊"
+                            cat_str = "earnings"
+                        else:
+                            tag_str = "重訊"
+                            cat_str = "news"
+
                         results.append({
                             "id": f"news-{c}-{date_raw}-{time_raw}",
                             "code": c,
-                            "tag": "重訊",
-                            "title": subj.replace("\r\n", " "),
+                            "tag": tag_str,
+                            "title": subj_clean,
                             "date": fmt_date,
                             "detail": desc.replace("\r\n", "\n").strip(),
-                            "category": "news",
+                            "category": cat_str,
                         })
         except Exception as e:
             logger.warning(f"Error fetching TPEx material news: {e}")
@@ -641,74 +669,91 @@ class AnnouncementService:
             logger.warning(f"Error fetching TPEx exdividend: {e}")
         return results
 
-    def _fetch_yfinance_calendar(self, wanted_codes: set[str]) -> list[dict]:
-        """透過 yfinance 取得尚未召開之財報公佈日 (Earnings Date)，已過期的自動排除"""
+    def _fetch_official_briefings_and_events(self, wanted_codes: set[str]) -> list[dict]:
+        """從台股官方公開申報日程 (HiStock / MOPS) 撈取已確認之法人說明會與財報公告，絕不使用演算法模型推估"""
         results: list[dict] = []
         today = date.today()
+        # 覆蓋今天起的近 5 週 (從上週起始點推至未來 3 週)
+        dates_to_check = [
+            today - timedelta(days=7),
+            today + timedelta(days=7),
+            today + timedelta(days=21),
+            today + timedelta(days=35),
+        ]
+        seen_ids = set()
 
-        def fetch_single(code: str):
-            res_items = []
-            for suffix in [".TW", ".TWO"]:
-                sym = f"{code}{suffix}"
-                try:
-                    tk = yf.Ticker(sym)
-                    cal = tk.calendar
-                    if not cal or not isinstance(cal, dict):
+        for d in dates_to_check:
+            url = f"https://histock.tw/stock/stockskd.aspx?cid=2&t={d.strftime('%Y-%m-%d')}"
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    html = resp.read().decode("utf-8")
+                soup = BeautifulSoup(html, "html.parser")
+                tbl = soup.find("table", class_="tb-stockskd")
+                if not tbl:
+                    continue
+                for row in tbl.find_all("tr"):
+                    th = row.find("th")
+                    tds = row.find_all("td")
+                    if not th or not tds:
+                        continue
+                    th_text = th.get_text(strip=True)
+                    m_date = re.match(r"(\d{1,2})/(\d{1,2})", th_text)
+                    if not m_date:
+                        continue
+                    month = int(m_date.group(1))
+                    day = int(m_date.group(2))
+
+                    ev_year = d.year
+                    if d.month == 12 and month == 1:
+                        ev_year += 1
+                    elif d.month == 1 and month == 12:
+                        ev_year -= 1
+                    try:
+                        ev_date = date(ev_year, month, day)
+                    except ValueError:
                         continue
 
-                    # 1. 財報公布日 (Earnings Date)
-                    earnings_dates = cal.get("Earnings Date", [])
-                    if earnings_dates:
-                        ed = earnings_dates[0]
-                        if isinstance(ed, (date, datetime)):
-                            d_obj = ed if isinstance(ed, date) else ed.date()
-                            # 僅保留「今天或未來」即將公布的財報（0 <= diff_days <= 60），已過期的絕不顯示
-                            diff_days = (d_obj - today).days
-                            if 0 <= diff_days <= 60:
-                                tag_lbl = f"財報 {d_obj.strftime('%m/%d')}"
-                                high_rev = cal.get("Revenue High")
-                                avg_rev = cal.get("Revenue Average")
-                                avg_eps = cal.get("Earnings Average")
+                    # 僅保留今天與未來 60 天內已官方申報之法說會與財報公告
+                    if ev_date < today or (ev_date - today).days > 60:
+                        continue
 
-                                detail_parts = [
-                                    f"預定財報/法說會公告日期: {d_obj.strftime('%Y-%m-%d')}",
-                                ]
-                                if avg_eps:
-                                    eps_str = f"{avg_eps:.2f}" if isinstance(avg_eps, (int, float)) else str(avg_eps)
-                                    detail_parts.append(f"預估每股盈餘 (EPS): {eps_str} 元")
-                                if avg_rev:
-                                    detail_parts.append(f"預估平均營收: {format_chinese_amount(avg_rev)}")
-                                elif high_rev:
-                                    detail_parts.append(f"預估營收高標: {format_chinese_amount(high_rev)}")
-                                res_items.append({
-                                    "id": f"earnings-{code}-{d_obj}",
-                                    "code": code,
-                                    "tag": tag_lbl,
-                                    "title": f"財報/法說會預告 ({d_obj.strftime('%m/%d')})",
-                                    "date": d_obj.strftime("%Y-%m-%d"),
-                                    "detail": "\n".join(detail_parts),
-                                    "category": "earnings",
-                                })
+                    full_text = " ".join(td.get_text(strip=True) for td in tds)
+                    matches = re.finditer(r"(\d{4})\s*([\u4e00-\u9fa5A-Za-z0-9\-\*]+?)(法人說明會|財報公告)", full_text)
+                    for m in matches:
+                        c = m.group(1)
+                        nm = m.group(2)
+                        ev = m.group(3)
+                        if c in wanted_codes:
+                            uid = f"official-{c}-{ev_date}-{ev}"
+                            if uid in seen_ids:
+                                continue
+                            seen_ids.add(uid)
 
-                    # 如果已找到正確後綴，跳出
-                    if res_items:
-                        break
-                except Exception:
-                    continue
-            return res_items
+                            if "法人說明會" in ev:
+                                tag_lbl = f"法說 {ev_date.strftime('%m/%d')}"
+                                cat_lbl = "briefing"
+                                title_lbl = f"{nm} 法人說明會 ({ev_date.strftime('%m/%d')})"
+                                detail_txt = f"官方公開申報日程: {ev_date.strftime('%Y-%m-%d')}\n公司: {c} {nm}\n事項: 召開法人說明會"
+                            else:
+                                tag_lbl = f"財報 {ev_date.strftime('%m/%d')}"
+                                cat_lbl = "earnings"
+                                title_lbl = f"{nm} 財報公告 ({ev_date.strftime('%m/%d')})"
+                                detail_txt = f"官方公開申報日程: {ev_date.strftime('%Y-%m-%d')}\n公司: {c} {nm}\n事項: 董事會提報/通過財務報告"
 
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
-                future_to_code = {ex.submit(fetch_single, c): c for c in wanted_codes}
-                for f in concurrent.futures.as_completed(future_to_code):
-                    try:
-                        items = f.result()
-                        results.extend(items)
-                    except Exception:
-                        pass
-        except Exception as e:
-            logger.warning(f"Error in _fetch_yfinance_calendar: {e}")
+                            results.append({
+                                "id": uid,
+                                "code": c,
+                                "tag": tag_lbl,
+                                "title": title_lbl,
+                                "date": ev_date.strftime("%Y-%m-%d"),
+                                "detail": detail_txt,
+                                "category": cat_lbl,
+                            })
+            except Exception as e:
+                logger.warning(f"Error fetching official briefings from {url}: {e}")
 
+        logger.info(f"Fetched {len(results)} confirmed official briefings/earnings from MOPS schedule.")
         return results
 
 announcement_service = AnnouncementService()
