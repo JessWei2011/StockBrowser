@@ -11,11 +11,30 @@ logger = logging.getLogger("yahoo_market")
 GLOBAL_NAMES = {
     "^DJI": ("道瓊指數", "Dow Jones"),
     "^IXIC": ("那斯達克", "NASDAQ"),
-    "^GSPC": ("標普500", "S&P 500"),
     "^SOX": ("費城半導體", "PHLX Semiconductor"),
     "^N225": ("日經225", "Nikkei 225"),
     "^KS11": ("南韓KOSPI", "KOSPI"),
 }
+
+
+def safe_float(val: Any, default: float = 0.0) -> float:
+    """安全轉換任意值至 float，容錯字典、破折號字串 '-'、None 及千分位逗號"""
+    if val is None:
+        return default
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, dict):
+        raw_val = val.get("raw")
+        return safe_float(raw_val, default)
+    if isinstance(val, str):
+        cleaned = val.strip().replace(",", "").replace("%", "")
+        if not cleaned or cleaned in ("-", "--", "null", "None", "nan"):
+            return default
+        try:
+            return float(cleaned)
+        except Exception:
+            return default
+    return default
 
 
 def evaluate_market_session(
@@ -31,7 +50,7 @@ def evaluate_market_session(
     quote = quote or {}
     now_ts = datetime.now(timezone.utc).timestamp()
 
-    if symbol in ("^DJI", "^IXIC", "^GSPC", "^SOX"):
+    if symbol in ("^DJI", "^IXIC", "^SOX"):
         try:
             tz = ZoneInfo("America/New_York")
         except Exception:
@@ -183,31 +202,34 @@ class YahooMarketService:
 
         for sym, key in tw_mapping.items():
             if sym in tw_data:
-                idx = tw_data[sym]
-                meta = idx.get("meta", {})
-                quote = idx.get("quote", {})
-                quotes_list = idx.get("indicators", {}).get("quote", [{}])[0]
-                closes = quotes_list.get("close", [])
-                valid_pts = [
-                    round(float(c), 2)
-                    for c in closes
-                    if c is not None and isinstance(c, (int, float))
-                ]
+                try:
+                    idx = tw_data[sym]
+                    meta = idx.get("meta", {})
+                    quote = idx.get("quote", {})
+                    quotes_list = idx.get("indicators", {}).get("quote", [{}])[0]
+                    closes = quotes_list.get("close", [])
+                    valid_pts = [
+                        round(safe_float(c), 2)
+                        for c in closes
+                        if c is not None and not (isinstance(c, str) and c in ("-", "--", ""))
+                    ]
 
-                tw_result[key] = {
-                    "code": "IX0001" if key == "TSE" else "IX0043",
-                    "name": "加權指數" if key == "TSE" else "櫃買指數",
-                    "price": float(quote.get("price") or meta.get("regularMarketPrice") or 0.0),
-                    "reference": float(quote.get("previousClose") or meta.get("chartPreviousClose") or 0.0),
-                    "open": float(quote.get("openPrice") or 0.0),
-                    "high": float(quote.get("dayHighPrice") or 0.0),
-                    "low": float(quote.get("dayLowPrice") or 0.0),
-                    "change": float(quote.get("change") or 0.0),
-                    "changePercent": float(quote.get("changePercent") or 0.0),
-                    "turnoverM": quote.get("turnoverM"),
-                    "points": valid_pts,
-                    "marketStatus": quote.get("marketStatus"),
-                }
+                    tw_result[key] = {
+                        "code": "IX0001" if key == "TSE" else "IX0043",
+                        "name": "加權指數" if key == "TSE" else "櫃買指數",
+                        "price": safe_float(quote.get("price") or meta.get("regularMarketPrice")),
+                        "reference": safe_float(quote.get("previousClose") or meta.get("chartPreviousClose")),
+                        "open": safe_float(quote.get("openPrice")),
+                        "high": safe_float(quote.get("dayHighPrice")),
+                        "low": safe_float(quote.get("dayLowPrice")),
+                        "change": safe_float(quote.get("change")),
+                        "changePercent": safe_float(quote.get("changePercent")),
+                        "turnoverM": quote.get("turnoverM"),
+                        "points": valid_pts,
+                        "marketStatus": quote.get("marketStatus"),
+                    }
+                except Exception as e:
+                    logger.warning(f"Error parsing TW index {sym}: {e}")
 
         # 1.1 解析台指期近一 (WTX& / 台指近（全）)
         try:
@@ -281,73 +303,79 @@ class YahooMarketService:
         except Exception as e:
             logger.warning(f"Error parsing TXF from Yahoo HTML: {e}")
 
-        # 2. 解析美股 (道瓊、那斯達克、標普500、費半)
+        # 2. 解析美股 (道瓊、那斯達克、費半)
         us_data = data.get("us", {})
         us_list: list[dict[str, Any]] = []
-        for sym in ["^DJI", "^IXIC", "^GSPC", "^SOX"]:
+        for sym in ["^DJI", "^IXIC", "^SOX"]:
             if sym in us_data:
-                idx = us_data[sym]
-                meta = idx.get("meta", {})
-                quote = idx.get("quote", {})
-                quotes_list = idx.get("indicators", {}).get("quote", [{}])[0]
-                closes = quotes_list.get("close", [])
-                valid_pts = [
-                    round(float(c), 2)
-                    for c in closes
-                    if c is not None and isinstance(c, (int, float))
-                ]
-                zh_name, en_name = GLOBAL_NAMES.get(sym, (meta.get("name") or sym, sym))
-                m_status, m_label, m_hours = evaluate_market_session(sym, meta, quote)
-                us_list.append({
-                    "symbol": sym,
-                    "name": zh_name,
-                    "englishName": en_name,
-                    "price": float(quote.get("price") or meta.get("regularMarketPrice") or 0.0),
-                    "reference": float(quote.get("previousClose") or meta.get("chartPreviousClose") or 0.0),
-                    "open": float(quote.get("openPrice") or 0.0),
-                    "high": float(quote.get("dayHighPrice") or 0.0),
-                    "low": float(quote.get("dayLowPrice") or 0.0),
-                    "change": float(quote.get("change") or 0.0),
-                    "changePercent": float(quote.get("changePercent") or 0.0),
-                    "points": valid_pts,
-                    "marketStatus": m_status,
-                    "statusLabel": m_label,
-                    "tradingHours": m_hours,
-                })
+                try:
+                    idx = us_data[sym]
+                    meta = idx.get("meta", {})
+                    quote = idx.get("quote", {})
+                    quotes_list = idx.get("indicators", {}).get("quote", [{}])[0]
+                    closes = quotes_list.get("close", [])
+                    valid_pts = [
+                        round(safe_float(c), 2)
+                        for c in closes
+                        if c is not None and not (isinstance(c, str) and c in ("-", "--", ""))
+                    ]
+                    zh_name, en_name = GLOBAL_NAMES.get(sym, (meta.get("name") or sym, sym))
+                    m_status, m_label, m_hours = evaluate_market_session(sym, meta, quote)
+                    us_list.append({
+                        "symbol": sym,
+                        "name": zh_name,
+                        "englishName": en_name,
+                        "price": safe_float(quote.get("price") or meta.get("regularMarketPrice")),
+                        "reference": safe_float(quote.get("previousClose") or meta.get("chartPreviousClose")),
+                        "open": safe_float(quote.get("openPrice")),
+                        "high": safe_float(quote.get("dayHighPrice")),
+                        "low": safe_float(quote.get("dayLowPrice")),
+                        "change": safe_float(quote.get("change")),
+                        "changePercent": safe_float(quote.get("changePercent")),
+                        "points": valid_pts,
+                        "marketStatus": m_status,
+                        "statusLabel": m_label,
+                        "tradingHours": m_hours,
+                    })
+                except Exception as e:
+                    logger.warning(f"Error parsing US index {sym}: {e}")
 
         # 3. 解析亞股（日經225、南韓KOSPI）
         asia_data = data.get("asia", {})
         asia_list: list[dict[str, Any]] = []
         for sym in ["^N225", "^KS11"]:
             if sym in asia_data:
-                idx = asia_data[sym]
-                meta = idx.get("meta", {})
-                quote = idx.get("quote", {})
-                quotes_list = idx.get("indicators", {}).get("quote", [{}])[0]
-                closes = quotes_list.get("close", [])
-                valid_pts = [
-                    round(float(c), 2)
-                    for c in closes
-                    if c is not None and isinstance(c, (int, float))
-                ]
-                zh_name, en_name = GLOBAL_NAMES.get(sym, (meta.get("name") or sym, sym))
-                m_status, m_label, m_hours = evaluate_market_session(sym, meta, quote)
-                asia_list.append({
-                    "symbol": sym,
-                    "name": zh_name,
-                    "englishName": en_name,
-                    "price": float(quote.get("price") or meta.get("regularMarketPrice") or 0.0),
-                    "reference": float(quote.get("previousClose") or meta.get("chartPreviousClose") or 0.0),
-                    "open": float(quote.get("openPrice") or 0.0),
-                    "high": float(quote.get("dayHighPrice") or 0.0),
-                    "low": float(quote.get("dayLowPrice") or 0.0),
-                    "change": float(quote.get("change") or 0.0),
-                    "changePercent": float(quote.get("changePercent") or 0.0),
-                    "points": valid_pts,
-                    "marketStatus": m_status,
-                    "statusLabel": m_label,
-                    "tradingHours": m_hours,
-                })
+                try:
+                    idx = asia_data[sym]
+                    meta = idx.get("meta", {})
+                    quote = idx.get("quote", {})
+                    quotes_list = idx.get("indicators", {}).get("quote", [{}])[0]
+                    closes = quotes_list.get("close", [])
+                    valid_pts = [
+                        round(safe_float(c), 2)
+                        for c in closes
+                        if c is not None and not (isinstance(c, str) and c in ("-", "--", ""))
+                    ]
+                    zh_name, en_name = GLOBAL_NAMES.get(sym, (meta.get("name") or sym, sym))
+                    m_status, m_label, m_hours = evaluate_market_session(sym, meta, quote)
+                    asia_list.append({
+                        "symbol": sym,
+                        "name": zh_name,
+                        "englishName": en_name,
+                        "price": safe_float(quote.get("price") or meta.get("regularMarketPrice")),
+                        "reference": safe_float(quote.get("previousClose") or meta.get("chartPreviousClose")),
+                        "open": safe_float(quote.get("openPrice")),
+                        "high": safe_float(quote.get("dayHighPrice")),
+                        "low": safe_float(quote.get("dayLowPrice")),
+                        "change": safe_float(quote.get("change")),
+                        "changePercent": safe_float(quote.get("changePercent")),
+                        "points": valid_pts,
+                        "marketStatus": m_status,
+                        "statusLabel": m_label,
+                        "tradingHours": m_hours,
+                    })
+                except Exception as e:
+                    logger.warning(f"Error parsing Asian index {sym}: {e}")
 
         now_iso_str = datetime.now(timezone.utc).isoformat()
         us_open = any(item.get("marketStatus") == "open" for item in us_list)
@@ -401,7 +429,7 @@ class YahooMarketService:
         return tw_result, global_result
 
     def get_global_indices(self) -> dict[str, Any]:
-        """取得快取的國際指數（包含台股三大指數、美股四大指數、亞股日韓）"""
+        """取得快取的國際指數（包含台股三大指數、美股主要指數、亞股日韓）"""
         res = dict(self._global_indices)
         from backend.app.services.shioaji_adapter import shioaji_adapter
         # 優先合併 Shioaji 即時的台股三大指數，若無則保留 Yahoo 抓取之 tw

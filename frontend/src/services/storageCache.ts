@@ -75,7 +75,8 @@ export function loadGlobalIndicesCache(): GlobalIndicesResponse | null {
     const raw = localStorage.getItem(GLOBAL_INDICES_CACHE_KEY);
     if (!raw) return null;
     const parsed: GlobalIndicesResponse = JSON.parse(raw);
-    if (parsed && Array.isArray(parsed.us)) {
+    if (parsed && Array.isArray(parsed.us) && (parsed.us.length > 0 || (parsed.asia && parsed.asia.length > 0))) {
+      parsed.us = parsed.us.filter((item) => item.symbol !== '^GSPC' && item.name !== '標普500');
       return parsed;
     }
   } catch (e) {

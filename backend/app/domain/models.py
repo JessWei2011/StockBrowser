@@ -162,6 +162,59 @@ class UpdateOrderRequest(BaseModel):
     newPrice: Optional[float] = None
     newQty: Optional[int] = None
 
+class SmartOrderCondition(BaseModel):
+    id: str
+    code: str
+    name: str = ""
+    quantity: int = 100  # 預填現有零股庫存 (1~999)
+    
+    # 選項 1: 現價高於 N% 或 M 元
+    opt1_enabled: bool = False
+    opt1_pct: Optional[float] = None
+    opt1_price: Optional[float] = None
+    
+    # 選項 2: 現價低於 N% 或 M 元
+    opt2_enabled: bool = False
+    opt2_pct: Optional[float] = None
+    opt2_price: Optional[float] = None
+    
+    # 選項 3: 現價高於 N% 或 M 元，啟動高點獲利條件判斷，衝高回落 X% 發出通知
+    opt3_enabled: bool = False
+    opt3_pct: Optional[float] = None
+    opt3_price: Optional[float] = None
+    opt3_trailing_pct: Optional[float] = None
+    
+    # 選項 4: 現價跌破均線（5MA、10MA、20MA）發出通知
+    opt4_enabled: bool = False
+    opt4_ma_type: Optional[str] = "5MA"  # '5MA' | '10MA' | '20MA'
+    
+    status: str = "PENDING"  # PENDING (盯盤中) | TRIGGERED (已發送警報) | CANCELLED (已暫停)
+    created_at: str
+    updated_at: str
+    triggered_at: Optional[str] = None
+    trigger_reason: Optional[str] = None
+    peak_price: Optional[float] = None  # 選項 3 啟動後記錄到的盤中最高價
+
+class CreateSmartOrderRequest(BaseModel):
+    code: str
+    quantity: Optional[int] = 100
+    
+    opt1_enabled: bool = False
+    opt1_pct: Optional[float] = None
+    opt1_price: Optional[float] = None
+    
+    opt2_enabled: bool = False
+    opt2_pct: Optional[float] = None
+    opt2_price: Optional[float] = None
+    
+    opt3_enabled: bool = False
+    opt3_pct: Optional[float] = None
+    opt3_price: Optional[float] = None
+    opt3_trailing_pct: Optional[float] = None
+    
+    opt4_enabled: bool = False
+    opt4_ma_type: Optional[str] = "5MA"
+
 class SettlementItem(BaseModel):
     t: int  # 0, 1, 2
     date: str

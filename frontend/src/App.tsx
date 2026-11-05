@@ -815,7 +815,7 @@ export const App: React.FC = () => {
                     setMarketModalTab('all');
                     setIsGlobalIndicesModalOpen(true);
                   }}
-                  title="查看國際股市（美股四大指數、亞股日韓）與台股大盤走勢"
+                  title="查看國際股市（美股主要指數、亞股日韓）與台股大盤走勢"
                 >
                   <span className="global-pill-icon">🌐</span>
                   <span className="global-pill-title">美股 / 亞股</span>

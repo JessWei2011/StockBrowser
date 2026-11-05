@@ -177,6 +177,57 @@ export interface StockMaSummary {
   recentCloses?: number[];
 }
 
+export interface SmartOrderCondition {
+  id: string;
+  code: string;
+  name?: string;
+  quantity: number;
+  
+  opt1_enabled: boolean;
+  opt1_pct?: number | null;
+  opt1_price?: number | null;
+  
+  opt2_enabled: boolean;
+  opt2_pct?: number | null;
+  opt2_price?: number | null;
+  
+  opt3_enabled: boolean;
+  opt3_pct?: number | null;
+  opt3_price?: number | null;
+  opt3_trailing_pct?: number | null;
+  
+  opt4_enabled: boolean;
+  opt4_ma_type?: '5MA' | '10MA' | '20MA' | null;
+  
+  status: 'PENDING' | 'TRIGGERED' | 'CANCELLED';
+  created_at: string;
+  updated_at: string;
+  triggered_at?: string | null;
+  trigger_reason?: string | null;
+  peak_price?: number | null;
+}
+
+export interface CreateSmartOrderParams {
+  code: string;
+  quantity: number;
+  
+  opt1_enabled: boolean;
+  opt1_pct?: number | null;
+  opt1_price?: number | null;
+  
+  opt2_enabled: boolean;
+  opt2_pct?: number | null;
+  opt2_price?: number | null;
+  
+  opt3_enabled: boolean;
+  opt3_pct?: number | null;
+  opt3_price?: number | null;
+  opt3_trailing_pct?: number | null;
+  
+  opt4_enabled: boolean;
+  opt4_ma_type?: '5MA' | '10MA' | '20MA' | null;
+}
+
 export interface BootstrapResponse {
   groups: WatchlistGroup[];
   quotes: Record<string, QuoteState>;
@@ -259,6 +310,8 @@ export interface KlineBar {
   ma10?: number | null;
   ma20?: number | null;
   ma60?: number | null;
+  ma120?: number | null;
+  ma240?: number | null;
   boll_up?: number | null;
   boll_mid?: number | null;
   boll_down?: number | null;

@@ -112,6 +112,54 @@ async def init_db():
             updated_at TEXT NOT NULL
         );
         """)
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS smart_orders (
+            id TEXT PRIMARY KEY,
+            code TEXT NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            quantity INTEGER NOT NULL DEFAULT 100,
+            opt1_enabled INTEGER NOT NULL DEFAULT 0,
+            opt1_pct REAL,
+            opt1_price REAL,
+            opt2_enabled INTEGER NOT NULL DEFAULT 0,
+            opt2_pct REAL,
+            opt2_price REAL,
+            opt3_enabled INTEGER NOT NULL DEFAULT 0,
+            opt3_pct REAL,
+            opt3_price REAL,
+            opt3_trailing_pct REAL,
+            opt4_enabled INTEGER NOT NULL DEFAULT 0,
+            opt4_ma_type TEXT DEFAULT '5MA',
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            triggered_at TEXT,
+            trigger_reason TEXT,
+            peak_price REAL
+        );
+        """)
+        # 自動遷移新欄位 (若表已存在)
+        for col_def in [
+            ("opt1_enabled", "INTEGER DEFAULT 0"),
+            ("opt1_pct", "REAL"),
+            ("opt1_price", "REAL"),
+            ("opt2_enabled", "INTEGER DEFAULT 0"),
+            ("opt2_pct", "REAL"),
+            ("opt2_price", "REAL"),
+            ("opt3_enabled", "INTEGER DEFAULT 0"),
+            ("opt3_pct", "REAL"),
+            ("opt3_price", "REAL"),
+            ("opt3_trailing_pct", "REAL"),
+            ("opt4_enabled", "INTEGER DEFAULT 0"),
+            ("opt4_ma_type", "TEXT DEFAULT '5MA'"),
+        ]:
+            try:
+                await db.execute(f"ALTER TABLE smart_orders ADD COLUMN {col_def[0]} {col_def[1]}")
+            except Exception:
+                pass
+        await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_smart_orders_status ON smart_orders(status);
+        """)
         await db.commit()
 
         # 檢查是否需要預設種子資料
@@ -502,3 +550,70 @@ async def set_setting(key: str, value: str):
             (key, value, now_iso())
         )
         await db.commit()
+
+async def get_smart_orders(status: Optional[str] = None) -> list[dict]:
+    async with get_db_connection() as db:
+        if status:
+            cur = await db.execute("SELECT * FROM smart_orders WHERE status = ? ORDER BY created_at DESC", (status,))
+        else:
+            cur = await db.execute("SELECT * FROM smart_orders ORDER BY created_at DESC")
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+async def create_smart_order(order_dict: dict) -> dict:
+    async with get_db_connection() as db:
+        await db.execute(
+            """
+            INSERT INTO smart_orders (
+                id, code, name, quantity,
+                opt1_enabled, opt1_pct, opt1_price,
+                opt2_enabled, opt2_pct, opt2_price,
+                opt3_enabled, opt3_pct, opt3_price, opt3_trailing_pct,
+                opt4_enabled, opt4_ma_type,
+                status, created_at, updated_at,
+                triggered_at, trigger_reason, peak_price
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                order_dict["id"],
+                order_dict["code"],
+                order_dict.get("name", ""),
+                order_dict.get("quantity", 100),
+                1 if order_dict.get("opt1_enabled") else 0,
+                order_dict.get("opt1_pct"),
+                order_dict.get("opt1_price"),
+                1 if order_dict.get("opt2_enabled") else 0,
+                order_dict.get("opt2_pct"),
+                order_dict.get("opt2_price"),
+                1 if order_dict.get("opt3_enabled") else 0,
+                order_dict.get("opt3_pct"),
+                order_dict.get("opt3_price"),
+                order_dict.get("opt3_trailing_pct"),
+                1 if order_dict.get("opt4_enabled") else 0,
+                order_dict.get("opt4_ma_type", "5MA"),
+                order_dict.get("status", "PENDING"),
+                order_dict["created_at"],
+                order_dict["updated_at"],
+                order_dict.get("triggered_at"),
+                order_dict.get("trigger_reason"),
+                order_dict.get("peak_price"),
+            )
+        )
+        await db.commit()
+        return order_dict
+
+async def cancel_smart_order(order_id: str) -> bool:
+    async with get_db_connection() as db:
+        cur = await db.execute(
+            "UPDATE smart_orders SET status = 'CANCELLED', updated_at = ? WHERE id = ? AND status = 'PENDING'",
+            (now_iso(), order_id)
+        )
+        await db.commit()
+        return cur.rowcount > 0
+
+async def delete_smart_order(order_id: str) -> bool:
+    async with get_db_connection() as db:
+        cur = await db.execute("DELETE FROM smart_orders WHERE id = ?", (order_id,))
+        await db.commit()
+        return cur.rowcount > 0
+

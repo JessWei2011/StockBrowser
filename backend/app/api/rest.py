@@ -20,9 +20,20 @@ from backend.app.domain.models import (
     SettlementItem,
     SettlementTradeDetail,
     CalendarMonthResponse,
+    SmartOrderCondition,
+    CreateSmartOrderRequest,
 )
 import datetime
-from backend.app.repositories.db import get_setting, set_setting, now_iso
+import uuid
+from backend.app.repositories.db import (
+    get_setting,
+    set_setting,
+    now_iso,
+    get_smart_orders,
+    create_smart_order,
+    cancel_smart_order,
+    delete_smart_order,
+)
 
 router = APIRouter(prefix="/api/v1")
 
@@ -170,23 +181,59 @@ async def refresh_system_quotes(force_reconnect: bool = False):
 @router.get("/charts/{code}")
 async def get_stock_chart(code: str):
     import asyncio
-    from backend.app.services.stock_chart_service import parse_stock_report
-    # 嘗試從即時記憶體快取中獲取當日即時報價
+    from backend.app.services.stock_chart_service import parse_stock_report, INDEX_CODE_MAP
+    # 嘗試從即時記憶體快取或指數行情中獲取當日即時報價
     live_quote = None
     try:
-        from backend.app.services.quote_store import quote_store
-        with quote_store._lock:
-            quote_obj = quote_store._quotes.get(code)
-            if quote_obj:
-                live_quote = {
-                    "open": quote_obj.open,
-                    "high": quote_obj.high,
-                    "low": quote_obj.low,
-                    "last": quote_obj.last,
-                    "totalVolume": quote_obj.totalVolume,
-                }
-    except Exception:
-        pass
+        if code in INDEX_CODE_MAP:
+            from backend.app.services.yahoo_market_service import yahoo_market_service
+            from backend.app.services.shioaji_adapter import shioaji_adapter
+            global_data = yahoo_market_service.get_global_indices()
+            if code in ("IX0001", "TSE", "^TWII", "MKT01"):
+                tw_info = shioaji_adapter.market_indices.get("TSE") or global_data.get("tw", {}).get("TSE")
+                if tw_info and tw_info.get("price"):
+                    live_quote = {
+                        "open": tw_info.get("open"),
+                        "high": tw_info.get("high"),
+                        "low": tw_info.get("low"),
+                        "last": tw_info.get("price"),
+                        "totalVolume": tw_info.get("turnoverM") or 0,
+                    }
+            elif code in ("IX0043", "OTC", "^TWOII", "MKT02"):
+                tw_info = shioaji_adapter.market_indices.get("OTC") or global_data.get("tw", {}).get("OTC")
+                if tw_info and tw_info.get("price"):
+                    live_quote = {
+                        "open": tw_info.get("open"),
+                        "high": tw_info.get("high"),
+                        "low": tw_info.get("low"),
+                        "last": tw_info.get("price"),
+                        "totalVolume": tw_info.get("turnoverM") or 0,
+                    }
+            else:
+                for item in global_data.get("us", []):
+                    if item.get("symbol") == code:
+                        live_quote = {
+                            "open": item.get("open"),
+                            "high": item.get("high"),
+                            "low": item.get("low"),
+                            "last": item.get("price"),
+                            "totalVolume": 0,
+                        }
+                        break
+        else:
+            from backend.app.services.quote_store import quote_store
+            with quote_store._lock:
+                quote_obj = quote_store._quotes.get(code)
+                if quote_obj:
+                    live_quote = {
+                        "open": quote_obj.open,
+                        "high": quote_obj.high,
+                        "low": quote_obj.low,
+                        "last": quote_obj.last,
+                        "totalVolume": quote_obj.totalVolume,
+                    }
+    except Exception as e:
+        logger.warning(f"Failed to fetch live quote for chart {code}: {e}")
 
     chart_data = await asyncio.to_thread(parse_stock_report, code, live_quote)
     if not chart_data:
@@ -360,6 +407,76 @@ async def update_account_capital(body: UpdateCapitalRequest):
         return {"status": "ok", "capitalWan": body.capitalWan, "capitalMode": mode}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/smart-orders", response_model=list[SmartOrderCondition])
+async def list_smart_orders(status: Optional[str] = None):
+    """取得所有智慧條件單 (可篩選狀態: PENDING / TRIGGERED / COMPLETED / CANCELLED)"""
+    return await get_smart_orders(status)
+
+@router.post("/smart-orders", response_model=SmartOrderCondition)
+async def create_new_smart_order(body: CreateSmartOrderRequest):
+    """建立新的出場警報設定 (4大獨立開關)"""
+    code = body.code.strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="商品代碼不得為空")
+    
+    qty = body.quantity or 100
+    if qty <= 0 or qty > 999:
+        raise HTTPException(status_code=400, detail="盤中零股委託股數必須介於 1 至 999 股")
+
+    # 至少要致能 1 個選項
+    if not (body.opt1_enabled or body.opt2_enabled or body.opt3_enabled or body.opt4_enabled):
+        raise HTTPException(status_code=400, detail="請至少開啟 1 個出場警報通知選項！")
+
+    # 取得商品名稱
+    contract = shioaji_adapter.contracts_cache.get(code)
+    stock_name = contract["name"] if contract else code
+
+    ts = now_iso()
+    order_id = f"so-{uuid.uuid4().hex[:10]}"
+    order_data = {
+        "id": order_id,
+        "code": code,
+        "name": stock_name,
+        "quantity": qty,
+        "opt1_enabled": body.opt1_enabled,
+        "opt1_pct": body.opt1_pct,
+        "opt1_price": body.opt1_price,
+        "opt2_enabled": body.opt2_enabled,
+        "opt2_pct": body.opt2_pct,
+        "opt2_price": body.opt2_price,
+        "opt3_enabled": body.opt3_enabled,
+        "opt3_pct": body.opt3_pct,
+        "opt3_price": body.opt3_price,
+        "opt3_trailing_pct": body.opt3_trailing_pct,
+        "opt4_enabled": body.opt4_enabled,
+        "opt4_ma_type": body.opt4_ma_type or "5MA",
+        "status": "PENDING",
+        "created_at": ts,
+        "updated_at": ts,
+        "triggered_at": None,
+        "trigger_reason": None,
+        "peak_price": None,
+    }
+    await create_smart_order(order_data)
+    return order_data
+
+@router.delete("/smart-orders/{order_id}")
+async def remove_smart_order(order_id: str):
+    """刪除或取消智慧條件單"""
+    ok = await delete_smart_order(order_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="找不到指定的智慧條件單")
+    return {"status": "ok", "message": f"已刪除條件單 {order_id}"}
+
+@router.post("/smart-orders/{order_id}/cancel")
+async def cancel_pending_smart_order(order_id: str):
+    """將監控中的條件單標記為取消"""
+    ok = await cancel_smart_order(order_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail="無法取消 (可能非 PENDING 狀態或單號不存在)")
+    return {"status": "ok", "message": f"已取消條件單 {order_id}"}
+
 
 
 

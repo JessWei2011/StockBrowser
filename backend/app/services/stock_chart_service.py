@@ -137,6 +137,8 @@ class KlineBar(BaseModel):
     ma10: Optional[float] = None
     ma20: Optional[float] = None
     ma60: Optional[float] = None
+    ma120: Optional[float] = None
+    ma240: Optional[float] = None
     boll_up: Optional[float] = None
     boll_mid: Optional[float] = None
     boll_down: Optional[float] = None
@@ -182,6 +184,32 @@ class StockAnalysisChartData(BaseModel):
 _reports_dir_index: dict[str, str] = {}
 _reports_dir_indexed_at: float = 0.0
 
+INDEX_CODE_MAP: dict[str, tuple[str, str, str]] = {
+    # 台股加權 (上市)
+    "IX0001": ("MKT01", "加權指數", "TWSE"),
+    "TSE": ("MKT01", "加權指數", "TWSE"),
+    "^TWII": ("MKT01", "加權指數", "TWSE"),
+    "MKT01": ("MKT01", "加權指數", "TWSE"),
+    # 台股櫃買 (上櫃)
+    "IX0043": ("MKT02", "櫃買指數", "TPEx"),
+    "OTC": ("MKT02", "櫃買指數", "TPEx"),
+    "^TWOII": ("MKT02", "櫃買指數", "TPEx"),
+    "MKT02": ("MKT02", "櫃買指數", "TPEx"),
+    # 美股道瓊
+    "^DJI": ("MKT03", "道瓊指數", "Dow Jones"),
+    "DJI": ("MKT03", "道瓊指數", "Dow Jones"),
+    "MKT03": ("MKT03", "道瓊指數", "Dow Jones"),
+    # 美股那斯達克
+    "^IXIC": ("MKT04", "那斯達克", "NASDAQ"),
+    "IXIC": ("MKT04", "那斯達克", "NASDAQ"),
+    "NASDAQ": ("MKT04", "那斯達克", "NASDAQ"),
+    "MKT04": ("MKT04", "那斯達克", "NASDAQ"),
+    # 美股費城半導體
+    "^SOX": ("MKT05", "費城半導體", "PHLX Semiconductor"),
+    "SOX": ("MKT05", "費城半導體", "PHLX Semiconductor"),
+    "MKT05": ("MKT05", "費城半導體", "PHLX Semiconductor"),
+}
+
 def _get_reports_index() -> dict[str, str]:
     global _reports_dir_index, _reports_dir_indexed_at
     now = time.time()
@@ -201,18 +229,22 @@ def _get_reports_index() -> dict[str, str]:
     return _reports_dir_index
 
 def find_stock_report_path(code: str) -> Optional[str]:
-    """於 StockCenter/reports 中依據代碼搜尋對應的 HTML 報告"""
+    """於 StockCenter/reports 中依據代碼搜尋對應的 HTML 報告（支援大盤指數映射）"""
     idx = _get_reports_index()
+    if code in INDEX_CODE_MAP:
+        mkt_code, _, _ = INDEX_CODE_MAP[code]
+        if mkt_code in idx:
+            return idx[mkt_code]
     return idx.get(code)
 
 def recalculate_indicators(kline_bars: list[KlineBar]):
-    """重新計算所有 K 棒的 MA5, MA10, MA20, MA60 及布林通道指標"""
+    """重新計算所有 K 棒的 MA5, MA10, MA20, MA60, MA120 (半年線), MA240 (年線) 及布林通道指標"""
     closes = [b.close for b in kline_bars]
     for idx, b in enumerate(kline_bars):
         if idx >= 4:
-            b.ma5 = round(sum(closes[idx-4:idx+1]) / 5, 2)
+            b.ma5 = round(sum(closes[idx-4:idx+1]) / 5.0, 2)
         if idx >= 9:
-            b.ma10 = round(sum(closes[idx-9:idx+1]) / 10, 2)
+            b.ma10 = round(sum(closes[idx-9:idx+1]) / 10.0, 2)
         if idx >= 19:
             sub = closes[idx-19:idx+1]
             avg = sum(sub) / 20.0
@@ -223,7 +255,11 @@ def recalculate_indicators(kline_bars: list[KlineBar]):
             b.boll_up = round(avg + 2 * std, 2)
             b.boll_down = round(avg - 2 * std, 2)
         if idx >= 59:
-            b.ma60 = round(sum(closes[idx-59:idx+1]) / 60, 2)
+            b.ma60 = round(sum(closes[idx-59:idx+1]) / 60.0, 2)
+        if idx >= 119:
+            b.ma120 = round(sum(closes[idx-119:idx+1]) / 120.0, 2)
+        if idx >= 239:
+            b.ma240 = round(sum(closes[idx-239:idx+1]) / 240.0, 2)
 
 def backfill_missing_kline_bars(code: str, kline_bars: list[KlineBar]) -> list[KlineBar]:
     """
@@ -289,10 +325,15 @@ def parse_stock_report(
     auto_generate: bool = True,
     backfill: bool = True
 ) -> Optional[StockAnalysisChartData]:
-    """解析 StockCenter 既有的 HTML 分析報告，若過期或無報告則連動 StockCenter 現場生成並持久化存檔"""
+    """解析 StockCenter 既有的 HTML 分析報告，若過期或無報告則連動 StockCenter 現場生成並持久化存檔（支援大盤指數）"""
     if is_etf_or_bond(code):
         logger.info(f"Stock {code} is ETF or Bond, skipping chart report.")
         return None
+
+    is_index = code in INDEX_CODE_MAP
+    if is_index:
+        auto_generate = False
+        backfill = False
 
     filepath = find_stock_report_path(code)
     is_stale = is_report_stale(filepath) if (filepath and os.path.exists(filepath)) else True
@@ -324,22 +365,48 @@ def parse_stock_report(
 
     soup = BeautifulSoup(html, "html.parser")
 
-    # 1. 解析標題 (如 "3231 緯創 台股分析")
-    h1 = soup.find("h1")
-    title_text = h1.get_text(strip=True) if h1 else f"{code} 技術分析"
-    m_name = re.search(r"\d+\s+([^\s]+)", title_text)
-    stock_name = m_name.group(1) if m_name else code
+    # 1. 解析標題
+    if is_index:
+        _, idx_name, _ = INDEX_CODE_MAP[code]
+        stock_name = idx_name
+        title_text = f"{idx_name} ({code}) 技術分析"
+    else:
+        h1 = soup.find("h1")
+        title_text = h1.get_text(strip=True) if h1 else f"{code} 技術分析"
+        m_name = re.search(r"\d+\s+([^\s]+)", title_text)
+        stock_name = m_name.group(1) if m_name else code
 
     sub = soup.find("div", class_="sub")
     last_update = sub.get_text(strip=True).replace("產生時間：", "") if sub else ""
 
     tables = soup.find_all("table")
 
-    # 2. 解析近 180 日 K 線
+    # 2. 解析 K 線 (指數 500 日或個股 180 日)
     kline_bars: list[KlineBar] = []
     for t in tables:
         headers = [th.get_text(strip=True) for th in t.find_all("th")]
-        if "MA5" in headers and ("BOLL上" in headers or "收" in headers):
+        # 指數報價表格 (日期, 開, 高, 低, 收)
+        if "日期" in headers and "開" in headers and "高" in headers and "低" in headers and "收" in headers and "MA5" not in headers:
+            rows = t.find_all("tr")[1:]
+            for r in rows:
+                cols = [td.get_text(strip=True) for td in r.find_all("td")]
+                if len(cols) >= 5:
+                    try:
+                        c_val = float(cols[4].replace(",", ""))
+                        if c_val <= 0:
+                            continue
+                        kline_bars.append(KlineBar(
+                            date=cols[0],
+                            open=float(cols[1].replace(",", "")),
+                            high=float(cols[2].replace(",", "")),
+                            low=float(cols[3].replace(",", "")),
+                            close=c_val,
+                            volume=0.0,
+                        ))
+                    except (ValueError, IndexError):
+                        continue
+            break
+        elif "MA5" in headers and ("BOLL上" in headers or "收" in headers):
             rows = t.find_all("tr")[1:]
             for r in rows:
                 cols = [td.get_text(strip=True) for td in r.find_all("td")]
@@ -407,23 +474,32 @@ def parse_stock_report(
                         pass
             break
 
-    # 4. 解析融資融券 (近 20 日)
+    # 4. 解析融資融券 (近 20 日，包含指數之融資餘額)
     margin_data: list[MarginFlowItem] = []
     for t in tables:
         headers = [th.get_text(strip=True) for th in t.find_all("th")]
-        if "融資餘額" in headers and "融券餘額" in headers:
+        if "融資餘額(億)" in headers or ("融資餘額" in headers and "融券餘額" in headers):
             rows = t.find_all("tr")[1:]
             for r in rows:
                 cols = [td.get_text(strip=True) for td in r.find_all("td")]
-                if len(cols) >= 5 and re.match(r"^\d{4}-\d{2}-\d{2}$", cols[0]):
+                if len(cols) >= 5:
                     try:
-                        margin_data.append(MarginFlowItem(
-                            date=cols[0],
-                            margin_balance=int(cols[1].replace(",", "")),
-                            margin_change=int(cols[2].replace("+", "").replace(",", "")),
-                            short_balance=int(cols[3].replace(",", "")),
-                            short_change=int(cols[4].replace("+", "").replace(",", ""))
-                        ))
+                        if "融資餘額(億)" in headers:
+                            margin_data.append(MarginFlowItem(
+                                date=cols[0],
+                                margin_change=int(float(cols[1].replace("+", "").replace(",", "")) * 100),
+                                margin_balance=int(float(cols[2].replace(",", "")) * 100),
+                                short_change=int(cols[3].replace("+", "").replace(",", "")),
+                                short_balance=int(cols[4].replace(",", "")),
+                            ))
+                        elif re.match(r"^\d{4}-\d{2}-\d{2}$", cols[0]):
+                            margin_data.append(MarginFlowItem(
+                                date=cols[0],
+                                margin_balance=int(cols[1].replace(",", "")),
+                                margin_change=int(cols[2].replace("+", "").replace(",", "")),
+                                short_balance=int(cols[3].replace(",", "")),
+                                short_change=int(cols[4].replace("+", "").replace(",", ""))
+                            ))
                     except Exception:
                         pass
             break
@@ -459,30 +535,39 @@ def parse_stock_report(
     is_weekday = today_date.weekday() < 5
     now_hour = datetime.now().hour
 
-    if live_quote and kline_bars and is_weekday and now_hour >= 9:
-        today_label = today_date.strftime("%m/%d")
+    if live_quote and kline_bars:
+        cur_open = float(live_quote.get("open") or live_quote.get("last") or 0.0)
+        cur_close = float(live_quote.get("last") or live_quote.get("price") or 0.0)
+        cur_high = float(live_quote.get("high") or cur_close)
+        cur_low = float(live_quote.get("low") or cur_close)
+        cur_vol = float(live_quote.get("totalVolume") or live_quote.get("volume") or 0.0)
+
+        if is_index:
+            today_label = today_date.strftime("%Y-%m-%d")
+        else:
+            today_label = today_date.strftime("%m/%d")
+
         last_date_str = kline_bars[-1].date
 
-        cur_open = live_quote.get("open") or live_quote.get("last")
-        cur_close = live_quote.get("last")
-        cur_high = live_quote.get("high") or cur_close
-        cur_low = live_quote.get("low") or cur_close
-        cur_vol = float(live_quote.get("totalVolume") or 0)
+        # 指數交易或個股正常交易時段更新
+        should_update = (cur_open > 0 and cur_close > 0)
+        if not is_index:
+            should_update = should_update and is_weekday and now_hour >= 9 and cur_vol > 0
 
-        # 必須確保當日有實際撮合交易（cur_vol > 0），休市日、颱風假或無量狀況嚴禁畫平盤假 K 棒
-        if cur_open and cur_close and cur_open > 0 and cur_close > 0 and cur_vol > 0:
+        if should_update:
             if last_date_str == today_label:
-                # 今日 K 棒已存在（例如 StockCenter 今日已產生過或 yfinance 已有），更新其現價與極值
+                # 今日 K 棒已存在，更新其現價與極值
                 last_bar = kline_bars[-1]
                 if not last_bar.open or last_bar.open <= 0:
                     last_bar.open = cur_open
                 last_bar.high = max(last_bar.high, cur_high)
                 last_bar.low = min(last_bar.low, cur_low)
                 last_bar.close = cur_close
-                last_bar.volume = cur_vol
+                if cur_vol > 0:
+                    last_bar.volume = cur_vol
                 recalculate_indicators(kline_bars)
                 is_appended = True
-            else:
+            elif (is_index and today_label > last_date_str) or (not is_index and today_label != last_date_str and is_weekday):
                 # 今日尚未在 K 線中，追加今日即時 K 棒
                 today_bar = KlineBar(
                     date=today_label,

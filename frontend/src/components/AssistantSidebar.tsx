@@ -4,6 +4,7 @@ import type { StockPosition, QuoteState, WealthSummary, OrderItem } from '../typ
 import { submitOrder, fetchOrders, cancelOrder, updateOrder, clearOrders } from '../services/api';
 import { getStoredVaultPassword } from './VaultPasswordModal';
 import { BalanceTab } from './BalanceTab';
+import { SmartOrderTab } from './SmartOrderTab';
 
 interface AssistantSidebarProps {
   isOpen: boolean;
@@ -153,7 +154,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   // 委託單列表狀態
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
-  const [orderSubTab, setOrderSubTab] = useState<'form' | 'orders'>('form');
+  const [orderSubTab, setOrderSubTab] = useState<'form' | 'smart' | 'orders'>('form');
   const [orderFilter, setOrderFilter] = useState<'all' | 'active' | 'filled' | 'cancelled'>('all');
 
   // 改價彈窗狀態
@@ -1108,14 +1109,21 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
               </div>
             )}
 
-            {/* 財神筆子分頁切換列：下單委託 vs 今日交易單 */}
+            {/* 財神筆子分頁切換列：下單委託 vs 智慧條件單 vs 今日交易單 */}
             <div className="order-subnav-bar">
               <button
                 type="button"
                 className={`subnav-btn ${orderSubTab === 'form' ? 'active' : ''}`}
                 onClick={() => setOrderSubTab('form')}
               >
-                <span>✍️ 快速下單委託</span>
+                <span>✍️ 快速下單</span>
+              </button>
+              <button
+                type="button"
+                className={`subnav-btn ${orderSubTab === 'smart' ? 'active' : ''}`}
+                onClick={() => setOrderSubTab('smart')}
+              >
+                <span>🛡️ 智慧預約單</span>
               </button>
               <button
                 type="button"
@@ -1543,6 +1551,13 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
               </button>
                 </form>
               </>
+            ) : orderSubTab === 'smart' ? (
+              /* ==================== 智慧條件單設定區 ==================== */
+              <SmartOrderTab
+                positions={positions}
+                quotes={quotes}
+                initialCode={stockCode}
+              />
             ) : (
               /* ==================== 今日交易單檢視區 ==================== */
               <div className="orders-management-view">

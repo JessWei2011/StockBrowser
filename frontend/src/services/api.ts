@@ -248,6 +248,51 @@ export async function refreshSystemQuotes(forceReconnect: boolean = false): Prom
   }
 }
 
+export async function fetchSmartOrders(status?: string): Promise<import('../types').SmartOrderCondition[]> {
+  const url = status ? `${API_BASE}/api/v1/smart-orders?status=${encodeURIComponent(status)}` : `${API_BASE}/api/v1/smart-orders`;
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) {
+    throw new Error('無法取得智慧條件單列表');
+  }
+  return res.json();
+}
+
+export async function createSmartOrder(params: import('../types').CreateSmartOrderParams): Promise<import('../types').SmartOrderCondition> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/smart-orders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || '建立智慧條件單失敗');
+  }
+  return res.json();
+}
+
+export async function deleteSmartOrder(orderId: string): Promise<{ status: string; message: string }> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/smart-orders/${encodeURIComponent(orderId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || '刪除條件單失敗');
+  }
+  return res.json();
+}
+
+export async function cancelSmartOrder(orderId: string): Promise<{ status: string; message: string }> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/smart-orders/${encodeURIComponent(orderId)}/cancel`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || '取消條件單失敗');
+  }
+  return res.json();
+}
+
+
 export async function fetchAccountBalance(): Promise<AccountBalanceState> {
   const res = await fetchWithTimeout(`${API_BASE}/api/v1/account/balance`);
   if (!res.ok) throw new Error('Failed to fetch account balance');

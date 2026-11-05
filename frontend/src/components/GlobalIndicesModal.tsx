@@ -2,6 +2,7 @@ import React, { useState, useEffect, useId, useRef } from 'react';
 import type { GlobalIndicesResponse, MarketIndexState, GlobalIndexItem } from '../types';
 import { fetchGlobalIndices } from '../services/api';
 import { loadGlobalIndicesCache, saveGlobalIndicesCache } from '../services/storageCache';
+import { GlobalIndexChartModal } from './GlobalIndexChartModal';
 
 interface GlobalIndicesModalProps {
   isOpen: boolean;
@@ -185,6 +186,17 @@ const GlobalIndicesModalContent: React.FC<GlobalIndicesModalProps> = ({
   const [lastRefreshed, setLastRefreshed] = useState<string>('');
   const prevOpenRef = useRef(false);
 
+  // 選中展開 K 線大彈窗之指數
+  const [selectedChartIndex, setSelectedChartIndex] = useState<{
+    code: string;
+    name: string;
+    price?: number | null;
+    change?: number | null;
+    changePercent?: number | null;
+    statusLabel?: string;
+    statusClass?: string;
+  } | null>(null);
+
   // 僅在視窗從關閉切換為開啟時，切換為呼叫端指定的初始分頁，避免背景 WebSocket 更新時重置使用者分頁
   useEffect(() => {
     if (!prevOpenRef.current && isOpen) {
@@ -197,8 +209,10 @@ const GlobalIndicesModalContent: React.FC<GlobalIndicesModalProps> = ({
     try {
       setLoading(true);
       const res = await fetchGlobalIndices();
-      setData(res);
-      saveGlobalIndicesCache(res);
+      const cleanedUs = (res.us || []).filter((item) => item.symbol !== '^GSPC' && item.name !== '標普500');
+      const cleanedRes = { ...res, us: cleanedUs };
+      setData(cleanedRes);
+      saveGlobalIndicesCache(cleanedRes);
       setLastRefreshed(new Date().toLocaleTimeString('zh-TW', { hour12: false }));
     } catch (e) {
       console.error('Failed to load global indices:', e);
@@ -257,9 +271,28 @@ const GlobalIndicesModalContent: React.FC<GlobalIndicesModalProps> = ({
     const ref = item.reference || (item.price ? item.price - item.change : item.price);
     const statusClass = overrideSession?.statusClass || twMarketStatus?.badgeType || 'closed';
     const statusLabel = overrideSession?.statusLabel || twMarketStatus?.badgeLabel || '休市中';
+    // 加權指數 (IX0001) 與 櫃買指數 (IX0043) 支援點擊展開 K 線圖；台指期保持純即時卡片
+    const isClickable = defaultCode === 'IX0001' || defaultCode === 'IX0043';
 
     return (
-      <div key={defaultCode} className={`yahoo-index-card status-${statusClass}`}>
+      <div
+        key={defaultCode}
+        className={`yahoo-index-card status-${statusClass} ${isClickable ? 'clickable' : ''}`}
+        onClick={() => {
+          if (isClickable) {
+            setSelectedChartIndex({
+              code: defaultCode,
+              name: item.name || defaultName,
+              price: item.price,
+              change: item.change,
+              changePercent: item.changePercent,
+              statusLabel,
+              statusClass,
+            });
+          }
+        }}
+        title={isClickable ? '點擊展開日K技術走勢圖' : undefined}
+      >
         <div className="yahoo-card-header">
           <div className="yahoo-card-title-col">
             <div className="yahoo-card-name-row">
@@ -332,9 +365,28 @@ const GlobalIndicesModalContent: React.FC<GlobalIndicesModalProps> = ({
     const chgSign = isUp ? '▲' : isDown ? '▼' : '';
     const statusClass = item.marketStatus || 'closed';
     const statusLabel = item.statusLabel || (statusClass === 'open' ? '盤中交易' : '已收盤');
+    // 美股三大指數 (^DJI, ^IXIC, ^SOX) 支援點擊展開 K 線圖；亞股保持純即時卡片
+    const isClickable = ['^DJI', '^IXIC', '^SOX'].includes(item.symbol);
 
     return (
-      <div key={item.symbol} className={`yahoo-index-card status-${statusClass}`}>
+      <div
+        key={item.symbol}
+        className={`yahoo-index-card status-${statusClass} ${isClickable ? 'clickable' : ''}`}
+        onClick={() => {
+          if (isClickable) {
+            setSelectedChartIndex({
+              code: item.symbol,
+              name: item.name,
+              price: item.price,
+              change: item.change,
+              changePercent: item.changePercent,
+              statusLabel,
+              statusClass,
+            });
+          }
+        }}
+        title={isClickable ? '點擊展開日K技術走勢圖' : undefined}
+      >
         <div className="yahoo-card-header">
           <div className="yahoo-card-title-col">
             <div className="yahoo-card-name-row">
@@ -454,7 +506,7 @@ const GlobalIndicesModalContent: React.FC<GlobalIndicesModalProps> = ({
             className={`global-tab-btn ${activeTab === 'us' ? 'active' : ''}`}
             onClick={() => setActiveTab('us')}
           >
-            <span>🇺🇸 美股四大指數</span>
+            <span>🇺🇸 美股主要指數</span>
             {data?.marketSummary?.us && (
               <span className={`tab-market-badge ${data.marketSummary.us.status}`}>
                 <span className="tab-status-dot" />
@@ -504,7 +556,7 @@ const GlobalIndicesModalContent: React.FC<GlobalIndicesModalProps> = ({
               {renderTwCard(effectiveTw?.TXF, '台指近（全）', 'WTX&', getTxfSession(twMarketStatus))}
 
               <div className="global-grid-section-header">
-                <span>🇺🇸 美股四大指數</span>
+                <span>🇺🇸 美股主要指數</span>
                 {data?.marketSummary?.us && (
                   <span className={`tab-market-badge ${data.marketSummary.us.status}`}>
                     <span className="tab-status-dot" />
@@ -554,10 +606,41 @@ const GlobalIndicesModalContent: React.FC<GlobalIndicesModalProps> = ({
             ‹ 返回自選股
           </button>
           <span className="global-modal-footer-note">
-            數據來源：永豐金即時報價 & Yahoo 財經 ｜ 分時走勢圖以昨日收盤為基準線，上方紅色、下方綠色
+            數據來源：永豐金即時報價 & Yahoo 財經 ｜ 分時走勢圖以昨日收盤為基準線，上方紅色、下方綠色 ｜ 點擊台股/美股卡片可展開 2 年歷史 K 線與年線
           </span>
         </div>
       </div>
+
+      {/* 獨立大盤技術分析 K 線大彈窗 */}
+      <GlobalIndexChartModal
+        isOpen={Boolean(selectedChartIndex)}
+        onClose={() => setSelectedChartIndex(null)}
+        code={selectedChartIndex?.code || null}
+        name={selectedChartIndex?.name}
+        currentPrice={
+          (selectedChartIndex?.code === 'IX0001'
+            ? effectiveTw?.TSE?.price
+            : selectedChartIndex?.code === 'IX0043'
+            ? effectiveTw?.OTC?.price
+            : data?.us?.find((u) => u.symbol === selectedChartIndex?.code)?.price) ?? selectedChartIndex?.price
+        }
+        change={
+          (selectedChartIndex?.code === 'IX0001'
+            ? effectiveTw?.TSE?.change
+            : selectedChartIndex?.code === 'IX0043'
+            ? effectiveTw?.OTC?.change
+            : data?.us?.find((u) => u.symbol === selectedChartIndex?.code)?.change) ?? selectedChartIndex?.change
+        }
+        changePercent={
+          (selectedChartIndex?.code === 'IX0001'
+            ? effectiveTw?.TSE?.changePercent
+            : selectedChartIndex?.code === 'IX0043'
+            ? effectiveTw?.OTC?.changePercent
+            : data?.us?.find((u) => u.symbol === selectedChartIndex?.code)?.changePercent) ?? selectedChartIndex?.changePercent
+        }
+        statusLabel={selectedChartIndex?.statusLabel}
+        statusClass={selectedChartIndex?.statusClass}
+      />
     </div>
   );
 };
