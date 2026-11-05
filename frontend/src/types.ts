@@ -393,6 +393,8 @@ export interface SettlementItem {
   date: string;
   amount: number;
   amountWan: number;
+  stockSummary?: string;
+  details?: SettlementTradeDetail[];
 }
 
 export interface SettlementTradeDetail {
@@ -415,9 +417,13 @@ export interface AccountBalanceState {
   t0Date: string;
   t0Amount: number;
   t0RemainingWan: number | null;
+  t0Formula?: string;
+  t0Details?: SettlementTradeDetail[];
   t1Date: string;
   t1Amount: number;
   t1RemainingWan: number | null;
+  t1Formula?: string;
+  t1Details?: SettlementTradeDetail[];
   t2Date: string;
   t2Amount: number;
   t2RemainingWan: number | null;

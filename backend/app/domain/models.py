@@ -215,12 +215,6 @@ class CreateSmartOrderRequest(BaseModel):
     opt4_enabled: bool = False
     opt4_ma_type: Optional[str] = "5MA"
 
-class SettlementItem(BaseModel):
-    t: int  # 0, 1, 2
-    date: str
-    amount: float  # 金額 (元, 負數為扣款，正數為入帳)
-    amountWan: float  # 金額 (萬)
-
 class SettlementTradeDetail(BaseModel):
     code: str
     name: str = ""
@@ -233,6 +227,14 @@ class SettlementTradeDetail(BaseModel):
     netAmount: float  # 該筆淨交割款 (賣出: + net, 買入: - net)
     netAmountWan: float  # 該筆淨交割款 (萬)
 
+class SettlementItem(BaseModel):
+    t: int  # 0, 1, 2
+    date: str
+    amount: float  # 金額 (元, 負數為扣款，正數為入帳)
+    amountWan: float  # 金額 (萬)
+    stockSummary: str = ""  # 標的摘要，例如 "凱基台灣TOP50 (009816)"
+    details: list[SettlementTradeDetail] = []  # 該日買賣明細
+
 class AccountBalanceState(BaseModel):
     hasConfigured: bool = False  # 使用者是否已手動設定過本金
     baseCapitalWan: Optional[float] = None  # 起始投資本金 (萬)
@@ -240,9 +242,13 @@ class AccountBalanceState(BaseModel):
     t0Date: str = ""
     t0Amount: float = 0.0  # 今日 T+0 交割金額 (元)
     t0RemainingWan: Optional[float] = None  # 格子 1: T+0 餘額 (萬)
+    t0Formula: str = ""
+    t0Details: list[SettlementTradeDetail] = []
     t1Date: str = ""
     t1Amount: float = 0.0  # 次日 T+1 交割金額 (元)
     t1RemainingWan: Optional[float] = None  # 格子 2: T+1 餘額 (萬)
+    t1Formula: str = ""
+    t1Details: list[SettlementTradeDetail] = []
     t2Date: str = ""
     t2Amount: float = 0.0  # 後天 T+2 交割金額 (元)
     t2RemainingWan: Optional[float] = None  # 格子 3: T+2 最終可用本金 (萬)

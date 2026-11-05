@@ -48,6 +48,13 @@ export const App: React.FC = () => {
   const [marketModalTab, setMarketModalTab] = useState<'all' | 'tw' | 'us' | 'asia'>('all');
   const [orderTargetCode, setOrderTargetCode] = useState<string | null>(null);
   const [pendingOrderCode, setPendingOrderCode] = useState<string | null>(null);
+  const [pendingOrderParams, setPendingOrderParams] = useState<{
+    action?: 'buy' | 'sell';
+    unit?: 'lot' | 'share';
+    price?: number;
+    qty?: number;
+    autoPromptConfirm?: boolean;
+  } | null>(null);
   const [selectedChartCode, setSelectedChartCode] = useState<string | null>(null);
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const [isNewsModalOpen, setIsNewsModalOpen] = useState(false);
@@ -291,6 +298,47 @@ export const App: React.FC = () => {
       if (watchlistChangedTimerRef.current) window.clearTimeout(watchlistChangedTimerRef.current);
     };
   }, [loadBootstrap]);
+
+  // 處理來自外部 Deep Link（如 Discord 警報通知連結）直達下單
+  useEffect(() => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const action = urlParams.get('action');
+      const code = urlParams.get('code');
+      if (action === 'confirm_smart_order' || action === 'order') {
+        const targetCode = code ? code.trim().toUpperCase() : '2330';
+        const rawQty = urlParams.get('qty');
+        const rawPrice = urlParams.get('price');
+        const rawUnit = urlParams.get('unit'); // 'share' | 'lot'
+        const rawAction = urlParams.get('order_action'); // 'sell' | 'buy'
+
+        const params = {
+          action: (rawAction === 'buy' ? 'buy' : 'sell') as 'buy' | 'sell',
+          unit: (rawUnit === 'lot' ? 'lot' : 'share') as 'lot' | 'share',
+          price: rawPrice ? parseFloat(rawPrice) : undefined,
+          qty: rawQty ? parseInt(rawQty, 10) : undefined,
+          autoPromptConfirm: true,
+        };
+
+        setPendingOrderCode(targetCode);
+        setPendingOrderParams(params);
+
+        // 依使用者要求方式 B：仍需先經過安全密碼驗證
+        if (!isVaultAuthenticated()) {
+          setIsVaultPasswordModalOpen(true);
+        } else {
+          setOrderTargetCode(targetCode);
+          setDrawerTab('order');
+          setIsDrawerOpen(true);
+        }
+
+        // 清理網址 query 參數，避免重整頁面時重複彈出
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    } catch (e) {
+      console.error('Failed to parse URL query params:', e);
+    }
+  }, []);
 
   // 目前選取的群組 (排除財神庫，財神庫由左側輔助視窗獨立呈現)
   const watchlistGroups = groups.filter((g) => g.id !== 'g-vault' && g.name !== '財神庫');
@@ -598,6 +646,7 @@ export const App: React.FC = () => {
             wealthSummary={wealthSummary}
             dirtyCodes={dirtyCodes}
             initialOrderCode={orderTargetCode || undefined}
+            initialOrderParams={pendingOrderParams || undefined}
             onOrderTargetCodeChange={(code) => setOrderTargetCode(code)}
             orderedCodes={
               groups.find((g) => g.id === 'g-wealth' || g.name === '財神簿')?.items.map((i) => i.code) ||

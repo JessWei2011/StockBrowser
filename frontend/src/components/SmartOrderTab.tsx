@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { StockPosition, QuoteState, SmartOrderCondition } from '../types';
-import { fetchSmartOrders, createSmartOrder, cancelSmartOrder, deleteSmartOrder } from '../services/api';
+import { fetchSmartOrders, createSmartOrder, cancelSmartOrder, resumeSmartOrder, deleteSmartOrder } from '../services/api';
 
 interface SmartOrderTabProps {
   positions: StockPosition[];
@@ -154,6 +154,29 @@ export const SmartOrderTab: React.FC<SmartOrderTabProps> = ({
       return;
     }
 
+    // 前端選項級防呆：檢查該個股是否已經開啟過相同選項
+    const activeOrdersForStock = smartOrders.filter(
+      (o) => o.code === cleanCode && o.status === 'PENDING'
+    );
+    for (const o of activeOrdersForStock) {
+      if (opt1Enabled && o.opt1_enabled) {
+        setMessage({ type: 'error', text: `【${cleanCode}】已開啟過「選項 1（現價高於）」盯盤中！同選項不可重複建立。` });
+        return;
+      }
+      if (opt2Enabled && o.opt2_enabled) {
+        setMessage({ type: 'error', text: `【${cleanCode}】已開啟過「選項 2（現價低於）」盯盤中！同選項不可重複建立。` });
+        return;
+      }
+      if (opt3Enabled && o.opt3_enabled) {
+        setMessage({ type: 'error', text: `【${cleanCode}】已開啟過「選項 3（衝高回落）」盯盤中！同選項不可重複建立。` });
+        return;
+      }
+      if (opt4Enabled && o.opt4_enabled) {
+        setMessage({ type: 'error', text: `【${cleanCode}】已開啟過「選項 4（跌破均線）」盯盤中！同選項不可重複建立。` });
+        return;
+      }
+    }
+
     try {
       setIsSubmitting(true);
       setMessage(null);
@@ -176,7 +199,7 @@ export const SmartOrderTab: React.FC<SmartOrderTabProps> = ({
 
       setMessage({
         type: 'success',
-        text: `已成功儲存【${cleanCode}】出場警報通知設定！明日 09:10 啟動盯盤，任一條件符合時即發送 Discord 通知。`,
+        text: `已成功儲存【${cleanCode}】出場警報通知設定！明日 09:00 開盤即啟動盯盤，任一條件符合時即發送 Discord 通知。`,
       });
       await loadSmartOrders();
     } catch (err: any) {
@@ -190,9 +213,19 @@ export const SmartOrderTab: React.FC<SmartOrderTabProps> = ({
     try {
       await cancelSmartOrder(orderId);
       await loadSmartOrders();
-      setMessage({ type: 'info', text: '已暫停該警報通知' });
+      setMessage({ type: 'info', text: '已暫停該警報通知（可隨時點擊「恢復盯盤」重新啟動）' });
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || '暫停失敗' });
+    }
+  };
+
+  const handleResumeOrder = async (orderId: string) => {
+    try {
+      await resumeSmartOrder(orderId);
+      await loadSmartOrders();
+      setMessage({ type: 'success', text: '已成功恢復「09:00 盯盤中」狀態！' });
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || '恢復失敗' });
     }
   };
 
@@ -214,18 +247,6 @@ export const SmartOrderTab: React.FC<SmartOrderTabProps> = ({
           <button type="button" className="btn-alert-close" onClick={() => setMessage(null)}>✕</button>
         </div>
       )}
-
-      {/* 頂部策略角色說明 */}
-      <div className="smart-order-intro-card">
-        <div className="intro-badge">
-          <span className="intro-icon">🔔</span>
-          <strong>出場警報通知設定（Discord 盯盤助手）</strong>
-        </div>
-        <p className="intro-desc">
-          設定後系統將於每日 <strong>09:10 盤中零股撮合穩定後</strong> 啟動盯盤。
-          以下 4 個選項皆為<strong>各自獨立觸發</strong>，任一條件符合時立即向 Discord 發送警報與快速下單連結！
-        </p>
-      </div>
 
       <form className="smart-order-form" onSubmit={handleCreateOrder}>
         {/* 標的商品與預填零股庫存 */}
@@ -539,7 +560,7 @@ export const SmartOrderTab: React.FC<SmartOrderTabProps> = ({
                       <span className="card-qty-badge">{order.quantity} 股</span>
                     </div>
                     <div className="card-status-badge">
-                      {isPending && <span className="badge-pending">👀 09:10 盯盤中</span>}
+                      {isPending && <span className="badge-pending">👀 09:00 盯盤中</span>}
                       {isTriggered && <span className="badge-triggered">🚨 已發送通知</span>}
                       {order.status === 'CANCELLED' && <span className="badge-cancelled">✕ 已暫停</span>}
                     </div>
@@ -583,19 +604,30 @@ export const SmartOrderTab: React.FC<SmartOrderTabProps> = ({
                   <div className="card-footer-row">
                     <span className="card-time">設定於: {order.created_at.slice(5, 16)}</span>
                     <div className="card-actions">
-                      {isPending && (
+                      {isPending ? (
                         <button
                           type="button"
                           className="btn-cancel-cond"
                           onClick={() => handleCancelOrder(order.id)}
+                          title="暫停盯盤通知"
                         >
                           暫停盯盤
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn-resume-cond"
+                          onClick={() => handleResumeOrder(order.id)}
+                          title="重新啟動 09:00 盯盤通知"
+                        >
+                          ▶ 恢復盯盤
                         </button>
                       )}
                       <button
                         type="button"
                         className="btn-delete-cond"
                         onClick={() => handleDeleteOrder(order.id)}
+                        title="徹底刪除此筆警報設定"
                       >
                         刪除
                       </button>

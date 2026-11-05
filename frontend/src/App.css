@@ -5873,6 +5873,42 @@ button, input, select, textarea {
   padding: 16px !important;
 }
 
+.settle-stocks-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.settle-stock-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: help;
+  transition: all 0.15s ease;
+}
+
+.settle-stock-tag.tag-stock-buy {
+  background: rgba(16, 185, 129, 0.14);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.settle-stock-tag.tag-stock-sell {
+  background: rgba(239, 68, 68, 0.14);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.settle-stock-text {
+  font-size: 11.5px;
+  color: var(--text-main);
+  font-weight: 600;
+}
+
 /* T+2 買賣算式 (a+b-c) 樣式 */
 .t2-delta-formula-row {
   align-items: flex-start !important;
@@ -5950,6 +5986,314 @@ button, input, select, textarea {
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+}
+
+/* ==================== 財神口袋 (BalanceTab) 白天模式專屬高對比樣式 ==================== */
+[data-theme="light"] .balance-tab-container {
+  color: #0f172a;
+}
+
+[data-theme="light"] .balance-header {
+  border-bottom: 1px solid #cbd5e1;
+}
+
+[data-theme="light"] .balance-title {
+  color: #0f172a;
+}
+
+[data-theme="light"] .balance-subtitle {
+  color: #475569;
+}
+
+[data-theme="light"] .btn-refresh-balance {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #1e293b;
+}
+
+[data-theme="light"] .btn-refresh-balance:hover:not(:disabled) {
+  background: #f0f9ff;
+  border-color: #0284c7;
+  color: #0284c7;
+}
+
+/* 區塊 1：帳戶本金卡片 */
+[data-theme="light"] .balance-capital-card {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .capital-label {
+  color: #b45309; /* 深琥珀金，在白底對比鮮明 */
+}
+
+[data-theme="light"] .capital-unit {
+  color: #475569;
+}
+
+[data-theme="light"] .capital-mode-selector {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+[data-theme="light"] .mode-selector-label {
+  color: #334155;
+}
+
+[data-theme="light"] .btn-mode-pill {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+}
+
+[data-theme="light"] .btn-mode-pill:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+[data-theme="light"] .btn-mode-pill.active {
+  background: #e0f2fe;
+  border-color: #0284c7;
+  color: #0369a1;
+  font-weight: 700;
+}
+
+[data-theme="light"] .delta-applied {
+  color: #64748b;
+}
+
+[data-theme="light"] .capital-input {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #0f172a;
+}
+
+[data-theme="light"] .capital-input:focus {
+  border-color: #d97706;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.15);
+}
+
+[data-theme="light"] .capital-input-suffix {
+  color: #475569;
+}
+
+[data-theme="light"] .capital-adjust-toolbar {
+  border-top: 1px dashed #e2e8f0;
+}
+
+[data-theme="light"] .adjust-tip {
+  color: #475569;
+}
+
+[data-theme="light"] .btn-adjust {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+}
+
+[data-theme="light"] .btn-adjust-sub {
+  color: #dc2626;
+}
+
+[data-theme="light"] .btn-adjust-sub:hover {
+  background: #fef2f2;
+  border-color: #dc2626;
+}
+
+[data-theme="light"] .btn-adjust-add {
+  color: #16a34a;
+}
+
+[data-theme="light"] .btn-adjust-add:hover {
+  background: #f0fdf4;
+  border-color: #16a34a;
+}
+
+/* 區塊 2：三大階段卡片 */
+[data-theme="light"] .balance-grid-card {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .balance-grid-card.highlight-target {
+  background: #ffffff;
+  border: 2px solid #0284c7;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.12);
+}
+
+[data-theme="light"] .grid-card-tag {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+
+[data-theme="light"] .grid-card-tag.badge-final {
+  background: #e0f2fe;
+  color: #0284c7;
+  border: 1px solid #bae6fd;
+}
+
+[data-theme="light"] .grid-card-title {
+  color: #0f172a;
+}
+
+[data-theme="light"] .grid-date {
+  color: #475569;
+}
+
+[data-theme="light"] .grid-main-val {
+  color: #0f172a;
+}
+
+[data-theme="light"] .highlight-amount .grid-main-val {
+  color: #0284c7;
+}
+
+[data-theme="light"] .grid-val-unit {
+  color: #475569;
+}
+
+[data-theme="light"] .grid-delta-row {
+  border-top: 1px dashed #e2e8f0;
+  color: #475569;
+}
+
+[data-theme="light"] .grid-delta-label {
+  color: #475569;
+}
+
+[data-theme="light"] .delta-zero {
+  color: #64748b;
+}
+
+[data-theme="light"] .delta-income {
+  color: #dc2626;
+}
+
+[data-theme="light"] .delta-expense {
+  color: #16a34a;
+}
+
+[data-theme="light"] .grid-card-footnote {
+  color: #0369a1;
+  background: #f0f9ff;
+  border: 1px solid #e0f2fe;
+}
+
+/* T+2 算式膠囊 (白天模式) */
+[data-theme="light"] .formula-plus {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+[data-theme="light"] .formula-minus {
+  background: #d1fae5;
+  color: #047857;
+  border: 1px solid #6ee7b7;
+}
+
+[data-theme="light"] .t2-formula-equal {
+  color: #64748b;
+}
+
+[data-theme="light"] .t2-formula-total {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+}
+
+[data-theme="light"] .t2-formula-total.color-up {
+  color: #b91c1c;
+}
+
+[data-theme="light"] .t2-formula-total.color-down {
+  color: #047857;
+}
+
+/* 區塊 3：在途明細卡片與表格 */
+[data-theme="light"] .balance-details-card {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .details-title {
+  color: #0f172a;
+}
+
+[data-theme="light"] .settlements-table th {
+  background: #f8fafc;
+  color: #334155;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+[data-theme="light"] .settlements-table td {
+  border-bottom: 1px solid #f1f5f9;
+  color: #0f172a;
+}
+
+[data-theme="light"] .settle-date {
+  color: #334155;
+  font-weight: 600;
+}
+
+[data-theme="light"] .badge-t0 {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+
+[data-theme="light"] .badge-t1 {
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+[data-theme="light"] .badge-t2 {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+}
+
+[data-theme="light"] .tag-pay {
+  color: #047857;
+}
+
+[data-theme="light"] .tag-receive {
+  color: #b91c1c;
+}
+
+[data-theme="light"] .tag-none {
+  color: #64748b;
+}
+
+[data-theme="light"] .table-empty {
+  color: #64748b;
+}
+
+[data-theme="light"] .settlements-table .num-font.color-up {
+  color: #b91c1c;
+}
+
+[data-theme="light"] .settlements-table .num-font.color-down {
+  color: #047857;
+}
+
+[data-theme="light"] .settle-stock-tag.tag-stock-buy {
+  background: #d1fae5;
+  color: #047857;
+  border: 1px solid #6ee7b7;
+}
+
+[data-theme="light"] .settle-stock-tag.tag-stock-sell {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+[data-theme="light"] .settle-stock-text {
+  color: #0f172a;
 }
 
 /* ==================== 投資事件月行事曆 (Investment Calendar Modal) ==================== */
@@ -9155,6 +9499,7 @@ input:checked + .slider.round:before {
 }
 
 .btn-cancel-cond,
+.btn-resume-cond,
 .btn-delete-cond {
   background: transparent;
   border: 1px solid var(--border-color);
@@ -9171,10 +9516,234 @@ input:checked + .slider.round:before {
   color: #f59e0b;
 }
 
+.btn-resume-cond {
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+}
+
+.btn-resume-cond:hover {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  color: #38bdf8;
+}
+
 .btn-delete-cond:hover {
   border-color: #ef4444;
   color: #ef4444;
 }
+
+/* ─────────────────────────────────────────────────────────────
+   智慧預約單 / 出場警報：白天模式 (Light Mode) 專屬清晰對比樣式
+   ───────────────────────────────────────────────────────────── */
+[data-theme="light"] .smart-card-section {
+  background: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+}
+
+[data-theme="light"] .smart-card-section label {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+
+[data-theme="light"] .smart-card-section .form-input {
+  background: #f8fafc !important;
+  border: 1px solid #94a3b8 !important;
+  color: #0a0f1d !important;
+  font-weight: 600 !important;
+}
+
+[data-theme="light"] .smart-card-section .form-input:focus {
+  background: #ffffff !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15) !important;
+}
+
+[data-theme="light"] .input-hint {
+  color: #475569 !important;
+  font-weight: 500 !important;
+}
+
+[data-theme="light"] .input-with-unit .unit-prefix,
+[data-theme="light"] .input-with-unit .unit-suffix {
+  color: #334155 !important;
+  font-weight: 700 !important;
+}
+
+[data-theme="light"] .step-title {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+
+/* 4 大選項卡片在白天模式下的亮底深色與鮮明強調邊框 */
+[data-theme="light"] .option-card {
+  background: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .option-card.is-active.border-up {
+  border-left: 4px solid #dc2626 !important;
+  background: #fef2f2 !important;
+  border-color: #fecaca !important;
+}
+
+[data-theme="light"] .option-card.is-active.border-down {
+  border-left: 4px solid #16a34a !important;
+  background: #f0fdf4 !important;
+  border-color: #bbf7d0 !important;
+}
+
+[data-theme="light"] .option-card.is-active.border-trailing {
+  border-left: 4px solid #d97706 !important;
+  background: #fffbeb !important;
+  border-color: #fde68a !important;
+}
+
+[data-theme="light"] .option-card.is-active.border-ma {
+  border-left: 4px solid #7c3aed !important;
+  background: #faf5ff !important;
+  border-color: #e9d5ff !important;
+}
+
+[data-theme="light"] .option-content-body {
+  border-top: 1px solid #e2e8f0 !important;
+}
+
+[data-theme="light"] .btn-fill-holding {
+  background: #fef3c7 !important;
+  border: 1px solid #d97706 !important;
+  color: #92400e !important;
+}
+
+[data-theme="light"] .btn-fill-holding:hover {
+  background: #fde68a !important;
+}
+
+/* 均線切換按鈕在白天的深色字體 */
+[data-theme="light"] .smart-card-section .pill-toggle {
+  background: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #334155 !important;
+  font-weight: 600 !important;
+}
+
+[data-theme="light"] .smart-card-section .pill-toggle.active {
+  background: #7c3aed !important;
+  border-color: #7c3aed !important;
+  color: #ffffff !important;
+}
+
+/* 警報清單卡片在白天模式下的純白亮底與高對比深色字 */
+[data-theme="light"] .smart-order-card {
+  background: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06) !important;
+}
+
+[data-theme="light"] .card-stock-code {
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .card-stock-name {
+  color: #334155 !important;
+  font-weight: 600 !important;
+}
+
+[data-theme="light"] .card-qty-badge {
+  background: #ffedd5 !important;
+  color: #c2410c !important;
+  border: 1px solid #fed7aa !important;
+}
+
+[data-theme="light"] .badge-pending {
+  background: #e0f2fe !important;
+  color: #0369a1 !important;
+  border: 1px solid #bae6fd !important;
+}
+
+[data-theme="light"] .badge-triggered {
+  background: #fee2e2 !important;
+  color: #b91c1c !important;
+  border: 1px solid #fecaca !important;
+}
+
+[data-theme="light"] .badge-cancelled {
+  background: #f1f5f9 !important;
+  color: #475569 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .card-conditions-summary {
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+[data-theme="light"] .cond-label {
+  color: #475569 !important;
+  font-weight: 600 !important;
+}
+
+[data-theme="light"] .cond-val.text-up {
+  color: #b91c1c !important;
+}
+
+[data-theme="light"] .cond-val.text-down {
+  color: #15803d !important;
+}
+
+[data-theme="light"] .cond-val.text-trailing {
+  color: #b45309 !important;
+}
+
+[data-theme="light"] .cond-val.text-ma {
+  color: #6d28d9 !important;
+}
+
+[data-theme="light"] .card-footer-row {
+  border-top: 1px solid #e2e8f0 !important;
+}
+
+[data-theme="light"] .card-time {
+  color: #64748b !important;
+}
+
+[data-theme="light"] .btn-cancel-cond,
+[data-theme="light"] .btn-resume-cond,
+[data-theme="light"] .btn-delete-cond {
+  background: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #334155 !important;
+}
+
+[data-theme="light"] .btn-resume-cond {
+  color: #0284c7 !important;
+  border-color: #bae6fd !important;
+  background: #f0f9ff !important;
+}
+
+[data-theme="light"] .btn-resume-cond:hover {
+  background: #e0f2fe !important;
+  border-color: #0284c7 !important;
+}
+
+[data-theme="light"] .btn-cancel-cond:hover {
+  background: #fffbeb !important;
+  border-color: #d97706 !important;
+  color: #92400e !important;
+}
+
+[data-theme="light"] .btn-delete-cond:hover {
+  background: #fef2f2 !important;
+  border-color: #dc2626 !important;
+  color: #991b1b !important;
+}
+
+[data-theme="light"] .smart-orders-empty {
+  background: #ffffff !important;
+  border: 1px dashed #cbd5e1 !important;
+  color: #64748b !important;
+}
+
 
 
 

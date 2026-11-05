@@ -274,9 +274,34 @@ export const BalanceTab: React.FC<BalanceTabProps> = () => {
             </span>
             <span className="grid-val-unit">萬</span>
           </div>
-          <div className="grid-delta-row">
-            <span className="grid-delta-label">次日交割：</span>
-            {balance ? formatSettleDelta(balance.t1Amount / 10000, balance.t1Amount) : '--'}
+          <div className="grid-delta-row t2-delta-formula-row">
+            <span className="grid-delta-label">次日交割算式：</span>
+            {balance && balance.t1Details && balance.t1Details.length > 0 ? (
+              <div className="t2-formula-container">
+                <div className="t2-formula-pills">
+                  {balance.t1Details.map((td, idx) => {
+                    const isIncome = td.netAmount >= 0;
+                    return (
+                      <span
+                        key={idx}
+                        className={`t2-formula-item ${isIncome ? 'formula-plus' : 'formula-minus'}`}
+                        title={`${td.name} (${td.code}) ${td.action === 'Sell' ? '賣出' : '買入'} ${td.qty}股 @ ${td.price}元\n總值: ${td.totalPrice} | 手續費: ${td.fee} | 稅: ${td.tax}\n淨額: ${td.netAmount} 元`}
+                      >
+                        <span className="formula-op">{isIncome ? '+' : '-'}</span>
+                        <span className="formula-val">{Math.abs(td.netAmountWan).toFixed(2)}萬</span>
+                        <span className="formula-name">({td.name || td.code})</span>
+                      </span>
+                    );
+                  })}
+                  <span className="t2-formula-equal">=</span>
+                  <span className={`t2-formula-total ${balance.t1Amount >= 0 ? 'color-up' : 'color-down'}`}>
+                    {balance.t1Amount >= 0 ? '+' : ''}{(balance.t1Amount / 10000).toFixed(2)}萬 ({balance.t1Amount >= 0 ? '+' : ''}{Math.round(balance.t1Amount).toLocaleString()}元)
+                  </span>
+                </div>
+              </div>
+            ) : balance ? (
+              formatSettleDelta(balance.t1Amount / 10000, balance.t1Amount)
+            ) : '--'}
           </div>
         </div>
 
@@ -340,6 +365,7 @@ export const BalanceTab: React.FC<BalanceTabProps> = () => {
                 <th>時程</th>
                 <th>預計交割日</th>
                 <th>收付性質</th>
+                <th>成交標的明細</th>
                 <th className="align-right">交割款 (萬元)</th>
                 <th className="align-right">台幣金額 (元)</th>
               </tr>
@@ -364,6 +390,26 @@ export const BalanceTab: React.FC<BalanceTabProps> = () => {
                           <span className="tag-none">無收付</span>
                         )}
                       </td>
+                      <td>
+                        {s.details && s.details.length > 0 ? (
+                          <div className="settle-stocks-wrap">
+                            {s.details.map((d, dIdx) => (
+                              <span
+                                key={dIdx}
+                                className={`settle-stock-tag ${d.action === 'Sell' ? 'tag-stock-sell' : 'tag-stock-buy'}`}
+                                title={`${d.name} (${d.code}) ${d.action === 'Sell' ? '賣出' : '買入'} ${d.qty}股 @ ${d.price}元\n總值: ${d.totalPrice} | 手續費: ${d.fee} | 稅: ${d.tax}\n淨額: ${d.netAmount} 元`}
+                              >
+                                {d.action === 'Sell' ? '賣出' : '買入'} {d.name || d.code}
+                                {d.qty ? ` · ${d.qty}股` : ''}
+                              </span>
+                            ))}
+                          </div>
+                        ) : s.stockSummary ? (
+                          <span className="settle-stock-text">{s.stockSummary}</span>
+                        ) : (
+                          <span className="tag-none">-</span>
+                        )}
+                      </td>
                       <td className={`align-right num-font ${isNegative ? 'color-down' : isPositive ? 'color-up' : ''}`}>
                         {isPositive ? '+' : ''}{s.amountWan.toFixed(2)} 萬
                       </td>
@@ -375,7 +421,7 @@ export const BalanceTab: React.FC<BalanceTabProps> = () => {
                 })
               ) : (
                 <tr>
-                  <td colSpan={5} className="table-empty">
+                  <td colSpan={6} className="table-empty">
                     目前無在途交割款項紀錄
                   </td>
                 </tr>

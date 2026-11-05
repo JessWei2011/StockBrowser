@@ -611,6 +611,15 @@ async def cancel_smart_order(order_id: str) -> bool:
         await db.commit()
         return cur.rowcount > 0
 
+async def resume_smart_order(order_id: str) -> bool:
+    async with get_db_connection() as db:
+        cur = await db.execute(
+            "UPDATE smart_orders SET status = 'PENDING', updated_at = ? WHERE id = ? AND status IN ('CANCELLED', 'TRIGGERED')",
+            (now_iso(), order_id)
+        )
+        await db.commit()
+        return cur.rowcount > 0
+
 async def delete_smart_order(order_id: str) -> bool:
     async with get_db_connection() as db:
         cur = await db.execute("DELETE FROM smart_orders WHERE id = ?", (order_id,))

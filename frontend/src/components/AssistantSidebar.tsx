@@ -16,6 +16,13 @@ interface AssistantSidebarProps {
   wealthSummary: WealthSummary | null;
   dirtyCodes: Set<string>;
   initialOrderCode?: string;
+  initialOrderParams?: {
+    action?: 'buy' | 'sell';
+    unit?: 'lot' | 'share';
+    price?: number;
+    qty?: number;
+    autoPromptConfirm?: boolean;
+  };
   onOrderTargetCodeChange?: (code: string) => void;
   onLock?: () => void;
   orderedCodes?: string[];
@@ -68,6 +75,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   wealthSummary,
   dirtyCodes,
   initialOrderCode,
+  initialOrderParams,
   onOrderTargetCodeChange,
   onLock,
   orderedCodes = [],
@@ -207,6 +215,24 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
       }
     }
   }, [initialOrderCode, quotes]);
+
+  // 處理外部 Deep Link (例如 Discord 點擊直接帶入參數與自動觸發確認卡片)
+  useEffect(() => {
+    if (initialOrderParams) {
+      if (initialOrderParams.action) setOrderAction(initialOrderParams.action);
+      if (initialOrderParams.unit) setOrderUnit(initialOrderParams.unit);
+      if (initialOrderParams.price && initialOrderParams.price > 0) {
+        setOrderPrice(initialOrderParams.price.toFixed(2));
+      }
+      if (initialOrderParams.qty && initialOrderParams.qty > 0) {
+        setOrderQty(initialOrderParams.qty);
+      }
+      if (initialOrderParams.autoPromptConfirm) {
+        setOrderSubTab('form');
+        setIsConfirmModalOpen(true);
+      }
+    }
+  }, [initialOrderParams]);
 
   // 當選定個股時，若尚未輸入價格則帶入現價或昨收；若為盤後定價則鎖定為收盤價
   const currentQuote = quotes[stockCode];

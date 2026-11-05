@@ -32,6 +32,7 @@ from backend.app.repositories.db import (
     get_smart_orders,
     create_smart_order,
     cancel_smart_order,
+    resume_smart_order,
     delete_smart_order,
 )
 
@@ -317,10 +318,18 @@ async def get_account_balance():
         
         t0_amt = 0.0
         t0_date = ""
+        t0_details: list[SettlementTradeDetail] = []
+        t0_formula_str = ""
+
         t1_amt = 0.0
         t1_date = ""
+        t1_details: list[SettlementTradeDetail] = []
+        t1_formula_str = ""
+
         t2_amt = 0.0
         t2_date = ""
+        t2_details: list[SettlementTradeDetail] = []
+        t2_formula_str = ""
         
         items: list[SettlementItem] = []
         for s in settlements_raw:
@@ -328,21 +337,43 @@ async def get_account_balance():
             d = s.get("date", "")
             amt = float(s.get("amount", 0.0))
             amt_wan = float(s.get("amountWan", 0.0))
+            raw_dtls = s.get("details", [])
+            dtl_objs = [SettlementTradeDetail(**x) for x in raw_dtls]
+            stock_summary = s.get("stockSummary", "")
+
+            # 拼裝個別交割日算式膠囊文字
+            formula_parts = []
+            for item_d in dtl_objs:
+                sign = "+" if item_d.netAmount >= 0 else "-"
+                amt_abs_wan = abs(item_d.netAmountWan)
+                stock_label = f"{item_d.name or item_d.code}"
+                formula_parts.append(f"{sign}{amt_abs_wan:.2f}萬({stock_label})")
+            cur_formula = " ".join(formula_parts)
+
             items.append(SettlementItem(
                 t=t,
                 date=d,
                 amount=amt,
-                amountWan=amt_wan
+                amountWan=amt_wan,
+                stockSummary=stock_summary,
+                details=dtl_objs
             ))
+
             if t == 0:
                 t0_amt = amt
                 t0_date = d
+                t0_details = dtl_objs
+                t0_formula_str = cur_formula
             elif t == 1:
                 t1_amt = amt
                 t1_date = d
+                t1_details = dtl_objs
+                t1_formula_str = cur_formula
             elif t == 2:
                 t2_amt = amt
                 t2_date = d
+                t2_details = dtl_objs
+                t2_formula_str = cur_formula
 
         t0_remaining = None
         t1_remaining = None
@@ -362,20 +393,6 @@ async def get_account_balance():
             # 格子 3 (T+2): T+1 餘額 + 後天交割款
             t2_remaining = round(t1_remaining + (t2_amt / 10000.0), 4)
 
-        # 取得今日買賣明細並拼裝算式 (a + b - c)
-        raw_deals = await asyncio.to_thread(shioaji_adapter.fetch_today_deals_breakdown)
-        t2_trade_details: list[SettlementTradeDetail] = []
-        formula_parts = []
-        for rd in raw_deals:
-            detail_item = SettlementTradeDetail(**rd)
-            t2_trade_details.append(detail_item)
-            sign = "+" if detail_item.netAmount >= 0 else "-"
-            amt_abs_wan = abs(detail_item.netAmountWan)
-            stock_label = f"{detail_item.name or detail_item.code}"
-            formula_parts.append(f"{sign}{amt_abs_wan:.2f}萬({stock_label})")
-
-        t2_formula_str = " ".join(formula_parts) if formula_parts else ""
-
         return AccountBalanceState(
             hasConfigured=has_configured,
             baseCapitalWan=round(base_cap, 4) if base_cap is not None else None,
@@ -383,14 +400,18 @@ async def get_account_balance():
             t0Date=t0_date,
             t0Amount=t0_amt,
             t0RemainingWan=t0_remaining,
+            t0Formula=t0_formula_str,
+            t0Details=t0_details,
             t1Date=t1_date,
             t1Amount=t1_amt,
             t1RemainingWan=t1_remaining,
+            t1Formula=t1_formula_str,
+            t1Details=t1_details,
             t2Date=t2_date,
             t2Amount=t2_amt,
             t2RemainingWan=t2_remaining,
             t2Formula=t2_formula_str,
-            t2Details=t2_trade_details,
+            t2Details=t2_details,
             settlements=items,
             updatedAt=now_iso() if "now_iso" in globals() else ""
         )
@@ -415,7 +436,7 @@ async def list_smart_orders(status: Optional[str] = None):
 
 @router.post("/smart-orders", response_model=SmartOrderCondition)
 async def create_new_smart_order(body: CreateSmartOrderRequest):
-    """建立新的出場警報設定 (4大獨立開關)"""
+    """建立新的出場警報設定 (4大獨立開關，含防呆防重覆機制)"""
     code = body.code.strip().upper()
     if not code:
         raise HTTPException(status_code=400, detail="商品代碼不得為空")
@@ -427,6 +448,31 @@ async def create_new_smart_order(body: CreateSmartOrderRequest):
     # 至少要致能 1 個選項
     if not (body.opt1_enabled or body.opt2_enabled or body.opt3_enabled or body.opt4_enabled):
         raise HTTPException(status_code=400, detail="請至少開啟 1 個出場警報通知選項！")
+
+    # 精確選項級防呆：同一檔個股中，某個選項若已在「盯盤中 (PENDING)」，則不可重複建立該選項
+    existing = await get_smart_orders(status="PENDING")
+    stock_active_orders = [o for o in existing if o["code"] == code]
+    for o in stock_active_orders:
+        if body.opt1_enabled and o.get("opt1_enabled"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"【{code}】目前已開啟過「選項 1（現價高於）」盯盤中！同選項不可重複設定。"
+            )
+        if body.opt2_enabled and o.get("opt2_enabled"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"【{code}】目前已開啟過「選項 2（現價低於）」盯盤中！同選項不可重複設定。"
+            )
+        if body.opt3_enabled and o.get("opt3_enabled"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"【{code}】目前已開啟過「選項 3（衝高回落）」盯盤中！同選項不可重複設定。"
+            )
+        if body.opt4_enabled and o.get("opt4_enabled"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"【{code}】目前已開啟過「選項 4（跌破均線）」盯盤中！同選項不可重複設定。"
+            )
 
     # 取得商品名稱
     contract = shioaji_adapter.contracts_cache.get(code)
@@ -471,11 +517,20 @@ async def remove_smart_order(order_id: str):
 
 @router.post("/smart-orders/{order_id}/cancel")
 async def cancel_pending_smart_order(order_id: str):
-    """將監控中的條件單標記為取消"""
+    """將監控中的條件單標記為暫停/取消"""
     ok = await cancel_smart_order(order_id)
     if not ok:
-        raise HTTPException(status_code=400, detail="無法取消 (可能非 PENDING 狀態或單號不存在)")
-    return {"status": "ok", "message": f"已取消條件單 {order_id}"}
+        raise HTTPException(status_code=400, detail="無法暫停 (可能非 PENDING 狀態或單號不存在)")
+    return {"status": "ok", "message": f"已暫停條件單 {order_id}"}
+
+@router.post("/smart-orders/{order_id}/resume")
+async def resume_pending_smart_order(order_id: str):
+    """恢復暫停中的條件單，重新啟動盯盤"""
+    ok = await resume_smart_order(order_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail="無法恢復 (單號不存在或狀態不符)")
+    return {"status": "ok", "message": f"已重新啟動盯盤 {order_id}"}
+
 
 
 

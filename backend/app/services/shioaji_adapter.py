@@ -856,8 +856,79 @@ class ShioajiAdapter:
         self.cached_wealth_summary = live_summary
         return live_summary
 
+    def get_stock_name(self, code: str) -> str:
+        """取得個股或ETF名稱，優先讀取快取，其次動態查詢 Shioaji 合約"""
+        if not code:
+            return ""
+        info = self.contracts_cache.get(code)
+        if info and info.get("name"):
+            return info["name"]
+        if self.api and hasattr(self.api, "Contracts") and hasattr(self.api.Contracts, "Stocks"):
+            try:
+                for ex in [self.api.Contracts.Stocks.TSE, self.api.Contracts.Stocks.OTC]:
+                    for item in ex:
+                        if getattr(item, "code", "") == code:
+                            name = getattr(item, "name", "")
+                            if name:
+                                return name
+            except Exception:
+                pass
+        return code
+
+    def fetch_settlement_history_details(self) -> dict[str, list[dict[str, Any]]]:
+        """從券商庫存明細與交易紀錄中，索取近期（T+0, T+1）的買賣成交紀錄"""
+        if not self.api or not self.is_logged_in:
+            return {}
+        try:
+            account = self.api.stock_account
+            if not account:
+                return {}
+
+            import shioaji as sj
+            positions = self.api.list_positions(account, unit=sj.Unit.Share)
+            date_to_deals: dict[str, list[dict[str, Any]]] = {}
+
+            if positions:
+                for pos in positions:
+                    p_id = getattr(pos, "id", 0)
+                    details = self.api.list_position_detail(account, detail_id=p_id)
+                    if not details:
+                        continue
+                    for d in details:
+                        d_date = str(getattr(d, "date", "")).strip()
+                        if not d_date:
+                            continue
+                        code = str(getattr(d, "code", "")).strip()
+                        fee = int(getattr(d, "fee", 0.0) or 0)
+                        raw_cost = float(getattr(d, "price", 0.0) or 0.0)
+                        qty = int(getattr(d, "quantity", 0) or 0)
+                        if qty == 0:
+                            qty = int(getattr(pos, "quantity", 0) or 1)
+                        net_amt = -raw_cost if raw_cost > 0 else 0.0
+                        name = self.get_stock_name(code)
+
+                        item = {
+                            "code": code,
+                            "name": name,
+                            "action": "Buy",
+                            "qty": qty,
+                            "price": round(raw_cost / qty, 2) if qty > 0 else raw_cost,
+                            "totalPrice": raw_cost - fee if raw_cost >= fee else raw_cost,
+                            "fee": fee,
+                            "tax": 0,
+                            "netAmount": round(net_amt, 2),
+                            "netAmountWan": round(net_amt / 10000.0, 4),
+                            "dealDate": d_date
+                        }
+                        date_to_deals.setdefault(d_date, []).append(item)
+
+            return date_to_deals
+        except Exception as e:
+            logger.error(f"Error fetching settlement history details: {e}", exc_info=True)
+            return {}
+
     def fetch_settlements(self) -> list[dict[str, Any]]:
-        """查詢 T+0, T+1, T+2 的交割金額與日期"""
+        """查詢 T+0, T+1, T+2 的交割金額與日期，並自動比對成交個股明細"""
         if not self.api or not self.is_logged_in:
             return []
         try:
@@ -866,19 +937,56 @@ class ShioajiAdapter:
                 return []
             res = self.api.settlements(account)
             results = []
-            if res:
-                for item in res:
-                    # item 有 date, amount, T 等屬性
-                    d_val = getattr(item, 'date', None)
-                    d_str = str(d_val) if d_val else ""
-                    amt = float(getattr(item, 'amount', 0.0) or 0.0)
-                    t_val = int(getattr(item, 'T', 0) if getattr(item, 'T', None) is not None else 0)
-                    results.append({
-                        "t": t_val,
-                        "date": d_str,
-                        "amount": amt,
-                        "amountWan": round(amt / 10000.0, 4)
-                    })
+            if not res:
+                return []
+
+            # 預載歷史庫存交易明細
+            hist_deals_by_date = self.fetch_settlement_history_details()
+            today_deals = self.fetch_today_deals_breakdown()
+
+            for item in res:
+                d_val = getattr(item, 'date', None)
+                d_str = str(d_val) if d_val else ""
+                amt = float(getattr(item, 'amount', 0.0) or 0.0)
+                t_val = int(getattr(item, 'T', 0) if getattr(item, 'T', None) is not None else 0)
+
+                matched_details: list[dict[str, Any]] = []
+                summary_str = ""
+
+                if amt != 0:
+                    if t_val == 2 and today_deals:
+                        matched_details = today_deals
+                    else:
+                        # 從歷史庫存比對 (金額相符優先)
+                        best_date = None
+                        for deal_date, d_list in hist_deals_by_date.items():
+                            total_net = sum(x["netAmount"] for x in d_list)
+                            if abs(total_net - amt) < 2.0:
+                                best_date = deal_date
+                                break
+
+                        if best_date and best_date in hist_deals_by_date:
+                            matched_details = hist_deals_by_date[best_date]
+
+                    if matched_details:
+                        names = [f"{d['name'] or d['code']}" for d in matched_details]
+                        unique_names = list(dict.fromkeys(names))
+                        act = "買入" if amt < 0 else "賣出"
+                        if len(unique_names) == 1:
+                            qty_info = f" {matched_details[0]['qty']}股" if matched_details[0].get('qty') else ""
+                            summary_str = f"{act} {unique_names[0]} ({matched_details[0]['code']}){qty_info}"
+                        else:
+                            summary_str = f"{act} {unique_names[0]} 等 {len(unique_names)} 檔"
+
+                results.append({
+                    "t": t_val,
+                    "date": d_str,
+                    "amount": amt,
+                    "amountWan": round(amt / 10000.0, 4),
+                    "details": matched_details,
+                    "stockSummary": summary_str
+                })
+
             # 確保按 t 排序 (0, 1, 2)
             results.sort(key=lambda x: x["t"])
             return results

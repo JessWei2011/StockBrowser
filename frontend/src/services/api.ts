@@ -287,7 +287,18 @@ export async function cancelSmartOrder(orderId: string): Promise<{ status: strin
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || '取消條件單失敗');
+    throw new Error(err.detail || '暫停條件單失敗');
+  }
+  return res.json();
+}
+
+export async function resumeSmartOrder(orderId: string): Promise<{ status: string; message: string }> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/smart-orders/${encodeURIComponent(orderId)}/resume`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || '恢復盯盤失敗');
   }
   return res.json();
 }
