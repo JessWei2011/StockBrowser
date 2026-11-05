@@ -1495,7 +1495,7 @@ class ShioajiAdapter:
             p_type = sj.StockPriceType.LMT
             if float(price) <= 0:
                 quote = getattr(self, "quotes_cache", {}).get(code, {})
-                ref_price = quote.get("close") or quote.get("last") or quote.get("previousClose") or 0.0
+                ref_price = quote.get("close") or quote.get("last") or quote.get("previousClose") or getattr(contract, "reference", 0.0) or 0.0
                 order_price = float(ref_price)
             else:
                 order_price = float(price)
@@ -1530,21 +1530,38 @@ class ShioajiAdapter:
         except Exception:
             pass
 
-        status_code = getattr(trade.status, "status_code", "")
-        status_str = str(getattr(trade.status, "status", ""))
+        status_code = str(getattr(trade.status, "status_code", "") or "").strip()
+        status_raw = getattr(trade.status, "status", "")
+        status_str = getattr(status_raw, "value", str(status_raw)).replace("OrderStatus.", "")
         op_msg = getattr(trade.status, "msg", "")
 
-        if status_code and status_code != "00":
+        is_failed = (
+            status_str in ("Failed", "OrderStatus.Failed")
+            or (status_code and status_code not in ("0", "00", "R", "") and status_str not in ("Submitted", "PendingSubmit", "PreSubmitted", "PartFilled", "Filled"))
+        )
+
+        if is_failed:
+            logger.warning(f"Shioaji order rejected/failed: code={code}, status={status_str}, statusCode={status_code}, msg={op_msg}")
             return {
                 "success": False,
                 "orderId": getattr(trade.order, "id", ""),
-                "status": status_str,
+                "status": status_str or "Failed",
                 "statusCode": status_code,
-                "message": op_msg or f"交易所退單 (代碼 {status_code})：集保不足或委託條件不符"
+                "message": op_msg or f"券商/交易所退單 (代碼 {status_code or 'Failed'})"
             }
 
         unit_str = "張" if unit == "lot" else "股"
         price_str = "市價" if is_mkt else f"${order_price}"
+
+        if status_str == "PreSubmitted" or status_code == "R":
+            return {
+                "success": True,
+                "orderId": getattr(trade.order, "id", ""),
+                "status": "PreSubmitted",
+                "statusCode": status_code or "R",
+                "message": f"預約單已成功受理 (代碼 R)！【{trade.order.action} {code}】{quantity}{unit_str} @ {price_str}（等待開盤/定盤時段撮合）"
+            }
+
         return {
             "success": True,
             "orderId": getattr(trade.order, "id", ""),

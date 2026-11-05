@@ -207,7 +207,7 @@ class YahooMarketService:
                     meta = idx.get("meta", {})
                     quote = idx.get("quote", {})
                     quotes_list = idx.get("indicators", {}).get("quote", [{}])[0]
-                    closes = quotes_list.get("close", [])
+                    closes = quotes_list.get("close") or []
                     valid_pts = [
                         round(safe_float(c), 2)
                         for c in closes
@@ -313,7 +313,7 @@ class YahooMarketService:
                     meta = idx.get("meta", {})
                     quote = idx.get("quote", {})
                     quotes_list = idx.get("indicators", {}).get("quote", [{}])[0]
-                    closes = quotes_list.get("close", [])
+                    closes = quotes_list.get("close") or []
                     valid_pts = [
                         round(safe_float(c), 2)
                         for c in closes
@@ -350,7 +350,7 @@ class YahooMarketService:
                     meta = idx.get("meta", {})
                     quote = idx.get("quote", {})
                     quotes_list = idx.get("indicators", {}).get("quote", [{}])[0]
-                    closes = quotes_list.get("close", [])
+                    closes = quotes_list.get("close") or []
                     valid_pts = [
                         round(safe_float(c), 2)
                         for c in closes

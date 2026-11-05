@@ -459,7 +459,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
       if (res.success) {
         setOrderNoticeType('success');
-        setOrderNotice(`✔ 委託已成功送出！單號: ${res.orderId || '已確認'} | ${res.message}`);
+        const isPreOrder = res.status === 'PreSubmitted' || res.statusCode === 'R';
+        setOrderNotice(`✔ ${isPreOrder ? '預約單已成功受理' : '委託已成功送出'}！單號: ${res.orderId || '已確認'} | ${res.message}`);
         await loadOrders();
         setOrderSubTab('orders');
       } else {
@@ -1338,7 +1339,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     <div className="specs-after-hours-tip">
                       {afterHoursLot === 'Fixing' ? (
                         <span>
-                          💡 <strong>盤後定價交易</strong>：於 14:00~14:30 申報，14:30 依今日收盤價（NT$ {closingPriceVal > 0 ? closingPriceVal.toFixed(2) : '--'}）定價撮合，單位為「整張 (1,000股)」。
+                          💡 <strong>盤後定價交易</strong>：於 14:00~14:30 申報（13:30~14:00 為券商預約掛單時段），14:30 依今日收盤價（NT$ {closingPriceVal > 0 ? closingPriceVal.toFixed(2) : '--'}）定價撮合，單位為「整張 (1,000股)」。
                         </span>
                       ) : (
                         <span>
