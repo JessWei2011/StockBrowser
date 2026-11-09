@@ -339,6 +339,14 @@ export async function fetchGlobalIndices(): Promise<import('../types').GlobalInd
   return res.json();
 }
 
+export async function fetchForexUsdTwd(force: boolean = false): Promise<import('../types').ForexRateResponse> {
+  const qStr = force ? '?force=true' : '';
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/forex/usdtwd${qStr}`);
+  if (!res.ok) throw new Error('無法取得美元/台幣即時匯率');
+  return res.json();
+}
+
+
 export async function fetchFinancialNews(date?: string): Promise<import('../types').FinancialNewsResponse> {
   const qStr = date ? `?date=${encodeURIComponent(date)}` : '';
   const res = await fetchWithTimeout(`${API_BASE}/api/v1/news${qStr}`);

@@ -67,6 +67,12 @@ async def get_global_indices():
         data = yahoo_market_service.get_global_indices()
     return data
 
+@router.get("/forex/usdtwd")
+async def get_forex_usdtwd(force: bool = False):
+    """取得美元對台幣 (USD/TWD) 即時匯率與當日分時走勢（鉅亨網 cnyes + Yahoo 雙重備援）"""
+    from backend.app.services.forex_service import forex_service
+    return await forex_service.get_usd_twd(force_refresh=force)
+
 @router.post("/groups")
 async def create_group(body: CreateGroupRequest):
     if not body.name.strip():

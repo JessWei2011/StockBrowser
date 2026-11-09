@@ -24,7 +24,10 @@ import { MarketIndexTrend } from './components/MarketIndexTrend';
 import { InvestmentCalendarModal } from './components/InvestmentCalendarModal';
 import { GlobalIndicesModal } from './components/GlobalIndicesModal';
 import { FinancialNewsModal } from './components/FinancialNewsModal';
+import { UsdTwdChartModal } from './components/UsdTwdChartModal';
 import { MobileNavBar, type MobileNavTab } from './components/MobileNavBar';
+import { fetchForexUsdTwd } from './services/api';
+import type { ForexRateResponse } from './types';
 import { loadBootstrapCache, saveBootstrapCache } from './services/storageCache';
 import './App.css';
 
@@ -46,6 +49,9 @@ export const App: React.FC = () => {
   const [isVaultPasswordModalOpen, setIsVaultPasswordModalOpen] = useState(false);
   const [isGlobalIndicesModalOpen, setIsGlobalIndicesModalOpen] = useState(false);
   const [marketModalTab, setMarketModalTab] = useState<'all' | 'tw' | 'us' | 'asia'>('all');
+  const [isUsdTwdModalOpen, setIsUsdTwdModalOpen] = useState(false);
+  const [forexData, setForexData] = useState<ForexRateResponse | null>(null);
+  const [isForexLoading, setIsForexLoading] = useState(false);
   const [orderTargetCode, setOrderTargetCode] = useState<string | null>(null);
   const [pendingOrderCode, setPendingOrderCode] = useState<string | null>(null);
   const [pendingOrderParams, setPendingOrderParams] = useState<{
@@ -573,6 +579,27 @@ export const App: React.FC = () => {
     setIsDrawerOpen(true);
   };
 
+  // 定時載入 USD/TWD 即時匯率 (初始載入 + 每 30 秒輪詢)
+  const loadForex = useCallback(async (force: boolean = false) => {
+    try {
+      setIsForexLoading(true);
+      const data = await fetchForexUsdTwd(force);
+      setForexData(data);
+    } catch (e) {
+      console.error('Failed to load forex data:', e);
+    } finally {
+      setIsForexLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadForex();
+    const interval = setInterval(() => {
+      loadForex();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [loadForex]);
+
   const isVaultGroup = activeGroup?.id === 'g-vault' || activeGroup?.name === '財神庫' || activeGroup?.name === '財神金庫';
   const isWealthGroup = activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿';
   const isSystemGroup = isVaultGroup || isWealthGroup || Boolean(activeGroup?.isSystemGroup);
@@ -870,6 +897,38 @@ export const App: React.FC = () => {
                   <span className="global-pill-title">美股 / 亞股</span>
                   <span className="global-pill-arrow">›</span>
                 </button>
+                <button
+                  className="index-pill btn-forex-usdtwd"
+                  onClick={() => {
+                    setIsUsdTwdModalOpen(true);
+                    loadForex(true);
+                  }}
+                  title="點擊查看美元/台幣即時走勢圖（資料來源：鉅亨網 cnyes）"
+                >
+                  <span className="global-pill-icon">💵</span>
+                  <span className="global-pill-title">
+                    美元 {forexData?.price ? forexData.price.toFixed(2) : '--'}
+                  </span>
+                  {forexData && (
+                    <span
+                      style={{
+                        marginLeft: '3px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        color:
+                          forexData.change > 0
+                            ? '#ef4444'
+                            : forexData.change < 0
+                            ? '#22c55e'
+                            : 'inherit',
+                      }}
+                    >
+                      {forexData.change > 0 ? '▲' : forexData.change < 0 ? '▼' : ''}
+                      {Math.abs(forexData.change).toFixed(2)}
+                    </span>
+                  )}
+                  <span className="global-pill-arrow">›</span>
+                </button>
               </div>
             )}
           </div>
@@ -988,6 +1047,14 @@ export const App: React.FC = () => {
       <FinancialNewsModal
         isOpen={isNewsModalOpen}
         onClose={() => setIsNewsModalOpen(false)}
+      />
+
+      <UsdTwdChartModal
+        isOpen={isUsdTwdModalOpen}
+        onClose={() => setIsUsdTwdModalOpen(false)}
+        data={forexData}
+        isLoading={isForexLoading}
+        onRefresh={() => loadForex(true)}
       />
 
       <MobileNavBar

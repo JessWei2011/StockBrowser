@@ -807,6 +807,31 @@ button, input, select, textarea {
   box-shadow: 0 2px 8px rgba(56, 189, 248, 0.2);
 }
 
+/* ── 美金/台幣匯率膠囊按鈕 ── */
+.btn-forex-usdtwd {
+  cursor: pointer;
+  background: var(--bg-card);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: var(--text-main);
+  transition: all 0.2s ease;
+  user-select: none;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-forex-usdtwd:hover {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: #10b981;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+}
+
+.btn-forex-usdtwd .global-pill-arrow {
+  color: #10b981;
+}
+
 .global-pill-icon {
   font-size: 13px;
 }

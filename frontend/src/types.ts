@@ -435,4 +435,24 @@ export interface AccountBalanceState {
   updatedAt: string;
 }
 
+export interface ForexPoint {
+  time: number;
+  price: number;
+}
+
+export interface ForexRateResponse {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  high: number;
+  low: number;
+  open: number;
+  prevClose: number;
+  points: ForexPoint[];
+  source: string;
+  updateTime: string;
+}
+
 
