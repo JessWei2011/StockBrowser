@@ -96,16 +96,74 @@ class AnnouncementService:
                 logger.error(f"Error in announcement schedule loop: {e}", exc_info=True)
                 await asyncio.sleep(60)
 
+    @staticmethod
+    def _is_expired(cat: str, d_str: str, today: date) -> bool:
+        """檢查特定類別公告是否已過期"""
+        if not d_str:
+            return False
+        d_str = str(d_str).strip()
+        d_obj = None
+        if len(d_str) == 7 and d_str.isdigit():
+            try:
+                yy = int(d_str[:3]) + 1911
+                mm = int(d_str[3:5])
+                dd = int(d_str[5:])
+                d_obj = date(yy, mm, dd)
+            except Exception:
+                pass
+        elif len(d_str) == 8 and d_str.isdigit():
+            try:
+                yy = int(d_str[:4])
+                mm = int(d_str[4:6])
+                dd = int(d_str[6:])
+                d_obj = date(yy, mm, dd)
+            except Exception:
+                pass
+        elif len(d_str) >= 10 and d_str[4] == "-" and d_str[7] == "-":
+            try:
+                d_obj = date.fromisoformat(d_str[:10])
+            except Exception:
+                pass
+
+        if not d_obj:
+            return False
+
+        # 1. 自結營收公告：超過出表發布日 5 天過期
+        if cat == "revenue":
+            return (today - d_obj).days > 5
+
+        # 2. 重大訊息：發布超過 3 天過期
+        if cat == "news":
+            return (today - d_obj).days > 3
+
+        # 3. 法說會與財報公告：召開/發布日過後超過 5 天過期
+        if cat in ["briefing", "earnings"]:
+            return (today - d_obj).days > 5
+
+        # 4. 除權息預告：除權息基準日過後過期
+        if cat == "exdividend":
+            return d_obj < today
+
+        return False
+
     async def load_from_db(self):
-        """從 SQLite 資料庫載入快取的公告"""
+        """從 SQLite 資料庫載入快取的公告 (自動剔除已過期的標籤項目)"""
         try:
+            today = date.today()
             async with db.get_db_connection() as conn:
                 cursor = await conn.execute(
                     "SELECT id, code, tag, title, date, detail, category, updated_at FROM stock_announcements ORDER BY date DESC, id DESC"
                 )
                 rows = await cursor.fetchall()
                 cache: dict[str, list[dict]] = {}
+                expired_ids = []
                 for r in rows:
+                    cat = r["category"]
+                    d_val = r["date"]
+                    if self._is_expired(cat, d_val, today):
+                        expired_ids.append(r["id"])
+                        continue
+
                     item = {
                         "id": r["id"],
                         "code": r["code"],
@@ -117,8 +175,15 @@ class AnnouncementService:
                         "updatedAt": r["updated_at"],
                     }
                     cache.setdefault(r["code"], []).append(item)
+
+                if expired_ids:
+                    # 清理 DB 中過期的舊紀錄
+                    placeholders = ",".join("?" for _ in expired_ids)
+                    await conn.execute(f"DELETE FROM stock_announcements WHERE id IN ({placeholders})", expired_ids)
+                    logger.info(f"Cleaned up {len(expired_ids)} expired announcements from DB.")
+
                 self._cache = cache
-                logger.info(f"Loaded {len(rows)} announcements for {len(cache)} stocks from DB.")
+                logger.info(f"Loaded {len(rows) - len(expired_ids)} active announcements for {len(cache)} stocks from DB.")
         except Exception as e:
             logger.warning(f"Failed to load announcements from DB: {e}")
 
@@ -480,8 +545,9 @@ class AnnouncementService:
         return results
 
     def _fetch_twse_monthly_revenue(self, wanted_codes: set[str]) -> list[dict]:
-        """從證交所 OpenAPI 撈取最新每月自結營收彙總 (t187ap05_L)"""
+        """從證交所 OpenAPI 撈取最新每月自結營收彙總 (t187ap05_L) (出表日 5 天內有效)"""
         results: list[dict] = []
+        today = date.today()
         try:
             url = "https://openapi.twse.com.tw/v1/opendata/t187ap05_L"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -490,6 +556,25 @@ class AnnouncementService:
                 for it in data:
                     c = str(it.get("公司代號", "")).strip()
                     if c in wanted_codes:
+                        date_raw = str(it.get("出表日期", "")).strip()
+                        fmt_date = date_raw
+                        d_obj = None
+                        if len(date_raw) == 7 and date_raw.isdigit():
+                            yy = int(date_raw[:3]) + 1911
+                            mm = int(date_raw[3:5])
+                            dd = int(date_raw[5:])
+                            fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
+                            d_obj = date(yy, mm, dd)
+                        elif len(date_raw) == 8 and date_raw.isdigit():
+                            yy = int(date_raw[:4])
+                            mm = int(date_raw[4:6])
+                            dd = int(date_raw[6:])
+                            fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
+                            d_obj = date(yy, mm, dd)
+                        # 自結日（出表發布日）超過 5 天自動取消過期
+                        if d_obj and (today - d_obj).days > 5:
+                            continue
+
                         m_str = str(it.get("資料年月", "")).strip()
                         raw_cur = float(it.get("營業收入-當月營收", 0) or 0)
                         cur_amount = raw_cur * 1000
@@ -514,7 +599,7 @@ class AnnouncementService:
                             "code": c,
                             "tag": "自結",
                             "title": f"最新{month_label}自結營收公告",
-                            "date": str(it.get("出表日期", "")),
+                            "date": fmt_date,
                             "detail": "\n".join(detail_lines),
                             "category": "revenue",
                         })
@@ -523,8 +608,9 @@ class AnnouncementService:
         return results
 
     def _fetch_tpex_monthly_revenue(self, wanted_codes: set[str]) -> list[dict]:
-        """從櫃買中心 TPEx OpenAPI 撈取最新每月自結營收彙總 (mopsfin_t187ap05_O)"""
+        """從櫃買中心 TPEx OpenAPI 撈取最新每月自結營收彙總 (mopsfin_t187ap05_O) (出表日 5 天內有效)"""
         results: list[dict] = []
+        today = date.today()
         try:
             url = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -533,6 +619,25 @@ class AnnouncementService:
                 for it in data:
                     c = str(it.get("公司代號", "")).strip()
                     if c in wanted_codes:
+                        date_raw = str(it.get("出表日期", "")).strip()
+                        fmt_date = date_raw
+                        d_obj = None
+                        if len(date_raw) == 7 and date_raw.isdigit():
+                            yy = int(date_raw[:3]) + 1911
+                            mm = int(date_raw[3:5])
+                            dd = int(date_raw[5:])
+                            fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
+                            d_obj = date(yy, mm, dd)
+                        elif len(date_raw) == 8 and date_raw.isdigit():
+                            yy = int(date_raw[:4])
+                            mm = int(date_raw[4:6])
+                            dd = int(date_raw[6:])
+                            fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
+                            d_obj = date(yy, mm, dd)
+                        # 自結日（出表發布日）超過 5 天自動取消過期
+                        if d_obj and (today - d_obj).days > 5:
+                            continue
+
                         m_str = str(it.get("資料年月", "")).strip()
                         raw_cur = float(it.get("營業收入-當月營收", 0) or 0)
                         cur_amount = raw_cur * 1000
@@ -557,12 +662,13 @@ class AnnouncementService:
                             "code": c,
                             "tag": "自結",
                             "title": f"最新{month_label}自結營收公告",
-                            "date": str(it.get("出表日期", "")),
+                            "date": fmt_date,
                             "detail": "\n".join(detail_lines),
                             "category": "revenue",
                         })
         except Exception as e:
             logger.warning(f"Error fetching TPEx monthly revenue: {e}")
+        return results
         return results
 
     def _fetch_twse_exdividend(self, wanted_codes: set[str]) -> list[dict]:
@@ -714,8 +820,9 @@ class AnnouncementService:
                     except ValueError:
                         continue
 
-                    # 僅保留今天與未來 60 天內已官方申報之法說會與財報公告
-                    if ev_date < today or (ev_date - today).days > 60:
+                    # 保留過去 5 天內召開/發布者（供盤後追蹤），以及未來 60 天內已官方申報之法說會與財報公告
+                    days_diff = (today - ev_date).days
+                    if days_diff > 5 or (ev_date - today).days > 60:
                         continue
 
                     full_text = " ".join(td.get_text(strip=True) for td in tds)

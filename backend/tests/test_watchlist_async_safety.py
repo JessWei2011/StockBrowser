@@ -188,12 +188,12 @@ async def test_add_item_whitespace_only_stock_code_returns_400(tmp_path):
 @pytest.mark.asyncio
 async def test_add_item_protected_vault_returns_400(tmp_path):
     """
-    【系統防護驗證】：對固定分頁『財神庫』手動新增個股，應回傳 HTTP 400 及中文說明。
+    【系統防護驗證】：對固定分頁『財神金庫』手動新增個股，應回傳 HTTP 400 及中文說明。
     """
     async with isolated_test_context(tmp_path) as (client, _):
         res = await client.post("/api/v1/groups/g-vault/items", json={"code": "2330"})
         assert res.status_code == 400
-        assert "『財神庫』與『財神簿』" in res.json()["detail"]
+        assert "『財神金庫』與『財神簿』" in res.json()["detail"]
         assert "無需手動新增" in res.json()["detail"]
 
 
@@ -205,7 +205,7 @@ async def test_add_item_protected_wealth_returns_400(tmp_path):
     async with isolated_test_context(tmp_path) as (client, _):
         res = await client.post("/api/v1/groups/g-wealth/items", json={"code": "2330"})
         assert res.status_code == 400
-        assert "『財神庫』與『財神簿』" in res.json()["detail"]
+        assert "『財神金庫』與『財神簿』" in res.json()["detail"]
         assert "無需手動新增" in res.json()["detail"]
 
 

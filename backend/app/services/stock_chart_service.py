@@ -143,6 +143,8 @@ class KlineBar(BaseModel):
     boll_mid: Optional[float] = None
     boll_down: Optional[float] = None
     rsi: Optional[float] = None
+    rsi6: Optional[float] = None
+    rsi12: Optional[float] = None
     macd_hist: Optional[float] = None
     k: Optional[float] = None
     d: Optional[float] = None
@@ -238,7 +240,7 @@ def find_stock_report_path(code: str) -> Optional[str]:
     return idx.get(code)
 
 def recalculate_indicators(kline_bars: list[KlineBar]):
-    """重新計算所有 K 棒的 MA5, MA10, MA20, MA60, MA120 (半年線), MA240 (年線) 及布林通道指標"""
+    """重新計算所有 K 棒的 MA (5/10/20/60/120/240)、布林通道及 RSI(6)、RSI(12) 指標"""
     closes = [b.close for b in kline_bars]
     for idx, b in enumerate(kline_bars):
         if idx >= 4:
@@ -260,6 +262,37 @@ def recalculate_indicators(kline_bars: list[KlineBar]):
             b.ma120 = round(sum(closes[idx-119:idx+1]) / 120.0, 2)
         if idx >= 239:
             b.ma240 = round(sum(closes[idx-239:idx+1]) / 240.0, 2)
+
+    # 計算標準 RSI(6) 與 RSI(12) (Wilder 平滑移動平均法)
+    if len(kline_bars) >= 2:
+        deltas = [kline_bars[i].close - kline_bars[i-1].close for i in range(1, len(kline_bars))]
+        gains = [max(0.0, d) for d in deltas]
+        losses = [max(0.0, -d) for d in deltas]
+
+        def compute_wilder_rsi(period: int) -> list[Optional[float]]:
+            res: list[Optional[float]] = [None]  # 第 0 根無前值
+            if len(deltas) < period:
+                return res + [None] * len(deltas)
+            avg_g = sum(gains[:period]) / float(period)
+            avg_l = sum(losses[:period]) / float(period)
+            for _ in range(period - 1):
+                res.append(None)
+            rs = (avg_g / avg_l) if avg_l != 0 else (100.0 if avg_g > 0 else 1.0)
+            res.append(round(100.0 - (100.0 / (1.0 + rs)), 1))
+            for i in range(period, len(deltas)):
+                avg_g = (avg_g * (period - 1) + gains[i]) / float(period)
+                avg_l = (avg_l * (period - 1) + losses[i]) / float(period)
+                rs = (avg_g / avg_l) if avg_l != 0 else (100.0 if avg_g > 0 else 1.0)
+                res.append(round(100.0 - (100.0 / (1.0 + rs)), 1))
+            return res
+
+        rsi6_list = compute_wilder_rsi(6)
+        rsi12_list = compute_wilder_rsi(12)
+        for idx, b in enumerate(kline_bars):
+            if idx < len(rsi6_list):
+                b.rsi6 = rsi6_list[idx]
+            if idx < len(rsi12_list):
+                b.rsi12 = rsi12_list[idx]
 
 def backfill_missing_kline_bars(code: str, kline_bars: list[KlineBar]) -> list[KlineBar]:
     """
@@ -385,7 +418,7 @@ def parse_stock_report(
     kline_bars: list[KlineBar] = []
     for t in tables:
         headers = [th.get_text(strip=True) for th in t.find_all("th")]
-        # 指數報價表格 (日期, 開, 高, 低, 收)
+        # 指數報價表格 (日期, 開, 高, 低, 收, [成交額/量])
         if "日期" in headers and "開" in headers and "高" in headers and "低" in headers and "收" in headers and "MA5" not in headers:
             rows = t.find_all("tr")[1:]
             for r in rows:
@@ -395,13 +428,19 @@ def parse_stock_report(
                         c_val = float(cols[4].replace(",", ""))
                         if c_val <= 0:
                             continue
+                        vol_val = 0.0
+                        if len(cols) >= 6:
+                            try:
+                                vol_val = float(cols[5].replace(",", "").replace("億", "").replace("張", "").strip())
+                            except (ValueError, IndexError):
+                                vol_val = 0.0
                         kline_bars.append(KlineBar(
                             date=cols[0],
                             open=float(cols[1].replace(",", "")),
                             high=float(cols[2].replace(",", "")),
                             low=float(cols[3].replace(",", "")),
                             close=c_val,
-                            volume=0.0,
+                            volume=vol_val,
                         ))
                     except (ValueError, IndexError):
                         continue

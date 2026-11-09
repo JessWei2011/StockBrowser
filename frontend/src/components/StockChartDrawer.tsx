@@ -12,7 +12,7 @@ interface StockChartDrawerProps {
   changePercent?: number | null;
 }
 
-type TabKey = 'chips' | 'margin' | 'holders';
+type TabKey = 'chips' | 'margin' | 'holders' | 'kd' | 'rsi';
 
 const BUFFER_DAYS = 20;
 const MIN_VISIBLE_BARS = 4; // 允許放大至僅 4 根 K 棒，細看型態與巨大 K 棒細節
@@ -538,7 +538,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
 
     dom.addEventListener('wheel', handleWheel, { passive: false, capture: true });
 
-    // 同步手動 slider 或左右拖曳後的 K 棒數量與價格徽章
+    // 同步手動 slider 或左右拖曳後的 K 棒數量與價格徽章，並在 KD / RSI 模式同步次圖 dataZoom
     const handleDataZoom = () => {
       const opt: any = chart.getOption();
       const dz = opt?.dataZoom?.[0];
@@ -546,6 +546,15 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
         const spanSlots = ((dz.end - dz.start) / 100) * (realTotal + BUFFER_DAYS - 1);
         if (spanSlots > 0) {
           visibleBarsRef.current = Math.max(MIN_VISIBLE_BARS, Math.min(realTotal, spanSlots * 0.75));
+        }
+
+        // 若次圖為 KD 或 RSI，即時同步相同的縮放範圍
+        if (subInstanceRef.current && !subInstanceRef.current.isDisposed()) {
+          subInstanceRef.current.dispatchAction({
+            type: 'dataZoom',
+            start: dz.start,
+            end: dz.end,
+          });
         }
       }
       refreshBadges();
@@ -742,6 +751,208 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
           },
         ],
       };
+    } else if (activeTab === 'kd') {
+      // 技術指標：KD 指標 (與上方主圖日期 100% 相同並同步縮放)
+      const kline = (data.kline || []).filter(
+        (k) => k.volume > 0 || k.open !== k.close || k.high !== k.low
+      );
+      const expandedDates = kline.map((k) => k.date).concat(new Array(BUFFER_DAYS).fill(''));
+      const kVals = kline.map((k) => k.k ?? null);
+      const dVals = kline.map((k) => k.d ?? null);
+
+      // 取得主圖目前的 dataZoom 狀態
+      let curStart = 0;
+      let curEnd = 100;
+      if (mainInstanceRef.current && !mainInstanceRef.current.isDisposed()) {
+        const mOpt: any = mainInstanceRef.current.getOption();
+        const dz = mOpt?.dataZoom?.[0];
+        if (dz && dz.start != null && dz.end != null) {
+          curStart = dz.start;
+          curEnd = dz.end;
+        }
+      }
+
+      subOption = {
+        animation: false,
+        tooltip: {
+          trigger: 'axis',
+          axisPointer: { type: 'cross' },
+          backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+          borderColor: isDark ? '#334155' : '#cbd5e1',
+          textStyle: { color: isDark ? '#f8fafc' : '#0f172a', fontSize: 12 },
+          formatter: (params: any) => {
+            if (!Array.isArray(params) || params.length === 0) return '';
+            const idx = params[0].dataIndex;
+            if (idx >= kline.length) return '';
+            const kItem = kline[idx];
+            if (!kItem) return '';
+            const kStr = kItem.k != null ? kItem.k.toFixed(1) : '-';
+            const dStr = kItem.d != null ? kItem.d.toFixed(1) : '-';
+            return `<div style="font-weight:700;margin-bottom:3px;">${kItem.date} KD指標</div>` +
+              `<div><span style="color:#0ea5e9;font-weight:700;">◆ K(9):</span> ${kStr}</div>` +
+              `<div><span style="color:#f97316;font-weight:700;">◆ D(9):</span> ${dStr}</div>`;
+          },
+        },
+        legend: {
+          data: ['K(9)', 'D(9)'],
+          textStyle: { color: textColor, fontSize: 11 },
+          top: 0,
+        },
+        grid: { left: '45px', right: '78px', top: '26px', bottom: '22px' },
+        xAxis: {
+          type: 'category',
+          data: expandedDates,
+          boundaryGap: false,
+          axisLine: { lineStyle: { color: gridBorder } },
+          axisLabel: { color: textColor, fontSize: 11 },
+          splitLine: { show: true, lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+        },
+        yAxis: {
+          type: 'value',
+          min: 0,
+          max: 100,
+          position: 'right',
+          splitNumber: 2,
+          axisLabel: { color: textColor, fontSize: 10 },
+          splitLine: { lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+        },
+        dataZoom: [
+          {
+            type: 'inside',
+            start: curStart,
+            end: curEnd,
+            zoomOnMouseWheel: false,
+            moveOnMouseMove: true,
+          },
+        ],
+        series: [
+          {
+            name: 'K(9)',
+            type: 'line',
+            data: kVals,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { color: '#0ea5e9', width: 1.8 },
+            markLine: {
+              symbol: 'none',
+              silent: true,
+              data: [
+                { yAxis: 80, lineStyle: { color: '#ef4444', type: 'dashed', width: 0.8 }, label: { formatter: '超買 80', position: 'insideStartTop', fontSize: 9, color: '#ef4444' } },
+                { yAxis: 20, lineStyle: { color: '#10b981', type: 'dashed', width: 0.8 }, label: { formatter: '超賣 20', position: 'insideStartBottom', fontSize: 9, color: '#10b981' } },
+              ],
+            },
+          },
+          {
+            name: 'D(9)',
+            type: 'line',
+            data: dVals,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { color: '#f97316', width: 1.8 },
+          },
+        ],
+      };
+    } else if (activeTab === 'rsi') {
+      // 技術指標：RSI 指標 (RSI 6 藍、RSI 12 橘)
+      const kline = (data.kline || []).filter(
+        (k) => k.volume > 0 || k.open !== k.close || k.high !== k.low
+      );
+      const expandedDates = kline.map((k) => k.date).concat(new Array(BUFFER_DAYS).fill(''));
+      const rsi6Vals = kline.map((k) => k.rsi6 ?? null);
+      const rsi12Vals = kline.map((k) => k.rsi12 ?? null);
+
+      let curStart = 0;
+      let curEnd = 100;
+      if (mainInstanceRef.current && !mainInstanceRef.current.isDisposed()) {
+        const mOpt: any = mainInstanceRef.current.getOption();
+        const dz = mOpt?.dataZoom?.[0];
+        if (dz && dz.start != null && dz.end != null) {
+          curStart = dz.start;
+          curEnd = dz.end;
+        }
+      }
+
+      subOption = {
+        animation: false,
+        tooltip: {
+          trigger: 'axis',
+          axisPointer: { type: 'cross' },
+          backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+          borderColor: isDark ? '#334155' : '#cbd5e1',
+          textStyle: { color: isDark ? '#f8fafc' : '#0f172a', fontSize: 12 },
+          formatter: (params: any) => {
+            if (!Array.isArray(params) || params.length === 0) return '';
+            const idx = params[0].dataIndex;
+            if (idx >= kline.length) return '';
+            const kItem = kline[idx];
+            if (!kItem) return '';
+            const r6Str = kItem.rsi6 != null ? kItem.rsi6.toFixed(1) : '-';
+            const r12Str = kItem.rsi12 != null ? kItem.rsi12.toFixed(1) : '-';
+            return `<div style="font-weight:700;margin-bottom:3px;">${kItem.date} RSI指標</div>` +
+              `<div><span style="color:#0ea5e9;font-weight:700;">◆ RSI(6):</span> ${r6Str}</div>` +
+              `<div><span style="color:#f97316;font-weight:700;">◆ RSI(12):</span> ${r12Str}</div>`;
+          },
+        },
+        legend: {
+          data: ['RSI(6)', 'RSI(12)'],
+          textStyle: { color: textColor, fontSize: 11 },
+          top: 0,
+        },
+        grid: { left: '45px', right: '78px', top: '26px', bottom: '22px' },
+        xAxis: {
+          type: 'category',
+          data: expandedDates,
+          boundaryGap: false,
+          axisLine: { lineStyle: { color: gridBorder } },
+          axisLabel: { color: textColor, fontSize: 11 },
+          splitLine: { show: true, lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+        },
+        yAxis: {
+          type: 'value',
+          min: 0,
+          max: 100,
+          position: 'right',
+          splitNumber: 2,
+          axisLabel: { color: textColor, fontSize: 10 },
+          splitLine: { lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+        },
+        dataZoom: [
+          {
+            type: 'inside',
+            start: curStart,
+            end: curEnd,
+            zoomOnMouseWheel: false,
+            moveOnMouseMove: true,
+          },
+        ],
+        series: [
+          {
+            name: 'RSI(6)',
+            type: 'line',
+            data: rsi6Vals,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { color: '#0ea5e9', width: 1.8 },
+            markLine: {
+              symbol: 'none',
+              silent: true,
+              data: [
+                { yAxis: 80, lineStyle: { color: '#ef4444', type: 'dashed', width: 0.8 }, label: { formatter: '超買 80', position: 'insideStartTop', fontSize: 9, color: '#ef4444' } },
+                { yAxis: 50, lineStyle: { color: '#64748b', type: 'dotted', width: 0.8 }, label: { formatter: '多空 50', position: 'insideStartTop', fontSize: 9, color: '#64748b' } },
+                { yAxis: 20, lineStyle: { color: '#10b981', type: 'dashed', width: 0.8 }, label: { formatter: '超賣 20', position: 'insideStartBottom', fontSize: 9, color: '#10b981' } },
+              ],
+            },
+          },
+          {
+            name: 'RSI(12)',
+            type: 'line',
+            data: rsi12Vals,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { color: '#f97316', width: 1.8 },
+          },
+        ],
+      };
     }
 
     chart.setOption(subOption, true);
@@ -847,6 +1058,20 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
                   onClick={() => setActiveTab('holders')}
                 >
                   👑 大戶散戶比例 ({data.holders.length}週)
+                </button>
+                <button
+                  className={`sub-tab-btn ${activeTab === 'kd' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('kd')}
+                  title="9日 KD 隨機指標 (超買超賣與黃金交叉)"
+                >
+                  📈 KD 指標
+                </button>
+                <button
+                  className={`sub-tab-btn ${activeTab === 'rsi' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('rsi')}
+                  title="相對強弱指標 RSI (多空強弱)"
+                >
+                  📊 RSI 指標
                 </button>
               </div>
 

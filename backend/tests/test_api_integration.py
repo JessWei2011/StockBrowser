@@ -43,7 +43,7 @@ async def test_vault_and_wealth_protection():
         groups = b_res.json()["groups"]
         assert len(groups) >= 2
         assert groups[0]["id"] == "g-vault"
-        assert groups[0]["name"] == "財神庫"
+        assert groups[0]["name"] == "財神金庫"
         assert groups[0]["isSystemGroup"] is True
         assert groups[1]["id"] == "g-wealth"
         assert groups[1]["name"] == "財神簿"

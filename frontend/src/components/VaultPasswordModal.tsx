@@ -64,7 +64,7 @@ export const VaultPasswordModal: React.FC<VaultPasswordModalProps> = ({
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '18px' }}>🔒</span>
-            <h2 className="modal-title">財神庫安全驗證</h2>
+            <h2 className="modal-title">財神金庫安全驗證</h2>
           </div>
           <button className="modal-close" onClick={onClose} title="關閉">
             ✕

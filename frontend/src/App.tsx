@@ -35,14 +35,14 @@ export const App: React.FC = () => {
   const [groups, setGroups] = useState<WatchlistGroup[]>(() => cachedBootstrap?.groups || []);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(() => {
     if (!cachedBootstrap?.groups || cachedBootstrap.groups.length === 0) return null;
-    const firstWatchlist = cachedBootstrap.groups.find((g) => g.id !== 'g-vault' && g.name !== '財神庫');
+    const firstWatchlist = cachedBootstrap.groups.find((g) => g.id !== 'g-vault' && g.name !== '財神庫' && g.name !== '財神金庫');
     return firstWatchlist?.id || cachedBootstrap.groups[0]?.id || null;
   });
   const [quotes, setQuotes] = useState<Record<string, QuoteState>>(() => cachedBootstrap?.quotes || {});
   const [positions, setPositions] = useState<StockPosition[]>(() => cachedBootstrap?.positions || []);
   const [dirtyCodes, setDirtyCodes] = useState<Set<string>>(new Set());
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [drawerTab, setDrawerTab] = useState<'vault' | 'vault_ledger' | 'order' | 'balance'>('vault');
+  const [drawerTab, setDrawerTab] = useState<'vault' | 'order' | 'balance'>('vault');
   const [isVaultPasswordModalOpen, setIsVaultPasswordModalOpen] = useState(false);
   const [isGlobalIndicesModalOpen, setIsGlobalIndicesModalOpen] = useState(false);
   const [marketModalTab, setMarketModalTab] = useState<'all' | 'tw' | 'us' | 'asia'>('all');
@@ -209,8 +209,8 @@ export const App: React.FC = () => {
           setIndicators(data.indicators);
         }
         setActiveGroupId((prev) => {
-          if (prev && prev !== 'g-vault' && data.groups.some((g) => g.id === prev && g.name !== '財神庫')) return prev;
-          const firstWatchlist = data.groups.find((g) => g.id !== 'g-vault' && g.name !== '財神庫');
+          if (prev && prev !== 'g-vault' && data.groups.some((g) => g.id === prev && g.name !== '財神庫' && g.name !== '財神金庫')) return prev;
+          const firstWatchlist = data.groups.find((g) => g.id !== 'g-vault' && g.name !== '財神庫' && g.name !== '財神金庫');
           return firstWatchlist?.id || data.groups[0]?.id || null;
         });
       } catch (e) {
@@ -340,8 +340,8 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // 目前選取的群組 (排除財神庫，財神庫由左側輔助視窗獨立呈現)
-  const watchlistGroups = groups.filter((g) => g.id !== 'g-vault' && g.name !== '財神庫');
+  // 目前選取的群組 (排除財神金庫，財神金庫由左側輔助視窗獨立呈現)
+  const watchlistGroups = groups.filter((g) => g.id !== 'g-vault' && g.name !== '財神庫' && g.name !== '財神金庫');
   const activeGroup = watchlistGroups.find((g) => g.id === activeGroupId) || watchlistGroups[0] || null;
 
   // 新增個股 (樂觀更新，立即在 < 16ms 內更新 UI，消除重載全量 bootstrap)
@@ -353,7 +353,7 @@ export const App: React.FC = () => {
     const cleanCode = code.trim().toUpperCase();
 
     // 1. 本地防呆檢查：系統群組保護
-    if (activeGroup.id === 'g-wealth' || activeGroup.id === 'g-vault' || activeGroup.name === '財神簿' || activeGroup.name === '財神庫' || activeGroup.isSystemGroup) {
+    if (activeGroup.id === 'g-wealth' || activeGroup.id === 'g-vault' || activeGroup.name === '財神簿' || activeGroup.name === '財神庫' || activeGroup.name === '財神金庫' || activeGroup.isSystemGroup) {
       throw new Error('『財神簿』由永豐證券庫存自動同步，請切換至自選組合以新增個股');
     }
 
@@ -510,11 +510,11 @@ export const App: React.FC = () => {
     await reorderItems(activeGroup.id, nextCodes);
   };
 
-  // 側邊欄持股自訂排序 (財神庫 / 財神簿，雙向同步財神簿與財神庫組合)
+  // 側邊欄持股自訂排序 (財神金庫 / 財神簿，雙向同步財神簿與財神金庫組合)
   const handleReorderPositions = async (nextCodes: string[]) => {
     setGroups((prev) =>
       prev.map((g) => {
-        if (g.id === 'g-wealth' || g.id === 'g-vault' || g.name === '財神簿' || g.name === '財神庫') {
+        if (g.id === 'g-wealth' || g.id === 'g-vault' || g.name === '財神簿' || g.name === '財神庫' || g.name === '財神金庫') {
           const itemMap = new Map(g.items.map((it) => [it.code, it]));
           const reordered = nextCodes
             .map((c) => itemMap.get(c))
@@ -549,7 +549,7 @@ export const App: React.FC = () => {
     // 樂觀更新
     setGroups((prev) => {
       const groupMap = new Map(prev.map((g) => [g.id, g]));
-      const systemGroups = prev.filter((g) => g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神簿' || g.isSystemGroup);
+      const systemGroups = prev.filter((g) => g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神金庫' || g.name === '財神簿' || g.isSystemGroup);
       const customReordered = nextGroupIds.map((id) => groupMap.get(id)).filter(Boolean) as typeof prev;
       const remaining = prev.filter((g) => !systemGroups.some((sg) => sg.id === g.id) && !nextGroupIds.includes(g.id));
       return [...systemGroups, ...customReordered, ...remaining];
@@ -561,7 +561,7 @@ export const App: React.FC = () => {
     }
   };
 
-  // 點選任一個股最右側下單按鈕：需財神庫密碼通過後方可開啟財神筆
+  // 點選任一個股最右側下單按鈕：需財神金庫密碼通過後方可開啟財神筆
   const handleOpenOrder = (code: string) => {
     if (!isVaultAuthenticated()) {
       setPendingOrderCode(code);
@@ -573,7 +573,7 @@ export const App: React.FC = () => {
     setIsDrawerOpen(true);
   };
 
-  const isVaultGroup = activeGroup?.id === 'g-vault' || activeGroup?.name === '財神庫';
+  const isVaultGroup = activeGroup?.id === 'g-vault' || activeGroup?.name === '財神庫' || activeGroup?.name === '財神金庫';
   const isWealthGroup = activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿';
   const isSystemGroup = isVaultGroup || isWealthGroup || Boolean(activeGroup?.isSystemGroup);
 
@@ -635,7 +635,7 @@ export const App: React.FC = () => {
             onClose={() => setIsDrawerOpen(false)}
             activeTab={drawerTab}
             onChangeTab={(tab) => {
-              if ((tab === 'vault' || tab === 'vault_ledger') && !isVaultAuthenticated()) {
+              if (tab === 'vault' && !isVaultAuthenticated()) {
                 setIsVaultPasswordModalOpen(true);
                 return;
               }
@@ -650,7 +650,7 @@ export const App: React.FC = () => {
             onOrderTargetCodeChange={(code) => setOrderTargetCode(code)}
             orderedCodes={
               groups.find((g) => g.id === 'g-wealth' || g.name === '財神簿')?.items.map((i) => i.code) ||
-              groups.find((g) => g.id === 'g-vault' || g.name === '財神庫')?.items.map((i) => i.code) ||
+              groups.find((g) => g.id === 'g-vault' || g.name === '財神庫' || g.name === '財神金庫')?.items.map((i) => i.code) ||
               []
             }
             onLock={() => {

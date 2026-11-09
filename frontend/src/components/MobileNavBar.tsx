@@ -37,7 +37,7 @@ export const MobileNavBar: React.FC<MobileNavBarProps> = ({
             <span className="mobile-nav-badge">{positionsCount}</span>
           )}
         </div>
-        <span className="mobile-nav-label">財神庫</span>
+        <span className="mobile-nav-label">財神金庫</span>
       </button>
 
       <button

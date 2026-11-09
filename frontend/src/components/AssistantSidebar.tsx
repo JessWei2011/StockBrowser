@@ -9,8 +9,8 @@ import { SmartOrderTab } from './SmartOrderTab';
 interface AssistantSidebarProps {
   isOpen: boolean;
   onClose: () => void;
-  activeTab: 'vault' | 'vault_ledger' | 'order' | 'balance';
-  onChangeTab: (tab: 'vault' | 'vault_ledger' | 'order' | 'balance') => void;
+  activeTab: 'vault' | 'order' | 'balance';
+  onChangeTab: (tab: 'vault' | 'order' | 'balance') => void;
   positions: StockPosition[];
   quotes: Record<string, QuoteState>;
   wealthSummary: WealthSummary | null;
@@ -635,7 +635,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
         className={`sidebar-resizer ${isResizing ? 'is-resizing' : ''}`}
         onMouseDown={handleMouseDown}
         onDoubleClick={handleResetWidth}
-        title="按住拖曳可調整財神庫寬度；雙擊重設為當前螢幕最佳自適應寬度"
+        title="按住拖曳可調整財神金庫寬度；雙擊重設為當前螢幕最佳自適應寬度"
       />
       {/* 頂部標題與分頁切換列 */}
       <div className="sidebar-header">
@@ -643,24 +643,16 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
           <button
             className={`sidebar-tab-btn ${activeTab === 'vault' ? 'active' : ''}`}
             onClick={() => onChangeTab('vault')}
-            title="分頁一：財神庫（庫存持股與未實現損益）"
+            title="分頁一：財神金庫（庫存持股與未實現損益）"
           >
             <span className="sidebar-tab-icon">🏦</span>
-            <span className="sidebar-tab-title">財神庫</span>
+            <span className="sidebar-tab-title">財神金庫</span>
             <span className="sidebar-tab-badge">{positions.length}</span>
-          </button>
-          <button
-            className={`sidebar-tab-btn ${activeTab === 'vault_ledger' ? 'active' : ''}`}
-            onClick={() => onChangeTab('vault_ledger')}
-            title="分頁二：財神簿（持股即時成交行情與操作）"
-          >
-            <span className="sidebar-tab-icon">📖</span>
-            <span className="sidebar-tab-title">財神簿</span>
           </button>
           <button
             className={`sidebar-tab-btn ${activeTab === 'order' ? 'active' : ''}`}
             onClick={() => onChangeTab('order')}
-            title="分頁三：財神筆（快速下單與委託管理）"
+            title="分頁二：財神筆（快速下單與委託管理）"
           >
             <span className="sidebar-tab-icon">✍️</span>
             <span className="sidebar-tab-title">財神筆</span>
@@ -677,7 +669,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
           <button
             className={`sidebar-tab-btn ${activeTab === 'balance' ? 'active' : ''}`}
             onClick={() => onChangeTab('balance')}
-            title="分頁四：財神口袋（T+2 在途交割與投資本金試算）"
+            title="分頁三：財神口袋（T+2 在途交割與投資本金試算）"
           >
             <span className="sidebar-tab-icon">💰</span>
             <span className="sidebar-tab-title">財神口袋</span>
@@ -688,7 +680,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
             <button
               className="btn-sidebar-lock"
               onClick={onLock}
-              title="立即上鎖財神庫（下次開啟需重新輸入密碼）"
+              title="立即上鎖財神金庫（下次開啟需重新輸入密碼）"
             >
               🔒 上鎖
             </button>
@@ -924,196 +916,6 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                             type="button"
                             className="btn-order-shortcut"
                             title={`帶入「${pos.name || pos.code}」現有 ${Math.round(pos.quantity).toLocaleString()} 股至財神筆快速下單`}
-                            onClick={() => handleSelectToOrder(pos.code, pos.quantity)}
-                          >
-                            <span>下單</span>
-                            <span className="order-shortcut-arrow">↗</span>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </>
-              )}
-            </div>
-          </div>
-        ) : activeTab === 'vault_ledger' ? (
-          /* ==================== 分頁二：財神簿 ==================== */
-          <div className="sidebar-vault-content">
-            <div className="sidebar-vault-list">
-              {sortedPositions.length === 0 ? (
-                <div className="sidebar-empty-msg">
-                  尚無持股資料，系統將於永豐證券 API 連線後自動同步。
-                </div>
-              ) : (
-                <>
-                  <div className="vault-sort-bar">
-                    <span className="vault-sort-title">
-                      財神簿 ({sortedPositions.length} 檔)
-                      {vaultSortMode === 'custom' && (
-                        <span className="vault-sort-subhint">（可按 ↑ / ↓ 自由排序）</span>
-                      )}
-                    </span>
-                    <div className="vault-sort-btn-group">
-                      <button
-                        type="button"
-                        className={`vault-sort-pill ${vaultSortMode === 'custom' ? 'active' : ''}`}
-                        onClick={() => setVaultSortMode('custom')}
-                        title="自訂排序 (可按 ↑ / ↓ 或拖曳調整，並與主畫面財神簿即時同步)"
-                      >
-                        📌 自訂排序
-                      </button>
-                      <button
-                        type="button"
-                        className={`vault-sort-pill ${vaultSortMode === 'pnl' ? 'active' : ''}`}
-                        onClick={() => setVaultSortMode('pnl')}
-                        title="依未實現損益高低排序"
-                      >
-                        💰 損益排行
-                      </button>
-                      {onRefreshPositions && (
-                        <button
-                          type="button"
-                          className="vault-sort-pill vault-refresh-pill"
-                          disabled={isRefreshingPositions}
-                          onClick={async () => {
-                            setIsRefreshingPositions(true);
-                            try {
-                              await onRefreshPositions();
-                            } finally {
-                              setIsRefreshingPositions(false);
-                            }
-                          }}
-                          title="立即向永豐證券重新同步最新庫存 (包含買賣成交異動)"
-                        >
-                          {isRefreshingPositions ? '⟳ 同步中...' : '⟳ 同步持股'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="sidebar-vault-col-header">
-                    {vaultSortMode === 'custom' && <span className="col-h-reorder">排序</span>}
-                    <span className="col-h-stock">商品</span>
-                    <span className="col-h-last-price">成交價</span>
-                    <span className="col-h-change-pct">漲跌幅</span>
-                    <span className="col-h-oddlot-price">零股價</span>
-                    <span className="col-h-action">操作</span>
-                  </div>
-                  {sortedPositions.map((pos, idx) => {
-                    const q = quotes[pos.code];
-                    const prev = (q?.previousClose && q.previousClose > 0) ? q.previousClose : null;
-                    const last = (q?.last && q.last > 0) ? q.last : null;
-                    const chg = (last !== null && prev !== null) ? (q?.change ?? (last - prev)) : null;
-                    const pct = (last !== null && prev !== null) ? (q?.changePercent ?? (chg !== null ? (chg / prev) * 100 : null)) : null;
-
-                    let changeClass = 'color-neutral';
-                    if (chg !== null && !isNaN(chg)) {
-                      if (chg > 0) changeClass = 'color-up';
-                      else if (chg < 0) changeClass = 'color-down';
-                    }
-
-                    const lastClass = (last !== null && prev !== null)
-                      ? (last > prev ? 'color-up' : last < prev ? 'color-down' : 'color-neutral')
-                      : 'color-neutral';
-
-                    const oddLot = q?.oddLotLast ?? null;
-                    const oddLotClass = (oddLot !== null && prev !== null)
-                      ? (oddLot > prev ? 'color-up' : oddLot < prev ? 'color-down' : 'color-neutral')
-                      : 'color-neutral';
-
-                    const isOtc = ((pos.exchange || q?.exchange || '').toUpperCase() === 'OTC');
-                    const isDirty = dirtyCodes.has(pos.code);
-                    const isDimmed = Boolean(
-                      pos.code.startsWith('00') ||
-                      pos.code.includes('B') ||
-                      ['ETF', 'BOND'].includes((q?.securityType || '').toUpperCase()) ||
-                      pos.code === '6757'
-                    );
-
-                    return (
-                      <div
-                        key={pos.code}
-                        className={`sidebar-stock-card flat-card ${isDimmed ? 'card-dimmed' : ''} ${isDirty ? 'card-flash' : ''} ${
-                          draggedPosIdx === idx ? 'card-dragging' : ''
-                        } ${dragOverPosIdx === idx ? 'card-drop-target' : ''}`}
-                        draggable={vaultSortMode === 'custom'}
-                        onDragStart={(e) => handleDragStart(e, idx)}
-                        onDragOver={(e) => handleDragOver(e, idx)}
-                        onDragEnd={handleDragEnd}
-                        onDrop={(e) => handleDrop(e, idx)}
-                      >
-                        <div className="vault-card-row-main">
-                          {vaultSortMode === 'custom' && (
-                            <div className="sidebar-reorder-controls" onClick={(e) => e.stopPropagation()}>
-                              <span className="drag-handle sidebar-drag-handle" title="按住拖曳排序">⠿</span>
-                              <button
-                                type="button"
-                                className="btn-order-arrow btn-sidebar-arrow"
-                                title="往上移"
-                                disabled={idx === 0}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleMovePosition(idx, -1);
-                                }}
-                              >
-                                ↑
-                              </button>
-                              <button
-                                type="button"
-                                className="btn-order-arrow btn-sidebar-arrow"
-                                title="往下移"
-                                disabled={idx === sortedPositions.length - 1}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleMovePosition(idx, 1);
-                                }}
-                              >
-                                ↓
-                              </button>
-                            </div>
-                          )}
-
-                          <div className="flat-card-stock">
-                            <span
-                              className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
-                              title={isOtc ? '上櫃股票' : '上市股票'}
-                            >
-                              {isOtc ? '櫃' : '市'}
-                            </span>
-                            <span className="flat-stock-name" title={pos.name || pos.code}>
-                              {pos.name || pos.code}
-                            </span>
-                            <span className={`flat-stock-code ${isOtc ? 'code-otc' : 'code-tse'}`}>
-                              {pos.code}
-                            </span>
-                          </div>
-
-                          <div className="vault-card-price-pct-group">
-                            <div className={`flat-card-price ${lastClass}`} title="整股成交價">
-                              {last !== null ? last.toFixed(2) : '—'}
-                            </div>
-                            <div className={`flat-card-pct ${changeClass}`} title="當日漲跌幅">
-                              {pct === null || isNaN(pct)
-                                ? '—'
-                                : pct > 0
-                                ? `+${pct.toFixed(2)}%`
-                                : `${pct.toFixed(2)}%`}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="vault-card-row-sub">
-                          <div className="vault-card-sub-info">
-                            <div className={`flat-card-oddlot ${oddLotClass}`} title="盤中零股成交價">
-                              {oddLot !== null && oddLot > 0 ? oddLot.toFixed(2) : '—'}
-                            </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            className="btn-order-shortcut"
-                            title={`帶入「${pos.name || pos.code}」快速下單`}
                             onClick={() => handleSelectToOrder(pos.code, pos.quantity)}
                           >
                             <span>下單</span>

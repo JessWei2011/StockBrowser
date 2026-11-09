@@ -1,5 +1,6 @@
 import React from 'react';
 import type { QuoteState, WatchlistItem, StockAnnouncement, StockMaSummary } from '../types';
+import { filterActiveAnnouncements } from '../utils/announcements';
 
 interface CompactCardListProps {
   items: WatchlistItem[];
@@ -121,7 +122,8 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
         const isOtc = ((item.exchange || q?.exchange || '').toUpperCase() === 'OTC');
         const isEtfOrBond = item.code.startsWith('00') || ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase());
 
-        const stockAnns = announcements[item.code] || [];
+        const rawAnns = announcements[item.code] || [];
+        const stockAnns = filterActiveAnnouncements(rawAnns);
         const dispAnn = stockAnns.find((a) => a.category === 'disposition');
         const hasDisp = dispAnn || dispositionLevel > 0 || dispositionPeriod;
         const dispTitle = dispAnn ? `${dispAnn.title}\n${dispAnn.detail || ''}`.trim() : (dispositionPeriod ? `處置股票 (期間: ${dispositionPeriod})` : '處置股票');
@@ -130,6 +132,12 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
         const attAnn = stockAnns.find((a) => a.category === 'attention');
         const hasAtt = !hasDisp && (attAnn || isAttention);
         const attTitle = attAnn ? `${attAnn.title}\n${attAnn.detail || ''}`.trim() : '注意股票';
+
+        const revAnn = stockAnns.find((a) => a.category === 'revenue');
+        const earnAnn = stockAnns.find((a) => a.category === 'earnings');
+        const briefAnn = stockAnns.find((a) => a.category === 'briefing');
+        const newsAnn = stockAnns.find((a) => a.category === 'news');
+        const exdivAnn = stockAnns.find((a) => a.category === 'exdividend');
 
         return (
           <div
@@ -156,6 +164,31 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
                   {hasAtt && (
                     <span className="stock-badge badge-attention" title={attTitle}>
                       [注意]
+                    </span>
+                  )}
+                  {revAnn && (
+                    <span className="stock-badge badge-revenue" title={`${revAnn.title}\n${revAnn.detail || ''}`.trim()}>
+                      [{revAnn.tag}]
+                    </span>
+                  )}
+                  {earnAnn && (
+                    <span className="stock-badge badge-earnings" title={`${earnAnn.title}\n${earnAnn.detail || ''}`.trim()}>
+                      [{earnAnn.tag}]
+                    </span>
+                  )}
+                  {briefAnn && (
+                    <span className="stock-badge badge-briefing" title={`${briefAnn.title}\n${briefAnn.detail || ''}`.trim()}>
+                      [{briefAnn.tag}]
+                    </span>
+                  )}
+                  {newsAnn && (
+                    <span className="stock-badge badge-news" title={`${newsAnn.title}\n${newsAnn.detail || ''}`.trim()}>
+                      [{newsAnn.tag}]
+                    </span>
+                  )}
+                  {exdivAnn && (
+                    <span className="stock-badge badge-exdiv" title={`${exdivAnn.title}\n${exdivAnn.detail || ''}`.trim()}>
+                      [{exdivAnn.tag}]
                     </span>
                   )}
                 </div>

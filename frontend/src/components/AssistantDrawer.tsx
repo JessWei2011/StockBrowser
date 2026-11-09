@@ -160,10 +160,10 @@ export const AssistantDrawer: React.FC<AssistantDrawerProps> = ({
             <button
               className={`drawer-tab-btn ${activeTab === 'vault' ? 'active' : ''}`}
               onClick={() => onChangeTab('vault')}
-              title="分頁一：財神庫（庫存持股與未實現損益）"
+              title="分頁一：財神金庫（庫存持股與未實現損益）"
             >
               <span className="drawer-tab-icon">🏦</span>
-              <span className="drawer-tab-title">財神庫</span>
+              <span className="drawer-tab-title">財神金庫</span>
               <span className="drawer-tab-badge">{positions.length}</span>
             </button>
             <button

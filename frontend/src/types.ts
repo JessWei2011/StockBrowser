@@ -140,7 +140,7 @@ export interface StockAnnouncement {
   title: string;
   date?: string | null;
   detail?: string | null;
-  category: 'attention' | 'disposition' | 'news' | 'exdividend' | 'earnings' | 'revenue';
+  category: 'attention' | 'disposition' | 'news' | 'exdividend' | 'earnings' | 'revenue' | 'briefing';
   updatedAt?: string | null;
 }
 
@@ -316,6 +316,8 @@ export interface KlineBar {
   boll_mid?: number | null;
   boll_down?: number | null;
   rsi?: number | null;
+  rsi6?: number | null;
+  rsi12?: number | null;
   macd_hist?: number | null;
   k?: number | null;
   d?: number | null;

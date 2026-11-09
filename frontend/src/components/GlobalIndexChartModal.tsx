@@ -3,6 +3,166 @@ import * as echarts from 'echarts';
 import type { StockChartData, KlineBar } from '../types';
 import { fetchStockChart } from '../services/api';
 
+interface PriceBadgeItem {
+  key: string;
+  tag: string;
+  val: number;
+  color: string;
+  text: string;
+  isBold?: boolean;
+  rawY?: number;
+}
+
+/**
+ * 右側 Y 軸彩色防重疊數值膠囊標籤 (與個股 K 線風格一致)
+ * 標示最新收盤/現價、MA 均線群 (5/10/20/60/120/240) 與 BOLL (上/下軌)
+ */
+function updateRightPriceBadges(
+  chart: echarts.ECharts | null,
+  dom: HTMLDivElement | null,
+  kline: KlineBar[],
+  currentPrice?: number | null,
+  showMA = true,
+  showBoll = false,
+) {
+  if (!chart || chart.isDisposed() || !dom || !kline || kline.length === 0) return;
+
+  let container = dom.querySelector<HTMLDivElement>('.echart-right-price-badges');
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'echart-right-price-badges';
+    dom.appendChild(container);
+  }
+
+  const lastIdx = kline.length - 1;
+  const lastK = kline[lastIdx];
+  const prevK = lastIdx > 0 ? kline[lastIdx - 1] : lastK;
+
+  const closePrice = currentPrice && currentPrice > 0 ? currentPrice : lastK.close;
+  const prevClose = prevK.close || lastK.open;
+  const isUp = closePrice >= prevClose;
+  const priceColor = isUp ? '#ef4444' : '#22c55e';
+
+  const formatPriceText = (v: number) => {
+    if (v >= 1000) return v.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    return v.toFixed(2);
+  };
+
+  const items: PriceBadgeItem[] = [];
+
+  // 1. 現價 (收盤價)
+  items.push({
+    key: 'close',
+    tag: '現',
+    val: closePrice,
+    color: priceColor,
+    text: formatPriceText(closePrice),
+    isBold: true,
+  });
+
+  // 2. 均線系列
+  if (showMA) {
+    if (lastK.ma5 != null) {
+      items.push({ key: 'ma5', tag: '5', val: lastK.ma5, color: '#38bdf8', text: formatPriceText(lastK.ma5) });
+    }
+    if (lastK.ma10 != null) {
+      items.push({ key: 'ma10', tag: '10', val: lastK.ma10, color: '#eab308', text: formatPriceText(lastK.ma10) });
+    }
+    if (lastK.ma20 != null) {
+      items.push({ key: 'ma20', tag: '20', val: lastK.ma20, color: '#f43f5e', text: formatPriceText(lastK.ma20) });
+    }
+    if (lastK.ma60 != null) {
+      items.push({ key: 'ma60', tag: '60', val: lastK.ma60, color: '#a855f7', text: formatPriceText(lastK.ma60) });
+    }
+    if (lastK.ma120 != null) {
+      items.push({ key: 'ma120', tag: '120', val: lastK.ma120, color: '#10b981', text: formatPriceText(lastK.ma120) });
+    }
+    if (lastK.ma240 != null) {
+      items.push({ key: 'ma240', tag: '240', val: lastK.ma240, color: '#f97316', text: formatPriceText(lastK.ma240) });
+    }
+  }
+
+  // 3. 布林通道
+  if (showBoll) {
+    if (lastK.boll_up != null) {
+      items.push({ key: 'boll_up', tag: 'UB', val: lastK.boll_up, color: '#60a5fa', text: formatPriceText(lastK.boll_up) });
+    }
+    if (lastK.boll_down != null) {
+      items.push({ key: 'boll_down', tag: 'LB', val: lastK.boll_down, color: '#60a5fa', text: formatPriceText(lastK.boll_down) });
+    }
+  }
+
+  // 計算在主圖 Y 軸 (gridIndex 0) 的實際像素座標
+  const validItems: PriceBadgeItem[] = [];
+  items.forEach((it) => {
+    try {
+      const pixel = chart.convertToPixel({ yAxisIndex: 0 }, it.val);
+      if (pixel != null && !isNaN(pixel)) {
+        it.rawY = pixel;
+        validItems.push(it);
+      }
+    } catch (_) {}
+  });
+
+  if (validItems.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  // 主圖 Y 軸顯示邊界範圍 (top: 25px, height: 56%)
+  const domHeight = dom.clientHeight || 450;
+  const minY = 28;
+  const maxY = Math.round(25 + domHeight * 0.56 - 10);
+
+  // 依 Y 座標從小到大排列 (即價格由高到低)
+  validItems.sort((a, b) => (a.rawY ?? 0) - (b.rawY ?? 0));
+
+  // 防重疊演算法 (Two-pass Relaxation with boundary clamping)
+  const minGap = 19;
+  const count = validItems.length;
+  const adjustedY = validItems.map((it) => it.rawY ?? 0);
+
+  for (let i = 1; i < count; i++) {
+    if (adjustedY[i] < adjustedY[i - 1] + minGap) {
+      adjustedY[i] = adjustedY[i - 1] + minGap;
+    }
+  }
+
+  if (adjustedY[count - 1] > maxY) {
+    adjustedY[count - 1] = maxY;
+    for (let i = count - 2; i >= 0; i--) {
+      if (adjustedY[i] > adjustedY[i + 1] - minGap) {
+        adjustedY[i] = adjustedY[i + 1] - minGap;
+      }
+    }
+  }
+
+  if (adjustedY[0] < minY) {
+    adjustedY[0] = minY;
+    for (let i = 1; i < count; i++) {
+      if (adjustedY[i] < adjustedY[i - 1] + minGap) {
+        adjustedY[i] = adjustedY[i - 1] + minGap;
+      }
+    }
+  }
+
+  let html = '';
+  for (let i = 0; i < count; i++) {
+    const it = validItems[i];
+    const y = adjustedY[i];
+    const topPx = Math.round(y - 9);
+    const tagHtml = it.tag ? `<span class="badge-tag">${it.tag}</span>` : '';
+    const fontWeight = it.isBold ? '800' : '700';
+
+    html += `<div class="echart-price-badge-item" style="top:${topPx}px; background-color:${it.color}; font-weight:${fontWeight};">` +
+      tagHtml +
+      `<span class="badge-text">${it.text}</span>` +
+      `</div>`;
+  }
+
+  container.innerHTML = html;
+}
+
 interface GlobalIndexChartModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -37,12 +197,14 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
 
   const mainChartRef = useRef<HTMLDivElement | null>(null);
   const mainInstanceRef = useRef<echarts.ECharts | null>(null);
+  const zoomRangeRef = useRef<{ start: number; end: number } | null>(null);
 
   // 載入技術分析 K 線數據（開盤交易時段每 15 秒自動刷新）
   useEffect(() => {
     if (!isOpen || !code) {
       setData(null);
       setError(null);
+      zoomRangeRef.current = null;
       return;
     }
 
@@ -146,9 +308,28 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
     const bollMid = kline.map((k: KlineBar) => k.boll_mid ?? null);
     const bollDown = kline.map((k: KlineBar) => k.boll_down ?? null);
 
-    // 初始預設視野：年線視角（近 240 根 K 棒，聚焦年線與中長期趨勢）
-    const initBars = Math.min(240, totalBars);
-    const initStart = Math.max(0, Math.round(((totalBars - initBars) / totalBars) * 100));
+    // 檢查是否有歷史成交量/額資料
+    const hasVolumeData = kline.some((k: KlineBar) => (k.volume ?? 0) > 0);
+    // 是否為台股市場（加權或櫃買），單位為億元；其他市場若有量則以量為單位
+    const isTwMarket = code === 'IX0001' || code === 'IX0043' || code === 'TSE' || code === 'OTC' || code === '^TWII' || code === 'MKT01' || code === 'MKT02';
+    const volumeUnitLabel = isTwMarket ? '億元' : '量';
+
+    const volumes = kline.map((k: KlineBar) => {
+      const vol = k.volume ?? 0;
+      const isUp = k.close >= k.open;
+      return {
+        value: vol,
+        itemStyle: {
+          color: isUp ? upColor : downColor,
+        },
+      };
+    });
+
+    // 初始預設視野：優先保留使用者當前縮放範圍（避免 15s 輪詢或即時報價跳動時還原重設）
+    const defaultBars = Math.min(240, totalBars);
+    const defaultStart = Math.max(0, Math.round(((totalBars - defaultBars) / totalBars) * 100));
+    const initStart = zoomRangeRef.current?.start ?? defaultStart;
+    const initEnd = zoomRangeRef.current?.end ?? 100;
 
     // 系列數據
     const seriesList: any[] = [
@@ -156,6 +337,8 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
         name: '日K線',
         type: 'candlestick',
         data: candles,
+        xAxisIndex: 0,
+        yAxisIndex: 0,
         itemStyle: {
           color: upColor,
           color0: downColor,
@@ -171,6 +354,8 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           name: '5MA',
           type: 'line',
           data: ma5,
+          xAxisIndex: 0,
+          yAxisIndex: 0,
           smooth: true,
           showSymbol: false,
           lineStyle: { width: 1.2, color: '#38bdf8' },
@@ -179,6 +364,8 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           name: '10MA',
           type: 'line',
           data: ma10,
+          xAxisIndex: 0,
+          yAxisIndex: 0,
           smooth: true,
           showSymbol: false,
           lineStyle: { width: 1.2, color: '#eab308' },
@@ -187,6 +374,8 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           name: '20MA',
           type: 'line',
           data: ma20,
+          xAxisIndex: 0,
+          yAxisIndex: 0,
           smooth: true,
           showSymbol: false,
           lineStyle: { width: 1.5, color: '#f43f5e' },
@@ -195,6 +384,8 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           name: '60MA',
           type: 'line',
           data: ma60,
+          xAxisIndex: 0,
+          yAxisIndex: 0,
           smooth: true,
           showSymbol: false,
           lineStyle: { width: 1.5, color: '#a855f7' },
@@ -203,6 +394,8 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           name: '120MA (半年線)',
           type: 'line',
           data: ma120,
+          xAxisIndex: 0,
+          yAxisIndex: 0,
           smooth: true,
           showSymbol: false,
           lineStyle: { width: 1.5, color: '#10b981' },
@@ -211,6 +404,8 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           name: '240MA (年線)',
           type: 'line',
           data: ma240,
+          xAxisIndex: 0,
+          yAxisIndex: 0,
           smooth: true,
           showSymbol: false,
           lineStyle: { width: 1.5, color: '#f97316' },
@@ -224,6 +419,8 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           name: 'BOLL上軌',
           type: 'line',
           data: bollUp,
+          xAxisIndex: 0,
+          yAxisIndex: 0,
           smooth: true,
           showSymbol: false,
           lineStyle: { width: 1, type: 'dashed', color: '#60a5fa' },
@@ -232,6 +429,8 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           name: 'BOLL中軌',
           type: 'line',
           data: bollMid,
+          xAxisIndex: 0,
+          yAxisIndex: 0,
           smooth: true,
           showSymbol: false,
           lineStyle: { width: 1, color: '#93c5fd' },
@@ -240,11 +439,24 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           name: 'BOLL下軌',
           type: 'line',
           data: bollDown,
+          xAxisIndex: 0,
+          yAxisIndex: 0,
           smooth: true,
           showSymbol: false,
           lineStyle: { width: 1, type: 'dashed', color: '#60a5fa' },
         }
       );
+    }
+
+    if (hasVolumeData) {
+      seriesList.push({
+        name: isTwMarket ? '成交額' : '成交量',
+        type: 'bar',
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        data: volumes,
+        barMaxWidth: 35,
+      });
     }
 
     const option: echarts.EChartsOption = {
@@ -269,76 +481,133 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           const isUp = k.close >= k.open;
           const colorHex = isUp ? upColor : downColor;
 
-          let html = `<div style="font-weight:700;margin-bottom:6px;font-size:13px;border-bottom:1px solid ${gridBorder};padding-bottom:4px;">📅 ${k.date} ｜ ${data.name || code}</div>`;
-          html += `<div style="color:${colorHex};font-weight:700;font-size:14px;margin-bottom:4px;">收盤: ${k.close.toLocaleString()} (${isUp ? '+' : ''}${chg.toFixed(2)}, ${chgPct.toFixed(2)}%)</div>`;
-          html += `<div style="color:${textColor};margin-bottom:4px;">開盤: ${k.open.toLocaleString()} ｜ 最高: ${k.high.toLocaleString()} ｜ 最低: ${k.low.toLocaleString()}</div>`;
-
-          if (k.ma240 || k.ma120 || k.ma60 || k.ma20) {
-            html += `<div style="margin-top:6px;padding-top:4px;border-top:1px dashed ${gridBorder};display:flex;flex-direction:column;gap:2px;">`;
-            if (k.ma240) html += `<span style="color:#f97316;">◆ 240MA (年線): ${k.ma240.toLocaleString()}</span>`;
-            if (k.ma120) html += `<span style="color:#10b981;">◆ 120MA (半年線): ${k.ma120.toLocaleString()}</span>`;
-            if (k.ma60) html += `<span style="color:#a855f7;">◆ 60MA (季線): ${k.ma60.toLocaleString()}</span>`;
-            if (k.ma20) html += `<span style="color:#f43f5e;">◆ 20MA (月線): ${k.ma20.toLocaleString()}</span>`;
-            if (k.ma10) html += `<span style="color:#eab308;">◆ 10MA: ${k.ma10.toLocaleString()}</span>`;
-            if (k.ma5) html += `<span style="color:#38bdf8;">◆ 5MA: ${k.ma5.toLocaleString()}</span>`;
-            html += `</div>`;
+          let html = `<div style="font-weight:700;margin-bottom:4px;">${k.date} ｜ ${data.name || code}</div>`;
+          html += `<div style="color:${colorHex};font-weight:700;font-size:13px;margin-bottom:2px;">收盤: ${k.close.toLocaleString()} (${isUp ? '+' : ''}${chg.toFixed(2)}, ${chgPct.toFixed(2)}%)</div>`;
+          html += `<div>開盤: ${k.open.toLocaleString()} ｜ 最高: ${k.high.toLocaleString()} ｜ 最低: ${k.low.toLocaleString()}</div>`;
+          if (hasVolumeData && (k.volume ?? 0) > 0) {
+            html += `<div style="color:${textColor};font-weight:600;margin-top:2px;">${isTwMarket ? '成交額' : '成交量'}: ${k.volume?.toLocaleString()} ${volumeUnitLabel}</div>`;
           }
-
-          if (k.boll_up) {
-            html += `<div style="color:#60a5fa;margin-top:4px;font-size:11px;">BOLL 上: ${k.boll_up.toLocaleString()} ｜ 中: ${k.boll_mid?.toLocaleString()} ｜ 下: ${k.boll_down?.toLocaleString()}</div>`;
-          }
-
           return html;
         },
       },
-      grid: {
-        left: '55px',
-        right: '40px',
-        top: '25px',
-        bottom: '50px',
+      axisPointer: {
+        link: [{ xAxisIndex: 'all' }],
       },
-      xAxis: {
-        type: 'category',
-        data: dates,
-        boundaryGap: false,
-        axisLine: { lineStyle: { color: gridBorder } },
-        axisLabel: {
-          color: textColor,
-          fontSize: 11,
-          formatter: (val: string) => {
-            // 如果格式為 YYYY-MM-DD，標籤僅顯示 YY/MM/DD 簡潔格式
-            if (val && val.length === 10 && val.includes('-')) {
-              return val.substring(2).replace(/-/g, '/');
-            }
-            return val;
-          },
-        },
-        splitLine: { show: true, lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
-      },
-      yAxis: {
-        type: 'value',
-        scale: true,
-        position: 'right',
-        axisLine: { show: true, lineStyle: { color: gridBorder } },
-        splitLine: { lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
-        axisLabel: {
-          color: textColor,
-          fontSize: 11,
-          formatter: (v: number) => v.toLocaleString(),
-        },
-      },
+      grid: hasVolumeData
+        ? [
+            { left: '45px', right: '78px', top: '25px', height: '56%' }, // 主圖 (K線，右側留 78px 供膠囊對齊)
+            { left: '45px', right: '78px', top: '69%', height: '20%' }, // 副圖 (成交量/額)
+          ]
+        : [
+            { left: '45px', right: '78px', top: '25px', bottom: '50px' },
+          ],
+      xAxis: hasVolumeData
+        ? [
+            {
+              type: 'category',
+              data: dates,
+              gridIndex: 0,
+              boundaryGap: false,
+              axisLine: { lineStyle: { color: gridBorder } },
+              axisLabel: { show: false },
+              splitLine: { show: true, lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+            },
+            {
+              type: 'category',
+              data: dates,
+              gridIndex: 1,
+              boundaryGap: false,
+              axisLine: { lineStyle: { color: gridBorder } },
+              axisLabel: {
+                color: textColor,
+                fontSize: 11,
+                formatter: (val: string) => {
+                  if (val && val.length === 10 && val.includes('-')) {
+                    return val.substring(2).replace(/-/g, '/');
+                  }
+                  return val;
+                },
+              },
+              splitLine: { show: true, lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+            },
+          ]
+        : [
+            {
+              type: 'category',
+              data: dates,
+              boundaryGap: false,
+              axisLine: { lineStyle: { color: gridBorder } },
+              axisLabel: {
+                color: textColor,
+                fontSize: 11,
+                formatter: (val: string) => {
+                  if (val && val.length === 10 && val.includes('-')) {
+                    return val.substring(2).replace(/-/g, '/');
+                  }
+                  return val;
+                },
+              },
+              splitLine: { show: true, lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+            },
+          ],
+      yAxis: hasVolumeData
+        ? [
+            {
+              type: 'value',
+              scale: true,
+              gridIndex: 0,
+              position: 'right',
+              axisLine: { show: true, lineStyle: { color: gridBorder } },
+              splitLine: { lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+              axisLabel: {
+                color: textColor,
+                fontSize: 11,
+                formatter: (v: number) => v.toLocaleString(),
+              },
+            },
+            {
+              type: 'value',
+              scale: true,
+              gridIndex: 1,
+              position: 'right',
+              splitNumber: 2,
+              axisLine: { show: true, lineStyle: { color: gridBorder } },
+              splitLine: { show: false },
+              axisLabel: {
+                color: textColor,
+                fontSize: 10,
+                formatter: (v: number) => (isTwMarket ? `${Math.round(v)}億` : `${v}`),
+              },
+            },
+          ]
+        : [
+            {
+              type: 'value',
+              scale: true,
+              position: 'right',
+              axisLine: { show: true, lineStyle: { color: gridBorder } },
+              splitLine: { lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+              axisLabel: {
+                color: textColor,
+                fontSize: 11,
+                formatter: (v: number) => v.toLocaleString(),
+              },
+            },
+          ],
       dataZoom: [
         {
           type: 'inside',
+          xAxisIndex: hasVolumeData ? [0, 1] : [0],
           start: initStart,
-          end: 100,
+          end: initEnd,
           zoomOnMouseWheel: true,
           moveOnMouseMove: true,
         },
         {
           type: 'slider',
+          xAxisIndex: hasVolumeData ? [0, 1] : [0],
           start: initStart,
-          end: 100,
+          end: initEnd,
           bottom: '8px',
           height: '20px',
           borderColor: gridBorder,
@@ -353,11 +622,42 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
 
     chart.setOption(option, true);
 
-    const handleResize = () => chart.resize();
+    const dom = mainChartRef.current;
+    const refreshBadges = () => {
+      updateRightPriceBadges(chart, dom, kline, propPrice, showMA, showBoll);
+    };
+    refreshBadges();
+    requestAnimationFrame(refreshBadges);
+    const badgeTimer = setTimeout(refreshBadges, 80);
+
+    // 監聽使用者的縮放/平移操作，將當前視角記錄在 ref 中並即時更新右側膠囊位置
+    const handleDataZoom = (e: any) => {
+      let start: number | undefined;
+      let end: number | undefined;
+      if (e.batch && e.batch.length > 0) {
+        start = e.batch[0].start;
+        end = e.batch[0].end;
+      } else if (e.start !== undefined && e.end !== undefined) {
+        start = e.start;
+        end = e.end;
+      }
+      if (start !== undefined && end !== undefined) {
+        zoomRangeRef.current = { start, end };
+      }
+      refreshBadges();
+    };
+    chart.on('datazoom', handleDataZoom);
+
+    const handleResize = () => {
+      chart.resize();
+      refreshBadges();
+    };
     window.addEventListener('resize', handleResize);
 
     return () => {
+      clearTimeout(badgeTimer);
       window.removeEventListener('resize', handleResize);
+      chart.off('datazoom', handleDataZoom);
       if (chart && !chart.isDisposed()) {
         chart.dispose();
       }
@@ -568,7 +868,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           <div
             className="index-echart-canvas"
             ref={mainChartRef}
-            style={{ width: '100%', height: '100%', minHeight: '440px' }}
+            style={{ width: '100%', height: '100%', minHeight: '440px', position: 'relative' }}
           />
         </div>
 

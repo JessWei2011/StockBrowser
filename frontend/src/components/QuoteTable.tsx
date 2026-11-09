@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { QuoteState, WatchlistItem, StockAnnouncement, StockMaSummary } from '../types';
+import { filterActiveAnnouncements } from '../utils/announcements';
 
 interface QuoteTableProps {
   items: WatchlistItem[];
@@ -226,7 +227,10 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                       );
                     })()}
                     {(() => {
-                      const stockAnns = announcements[item.code] || [];
+                      const rawAnns = announcements[item.code] || [];
+                      // 自動過濾已超過有效天數的標籤（自結 5 天、重訊 3 天、法說與財報 5 天）
+                      const stockAnns = filterActiveAnnouncements(rawAnns);
+
                       // 1. 處置標籤
                       const dispAnn = stockAnns.find((a) => a.category === 'disposition');
                       const hasDisp = dispAnn || dispositionLevel > 0 || dispositionPeriod;
@@ -238,16 +242,19 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                       const hasAtt = !hasDisp && (attAnn || isAttention);
                       const attTitle = attAnn ? `${attAnn.title}\n${attAnn.detail || ''}`.trim() : '注意股票';
 
-                      // 3. 財報/法說標籤
+                      // 3. 財報標籤
                       const earnAnn = stockAnns.find((a) => a.category === 'earnings');
 
-                      // 4. 重大訊息標籤
+                      // 4. 法說會標籤
+                      const briefAnn = stockAnns.find((a) => a.category === 'briefing');
+
+                      // 5. 重大訊息標籤
                       const newsAnn = stockAnns.find((a) => a.category === 'news');
 
-                      // 5. 除權除息標籤
+                      // 6. 除權除息標籤
                       const exdivAnn = stockAnns.find((a) => a.category === 'exdividend');
 
-                      // 6. 最新自結營收標籤
+                      // 7. 最新自結營收標籤 (5天內有效)
                       const revAnn = stockAnns.find((a) => a.category === 'revenue');
 
                       return (
@@ -270,6 +277,11 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                           {earnAnn && (
                             <span className="stock-badge badge-earnings" title={`${earnAnn.title}\n${earnAnn.detail || ''}`.trim()}>
                               [{earnAnn.tag}]
+                            </span>
+                          )}
+                          {briefAnn && (
+                            <span className="stock-badge badge-briefing" title={`${briefAnn.title}\n${briefAnn.detail || ''}`.trim()}>
+                              [{briefAnn.tag}]
                             </span>
                           )}
                           {newsAnn && (

@@ -80,7 +80,7 @@ export const GroupModal: React.FC<GroupModalProps> = ({
   const handleMove = (id: string, direction: 'up' | 'down') => {
     if (!onReorderGroups) return;
     const customList = localGroups.filter(
-      (g) => !(g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神簿' || g.isSystemGroup)
+      (g) => !(g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神金庫' || g.name === '財神簿' || g.isSystemGroup)
     );
     const currentIndex = customList.findIndex((g) => g.id === id);
     if (currentIndex === -1) return;
@@ -95,7 +95,7 @@ export const GroupModal: React.FC<GroupModalProps> = ({
 
     // 重組 localGroups 並立刻反映在 UI 上（無延遲、不鎖定按鈕）
     const systemList = localGroups.filter(
-      (g) => g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神簿' || g.isSystemGroup
+      (g) => g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神金庫' || g.name === '財神簿' || g.isSystemGroup
     );
     const updatedAll = [...systemList, ...nextCustomList];
     setLocalGroups(updatedAll);
@@ -139,7 +139,7 @@ export const GroupModal: React.FC<GroupModalProps> = ({
     }
 
     const customList = localGroups.filter(
-      (g) => !(g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神簿' || g.isSystemGroup)
+      (g) => !(g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神金庫' || g.name === '財神簿' || g.isSystemGroup)
     );
     const fromIndex = customList.findIndex((g) => g.id === draggedId);
     const toIndex = customList.findIndex((g) => g.id === targetId);
@@ -154,7 +154,7 @@ export const GroupModal: React.FC<GroupModalProps> = ({
     nextCustomList.splice(toIndex, 0, moved);
 
     const systemList = localGroups.filter(
-      (g) => g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神簿' || g.isSystemGroup
+      (g) => g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神金庫' || g.name === '財神簿' || g.isSystemGroup
     );
     const updatedAll = [...systemList, ...nextCustomList];
     setLocalGroups(updatedAll);
@@ -167,8 +167,8 @@ export const GroupModal: React.FC<GroupModalProps> = ({
     }
   };
 
-  // 排除純背景資料庫用的 g-vault (財神庫)，展示與主畫面頁籤完全一致的組合列表
-  const displayGroups = localGroups.filter((g) => g.id !== 'g-vault' && g.name !== '財神庫');
+  // 排除純背景資料庫用的 g-vault (財神金庫)，展示與主畫面頁籤完全一致的組合列表
+  const displayGroups = localGroups.filter((g) => g.id !== 'g-vault' && g.name !== '財神庫' && g.name !== '財神金庫');
   const customGroups = displayGroups.filter(
     (g) => !(g.id === 'g-wealth' || g.name === '財神簿' || g.isSystemGroup)
   );
