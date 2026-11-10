@@ -55,6 +55,16 @@ def check_twse_emergency_closure(target_date: datetime.date | None = None) -> Tu
             for row in data:
                 if len(row) >= 2:
                     title = str(row[1])
+                    # 必須是全市場休市（排除個別公司如「2314台揚普通股暫停交易」）
+                    is_market_wide = (
+                        "集中交易市場" in title
+                        or "證券市場" in title
+                        or "全體證券商" in title
+                        or "臺灣證券交易所" in title
+                    ) and ("公司代號" not in title and "普通股" not in title and "股票代號" not in title)
+                    if not is_market_wide and ("颱風" not in title and "天然災害" not in title):
+                        continue
+
                     for pat in date_patterns:
                         if pat in title and ("休市" in title or "暫停交易" in title):
                             is_closed = True
