@@ -2,6 +2,7 @@
   --bg-main: #f8fafc;
   --bg-card: #ffffff;
   --bg-hover: #f1f5f9;
+  --bg-surface: #f8fafc;
   --border-color: #cbd5e1;
   --border-subtle: #e2e8f0;
   --text-main: #0a0f1d;
@@ -29,6 +30,7 @@
   --bg-main: #0b0f17;
   --bg-card: #151d28;
   --bg-hover: #1f2b3b;
+  --bg-surface: #101722;
   --border-color: #243042;
   --border-subtle: #192433;
   --text-main: #f8fafc;
@@ -831,6 +833,22 @@ button, input, select, textarea {
 .btn-forex-usdtwd .global-pill-arrow {
   color: #10b981;
 }
+
+/* ── 美元走勢彈窗 (日間/夜間主題完全自適應) ── */
+.usdtwd-chart-container {
+  position: relative;
+  width: 100%;
+  background: #0f172a;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+}
+
+[data-theme='light'] .usdtwd-chart-container {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
 
 .global-pill-icon {
   font-size: 13px;

@@ -301,14 +301,9 @@ export const UsdTwdChartModal: React.FC<UsdTwdChartModalProps> = ({
 
           {/* 走勢圖主體 (SVG 繪製，採用系統統一深色/淺色主題與高質感漸層) */}
           <div
+            className="usdtwd-chart-container"
             style={{
-              position: 'relative',
-              width: '100%',
               height: `${height}px`,
-              background: 'var(--bg-surface, rgba(15, 23, 42, 0.45))',
-              borderRadius: '12px',
-              border: '1px solid var(--border-color)',
-              overflow: 'hidden',
             }}
             onMouseLeave={() => setHoverIndex(null)}
           >
