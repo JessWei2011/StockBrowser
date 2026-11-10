@@ -75,24 +75,19 @@ class AnnouncementService:
         logger.info("AnnouncementService stopped.")
 
     async def _schedule_loop(self):
-        """每天台灣時間 08:30 準時自動執行一次爬取最新消息"""
+        """定期自動更新公告：每天 08:30 盤前更新，且在盤中與盤後每 15 分鐘自動刷新重大訊息與最新營收"""
         while self._is_running:
             try:
-                now = datetime.now()
-                # 計算下一個 08:30 的時間點
-                target = now.replace(hour=8, minute=30, second=0, microsecond=0)
-                if now >= target:
-                    target += timedelta(days=1)
-                wait_seconds = (target - now).total_seconds()
-                logger.info(f"Next announcement refresh scheduled at {target.strftime('%Y-%m-%d %H:%M:%S')} (in {wait_seconds:.1f}s)")
-                
-                await asyncio.sleep(wait_seconds)
+                # 每 15 分鐘（900 秒）輪詢更新一次，確保盤中與下午陸續發布的營收/重訊即時同步
+                await asyncio.sleep(900)
                 if self._is_running:
-                    logger.info("Executing scheduled pre-market 08:30 announcements refresh...")
-                    await self.refresh_all_announcements(reason="scheduled_0830")
+                    logger.info("Executing periodic announcements refresh (15m interval)...")
+                    await self.refresh_all_announcements(reason="scheduled_periodic")
             except asyncio.CancelledError:
                 break
             except Exception as e:
+                logger.error(f"Error in announcement schedule loop: {e}", exc_info=True)
+                await asyncio.sleep(60)
                 logger.error(f"Error in announcement schedule loop: {e}", exc_info=True)
                 await asyncio.sleep(60)
 
@@ -466,8 +461,17 @@ class AnnouncementService:
                         subj_clean = subj.replace("\r\n", " ")
                         is_briefing = any(k in subj_clean for k in ["法人說明會", "法說會", "投資人說明會"])
                         is_financial_report = any(k in subj_clean for k in ["董事會通過", "提報董事會", "董事會決議提報"]) and any(k in subj_clean for k in ["財務報告", "財務報表", "季報", "年報"])
+                        is_revenue = any(k in subj_clean for k in ["自結合併營收", "合併營收", "月營收", "營業額", "業績資料", "自結損益", "自結盈餘"]) or ("營業額" in desc or "當月營收" in desc or "自結合併營收" in desc)
 
-                        if is_briefing:
+                        if is_revenue:
+                            import re
+                            m_month = re.search(r'(?:115|2026)?年?(\d{1,2})月份?', subj_clean)
+                            if not m_month:
+                                m_month = re.search(r'(?:115|2026)?年?(\d{1,2})月份?', desc[:100])
+                            month_label = f"{m_month.group(1)}月" if m_month else ""
+                            tag_str = f"自結{month_label}" if month_label else "自結"
+                            cat_str = "revenue"
+                        elif is_briefing:
                             tag_str = "法說重訊"
                             cat_str = "briefing"
                         elif is_financial_report:
@@ -520,8 +524,17 @@ class AnnouncementService:
                         subj_clean = subj.replace("\r\n", " ")
                         is_briefing = any(k in subj_clean for k in ["法人說明會", "法說會", "投資人說明會"])
                         is_financial_report = any(k in subj_clean for k in ["董事會通過", "提報董事會", "董事會決議提報"]) and any(k in subj_clean for k in ["財務報告", "財務報表", "季報", "年報"])
+                        is_revenue = any(k in subj_clean for k in ["自結合併營收", "合併營收", "月營收", "營業額", "業績資料", "自結損益", "自結盈餘"]) or ("營業額" in desc or "當月營收" in desc or "自結合併營收" in desc)
 
-                        if is_briefing:
+                        if is_revenue:
+                            import re
+                            m_month = re.search(r'(?:115|2026)?年?(\d{1,2})月份?', subj_clean)
+                            if not m_month:
+                                m_month = re.search(r'(?:115|2026)?年?(\d{1,2})月份?', desc[:100])
+                            month_label = f"{m_month.group(1)}月" if m_month else ""
+                            tag_str = f"自結{month_label}" if month_label else "自結"
+                            cat_str = "revenue"
+                        elif is_briefing:
                             tag_str = "法說重訊"
                             cat_str = "briefing"
                         elif is_financial_report:
