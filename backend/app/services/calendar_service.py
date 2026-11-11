@@ -627,6 +627,9 @@ class CalendarService:
         code_name_map = await self.get_all_stock_names()
         # 補充從 announcements 與 positions 取得的名字
         all_ann = announcement_service.get_all_announcements()
+        if not all_ann:
+            await announcement_service.load_from_db()
+            all_ann = announcement_service.get_all_announcements()
 
         # 2. 檢索已有 announcements
         for code, items in all_ann.items():

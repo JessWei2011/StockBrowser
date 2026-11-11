@@ -24,6 +24,11 @@ RSS_FEEDS = [
         "source": "工商時報",
         "url": "https://www.ctee.com.tw/rss_web/livenews/ctee",
         "type": "ctee"
+    },
+    {
+        "source": "經濟日報",
+        "url": "https://money.udn.com/rssfeed/news/1001/5588",
+        "type": "udn"
     }
 ]
 
@@ -33,6 +38,23 @@ def clean_html(raw_html: str) -> str:
         return ""
     text = re.sub(r'<[^>]+>', '', raw_html)
     return html.unescape(text).strip()
+
+def extract_news_category(title: str, desc: str) -> str:
+    """智慧識別新聞核心主題標籤：法說、財報、營收、除權息、大盤、產業、焦點"""
+    combined = f"{title} {desc}"
+    if any(k in combined for k in ["法人說明會", "法說會", "業績發表會", "投資人說明會"]):
+        return "法說"
+    if any(k in combined for k in ["財報", "季報", "年報", "每股純益", "每股盈餘", "EPS", "純益", "獲利", "虧損", "轉盈"]):
+        return "財報"
+    if any(k in combined for k in ["自結營收", "合併營收", "月營收", "營收", "營業額"]):
+        return "營收"
+    if any(k in combined for k in ["除息", "除權", "配息", "股利", "殖利率"]):
+        return "除權息"
+    if any(k in combined for k in ["台股", "加權指數", "大盤", "櫃買", "三大法人", "外資", "投信", "國安基金"]):
+        return "大盤"
+    if any(k in combined for k in ["半導體", "AI", "晶圓", "伺服器", "散熱", "航運", "重電", "生技", "金融"]):
+        return "產業"
+    return "焦點"
 
 class NewsService:
     def __init__(self):
@@ -51,12 +73,17 @@ class NewsService:
                 time TEXT NOT NULL,
                 detail TEXT,
                 link TEXT,
+                category TEXT DEFAULT '焦點',
                 created_at TEXT NOT NULL
             );
             """)
             await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_financial_news_date ON financial_news(date DESC);
             """)
+            try:
+                await db.execute("ALTER TABLE financial_news ADD COLUMN category TEXT DEFAULT '焦點'")
+            except Exception:
+                pass
             await db.commit()
 
     def _fetch_rss_sync(self) -> List[Dict[str, Any]]:
@@ -116,6 +143,7 @@ class NewsService:
                     import hashlib
                     unique_id = hashlib.md5(f"{clean_title}_{date_str}_{feed['source']}".encode()).hexdigest()
 
+                    cat = extract_news_category(clean_title, clean_desc)
                     items.append({
                         "id": unique_id,
                         "source": feed["source"],
@@ -123,7 +151,8 @@ class NewsService:
                         "date": date_str,
                         "time": time_str,
                         "detail": clean_desc,
-                        "link": link
+                        "link": link,
+                        "category": cat
                     })
             except Exception as e:
                 logger.warning(f"Failed to fetch RSS from {feed['source']}: {e}")
@@ -144,12 +173,13 @@ class NewsService:
         async with get_db_connection() as db:
             for it in new_items:
                 await db.execute("""
-                INSERT INTO financial_news (id, source, title, date, time, detail, link, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO financial_news (id, source, title, date, time, detail, link, category, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     detail = excluded.detail,
-                    link = excluded.link
-                """, (it["id"], it["source"], it["title"], it["date"], it["time"], it["detail"], it["link"], now_iso))
+                    link = excluded.link,
+                    category = excluded.category
+                """, (it["id"], it["source"], it["title"], it["date"], it["time"], it["detail"], it["link"], it.get("category", "焦點"), now_iso))
             await db.commit()
 
             # 滾動保留最新 5 個日期 (降冪前 5 日)，刪除更早以前的歷史新聞
@@ -186,7 +216,7 @@ class NewsService:
             news_list: List[Dict[str, Any]] = []
             if active_date:
                 cursor = await db.execute("""
-                SELECT id, source, title, date, time, detail, link
+                SELECT id, source, title, date, time, detail, link, category
                 FROM financial_news
                 WHERE date = ?
                 ORDER BY time DESC, id DESC
@@ -200,7 +230,8 @@ class NewsService:
                         "date": nr["date"],
                         "time": nr["time"],
                         "detail": nr["detail"],
-                        "link": nr["link"]
+                        "link": nr["link"],
+                        "category": nr["category"] if "category" in nr.keys() and nr["category"] else "焦點"
                     })
 
         return {

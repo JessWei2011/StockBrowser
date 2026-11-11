@@ -142,7 +142,11 @@ async def search_instruments(q: str = Query("", min_length=1)):
 @router.get("/announcements")
 async def get_announcements():
     from backend.app.services.announcement_service import announcement_service
-    return announcement_service.get_all_announcements()
+    res = announcement_service.get_all_announcements()
+    if not res:
+        await announcement_service.load_from_db()
+        res = announcement_service.get_all_announcements()
+    return res
 
 @router.post("/announcements/refresh")
 async def refresh_announcements():

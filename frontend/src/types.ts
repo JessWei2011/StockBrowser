@@ -249,6 +249,7 @@ export interface FinancialNewsItem {
   time: string;
   detail?: string;
   link?: string;
+  category?: string;
 }
 
 export interface FinancialNewsResponse {

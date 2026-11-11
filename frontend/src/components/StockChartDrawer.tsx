@@ -207,7 +207,13 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
   const subChartRef = useRef<HTMLDivElement | null>(null);
   const mainInstanceRef = useRef<echarts.ECharts | null>(null);
   const subInstanceRef = useRef<echarts.ECharts | null>(null);
-  const visibleBarsRef = useRef<number>(60);
+  const zoomRangeRef = useRef<{ start: number; end: number } | null>(null);
+  const isSyncingZoomRef = useRef<boolean>(false);
+
+  // 當 code 變更時重設縮放記憶，確保新開啟的股票以預設視角呈現
+  useEffect(() => {
+    zoomRangeRef.current = null;
+  }, [code]);
 
   // 當抽屜關閉或 code 變更時，徹底銷毀 ECharts instance 以釋放記憶體與 DOM 關聯
   useEffect(() => {
@@ -222,6 +228,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
       subInstanceRef.current = null;
       setData(null);
       setError(null);
+      zoomRangeRef.current = null;
     }
   }, [isOpen]);
 
@@ -294,10 +301,11 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
     const bollMid = kline.map((k) => k.boll_mid ?? null);
     const bollDown = kline.map((k) => k.boll_down ?? null);
 
-    // 計算預設顯示範圍：近 60 根或全部，採用 StockCenter 置中算法
+    // 計算預設顯示範圍：近 60 根或全部，保留使用者手動縮放視野
     const initBars = Math.min(60, realTotal);
-    visibleBarsRef.current = initBars;
-    const { start: initStart, end: initEnd } = calcZoomFromVisibleBars(initBars, realTotal, BUFFER_DAYS);
+    const calculatedInit = calcZoomFromVisibleBars(initBars, realTotal, BUFFER_DAYS);
+    const initStart = zoomRangeRef.current?.start ?? calculatedInit.start;
+    const initEnd = zoomRangeRef.current?.end ?? calculatedInit.end;
 
     const option: any = {
       animation: false,
@@ -383,9 +391,11 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
         {
           type: 'inside',
           xAxisIndex: [0, 1],
-          zoomOnMouseWheel: false,
+          zoomOnMouseWheel: true,
           moveOnMouseMove: true,
           moveOnMouseWheel: false,
+          minSpan: ((MIN_VISIBLE_BARS) / (realTotal + BUFFER_DAYS)) * 100,
+          maxSpan: 100,
           start: initStart,
           end: initEnd,
         },
@@ -396,6 +406,8 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
           height: '14px',
           start: initStart,
           end: initEnd,
+          minSpan: ((MIN_VISIBLE_BARS) / (realTotal + BUFFER_DAYS)) * 100,
+          maxSpan: 100,
           borderColor: 'transparent',
           backgroundColor: isDark ? 'rgba(30, 41, 59, 0.4)' : 'rgba(226, 232, 240, 0.5)',
           fillerColor: isDark ? 'rgba(56, 189, 248, 0.2)' : 'rgba(14, 165, 233, 0.2)',
@@ -496,65 +508,39 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
     requestAnimationFrame(refreshBadges);
     const badgeTimer = setTimeout(refreshBadges, 80);
 
-    // 綁定以最新 K 柱為錨點的滾輪縮放邏輯 (StockCenter 居中聚焦體驗)
-    const handleWheel = (e: WheelEvent) => {
-      if (!mainInstanceRef.current || mainInstanceRef.current.isDisposed()) return;
-
-      // 攔截滾輪事件，阻止頁面上下滾動，並以最新 K 棒置中為焦點縮放
-      e.preventDefault();
-      e.stopPropagation();
-
-      const totalSlots = realTotal + BUFFER_DAYS;
-      let currentBars = visibleBarsRef.current || Math.min(60, realTotal);
-
-      const opt: any = mainInstanceRef.current.getOption();
-      const dz = opt?.dataZoom?.[0];
-      if (dz && dz.start != null && dz.end != null) {
-        const spanSlots = ((dz.end - dz.start) / 100) * (totalSlots - 1);
-        if (spanSlots > 0) {
-          currentBars = Math.max(MIN_VISIBLE_BARS, Math.min(realTotal, spanSlots * 0.75));
+    // 監聽縮放與平移操作，將當前視角記錄在 ref 中、更新右側徽章，並在 KD / RSI 模式同步次圖
+    const handleDataZoom = (e?: any) => {
+      let start: number | undefined;
+      let end: number | undefined;
+      if (e?.batch && e.batch.length > 0) {
+        start = e.batch[0].start;
+        end = e.batch[0].end;
+      } else if (e?.start !== undefined && e?.end !== undefined) {
+        start = e.start;
+        end = e.end;
+      } else {
+        const opt: any = chart.getOption();
+        const dz = opt?.dataZoom?.[0];
+        if (dz && dz.start != null && dz.end != null) {
+          start = dz.start;
+          end = dz.end;
         }
       }
 
-      // 阻尼計算：平滑支援滑鼠滾輪與觸控板手勢
-      let delta = e.deltaY;
-      if (e.deltaMode === 1) delta *= 40;
-      else if (e.deltaMode === 2) delta *= 800;
-      const zoomStep = Math.min(0.28, Math.max(0.06, Math.abs(delta) / 360));
-      const zoomFactor = delta < 0 ? 1 - zoomStep : 1 + zoomStep * 1.15;
-
-      let nextBars = currentBars * zoomFactor;
-      nextBars = Math.max(MIN_VISIBLE_BARS, Math.min(realTotal, nextBars));
-      visibleBarsRef.current = nextBars;
-
-      const res = calcZoomFromVisibleBars(nextBars, realTotal, BUFFER_DAYS);
-      mainInstanceRef.current.dispatchAction({
-        type: 'dataZoom',
-        start: res.start,
-        end: res.end,
-      });
-      refreshBadges();
-    };
-
-    dom.addEventListener('wheel', handleWheel, { passive: false, capture: true });
-
-    // 同步手動 slider 或左右拖曳後的 K 棒數量與價格徽章，並在 KD / RSI 模式同步次圖 dataZoom
-    const handleDataZoom = () => {
-      const opt: any = chart.getOption();
-      const dz = opt?.dataZoom?.[0];
-      if (dz && dz.start != null && dz.end != null) {
-        const spanSlots = ((dz.end - dz.start) / 100) * (realTotal + BUFFER_DAYS - 1);
-        if (spanSlots > 0) {
-          visibleBarsRef.current = Math.max(MIN_VISIBLE_BARS, Math.min(realTotal, spanSlots * 0.75));
-        }
+      if (start !== undefined && end !== undefined) {
+        zoomRangeRef.current = { start, end };
 
         // 若次圖為 KD 或 RSI，即時同步相同的縮放範圍
         if (subInstanceRef.current && !subInstanceRef.current.isDisposed()) {
-          subInstanceRef.current.dispatchAction({
-            type: 'dataZoom',
-            start: dz.start,
-            end: dz.end,
-          });
+          if (!isSyncingZoomRef.current) {
+            isSyncingZoomRef.current = true;
+            subInstanceRef.current.dispatchAction({
+              type: 'dataZoom',
+              start,
+              end,
+            });
+            isSyncingZoomRef.current = false;
+          }
         }
       }
       refreshBadges();
@@ -568,7 +554,6 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
     window.addEventListener('resize', handleResize);
     return () => {
       clearTimeout(badgeTimer);
-      dom.removeEventListener('wheel', handleWheel, { capture: true });
       chart.off('datazoom', handleDataZoom);
       window.removeEventListener('resize', handleResize);
     };
@@ -761,16 +746,8 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
       const dVals = kline.map((k) => k.d ?? null);
 
       // 取得主圖目前的 dataZoom 狀態
-      let curStart = 0;
-      let curEnd = 100;
-      if (mainInstanceRef.current && !mainInstanceRef.current.isDisposed()) {
-        const mOpt: any = mainInstanceRef.current.getOption();
-        const dz = mOpt?.dataZoom?.[0];
-        if (dz && dz.start != null && dz.end != null) {
-          curStart = dz.start;
-          curEnd = dz.end;
-        }
-      }
+      const curStart = zoomRangeRef.current?.start ?? 0;
+      const curEnd = zoomRangeRef.current?.end ?? 100;
 
       subOption = {
         animation: false,
@@ -821,7 +798,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
             type: 'inside',
             start: curStart,
             end: curEnd,
-            zoomOnMouseWheel: false,
+            zoomOnMouseWheel: true,
             moveOnMouseMove: true,
           },
         ],
@@ -861,16 +838,9 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
       const rsi6Vals = kline.map((k) => k.rsi6 ?? null);
       const rsi12Vals = kline.map((k) => k.rsi12 ?? null);
 
-      let curStart = 0;
-      let curEnd = 100;
-      if (mainInstanceRef.current && !mainInstanceRef.current.isDisposed()) {
-        const mOpt: any = mainInstanceRef.current.getOption();
-        const dz = mOpt?.dataZoom?.[0];
-        if (dz && dz.start != null && dz.end != null) {
-          curStart = dz.start;
-          curEnd = dz.end;
-        }
-      }
+      // 取得主圖目前的 dataZoom 狀態
+      const curStart = zoomRangeRef.current?.start ?? 0;
+      const curEnd = zoomRangeRef.current?.end ?? 100;
 
       subOption = {
         animation: false,
@@ -921,7 +891,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
             type: 'inside',
             start: curStart,
             end: curEnd,
-            zoomOnMouseWheel: false,
+            zoomOnMouseWheel: true,
             moveOnMouseMove: true,
           },
         ],
@@ -957,9 +927,39 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
 
     chart.setOption(subOption, true);
 
+    // 若次圖為 KD 或 RSI，監聽次圖縮放平移並同步回主圖
+    const handleSubDataZoom = (e?: any) => {
+      if (activeTab !== 'kd' && activeTab !== 'rsi') return;
+      let start: number | undefined;
+      let end: number | undefined;
+      if (e?.batch && e.batch.length > 0) {
+        start = e.batch[0].start;
+        end = e.batch[0].end;
+      } else if (e?.start !== undefined && e?.end !== undefined) {
+        start = e.start;
+        end = e.end;
+      }
+      if (start !== undefined && end !== undefined) {
+        zoomRangeRef.current = { start, end };
+        if (mainInstanceRef.current && !mainInstanceRef.current.isDisposed()) {
+          if (!isSyncingZoomRef.current) {
+            isSyncingZoomRef.current = true;
+            mainInstanceRef.current.dispatchAction({
+              type: 'dataZoom',
+              start,
+              end,
+            });
+            isSyncingZoomRef.current = false;
+          }
+        }
+      }
+    };
+    chart.on('datazoom', handleSubDataZoom);
+
     const handleResize = () => chart.resize();
     window.addEventListener('resize', handleResize);
     return () => {
+      chart.off('datazoom', handleSubDataZoom);
       window.removeEventListener('resize', handleResize);
     };
   }, [data, activeTab, theme, isOpen]);

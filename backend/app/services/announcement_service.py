@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from datetime import datetime, date, timedelta
 from typing import Optional, Any
 import urllib.request
@@ -14,6 +15,15 @@ from backend.app.repositories import db
 from backend.app.domain.models import StockAnnouncementItem
 
 logger = logging.getLogger("announcement_service")
+
+def safe_float(val: Any, default: float = 0.0) -> float:
+    """安全轉換浮點數，支援千分位逗號與非數值過濾"""
+    if val is None or val == "" or val == "-":
+        return default
+    try:
+        return float(str(val).replace(",", "").strip())
+    except (ValueError, TypeError):
+        return default
 
 def format_chinese_amount(val: Any) -> str:
     """將大數額（千萬、億、兆）轉換為直觀的中文字符單位，避免一堆0難以閱讀"""
@@ -75,19 +85,20 @@ class AnnouncementService:
         logger.info("AnnouncementService stopped.")
 
     async def _schedule_loop(self):
-        """定期自動更新公告：每天 08:30 盤前更新，且在盤中與盤後每 15 分鐘自動刷新重大訊息與最新營收"""
+        """定期自動更新公告：每天 08:30 盤前更新，且在盤中與盤後每 3~15 分鐘自動刷新重大訊息與最新營收"""
         while self._is_running:
             try:
-                # 每 15 分鐘（900 秒）輪詢更新一次，確保盤中與下午陸續發布的營收/重訊即時同步
-                await asyncio.sleep(900)
+                now = datetime.now()
+                # 營收公布高峰期（每月 1 日 ~ 15 日的 12:00 ~ 21:30）每 3 分鐘 (180s) 輪詢；其餘時段每 15 分鐘 (900s)
+                is_peak_window = (1 <= now.day <= 15) and (12 <= now.hour <= 21)
+                interval = 180 if is_peak_window else 900
+                await asyncio.sleep(interval)
                 if self._is_running:
-                    logger.info("Executing periodic announcements refresh (15m interval)...")
+                    logger.info(f"Executing periodic announcements refresh ({interval}s interval)...")
                     await self.refresh_all_announcements(reason="scheduled_periodic")
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in announcement schedule loop: {e}", exc_info=True)
-                await asyncio.sleep(60)
                 logger.error(f"Error in announcement schedule loop: {e}", exc_info=True)
                 await asyncio.sleep(60)
 
@@ -123,9 +134,9 @@ class AnnouncementService:
         if not d_obj:
             return False
 
-        # 1. 自結營收公告：超過出表發布日 5 天過期
+        # 1. 自結營收公告：在該月份之次月營收公布前均保留有效（45 天寬限期，避免換月時空窗）
         if cat == "revenue":
-            return (today - d_obj).days > 5
+            return (today - d_obj).days > 45
 
         # 2. 重大訊息：發布超過 3 天過期
         if cat == "news":
@@ -142,9 +153,12 @@ class AnnouncementService:
         return False
 
     async def load_from_db(self):
-        """從 SQLite 資料庫載入快取的公告 (自動剔除已過期的標籤項目)"""
+        """從 SQLite 資料庫載入快取的公告 (自動剔除已過期的標籤項目，自結營收僅保留當期目標月份)"""
         try:
             today = date.today()
+            target_month = 12 if today.month == 1 else today.month - 1
+            target_tag_prefix = f"自結{target_month}月"
+
             async with db.get_db_connection() as conn:
                 cursor = await conn.execute(
                     "SELECT id, code, tag, title, date, detail, category, updated_at FROM stock_announcements ORDER BY date DESC, id DESC"
@@ -155,6 +169,13 @@ class AnnouncementService:
                 for r in rows:
                     cat = r["category"]
                     d_val = r["date"]
+                    tag_val = r["tag"] or ""
+
+                    # 依規則：自結營收在 11 月僅保留 10 月自結；舊月份 (9 月或更早) 視為過期直接淘汰
+                    if cat == "revenue" and target_tag_prefix not in tag_val:
+                        expired_ids.append(r["id"])
+                        continue
+
                     if self._is_expired(cat, d_val, today):
                         expired_ids.append(r["id"])
                         continue
@@ -183,60 +204,63 @@ class AnnouncementService:
             logger.warning(f"Failed to load announcements from DB: {e}")
 
     async def save_to_db(self, all_items: list[dict]):
-        """將最新公告批次存入 SQLite 資料庫 (替換舊資料)"""
+        """將最新公告批次存入 SQLite 資料庫 (替換舊資料，使用 executemany 提升百倍寫入效能)"""
         try:
             ts = db.now_iso()
+            params = [
+                (
+                    it["id"],
+                    it["code"],
+                    it["tag"],
+                    it["title"],
+                    it.get("date"),
+                    it.get("detail", ""),
+                    it["category"],
+                    ts,
+                )
+                for it in all_items
+            ]
             async with db.get_db_connection() as conn:
                 await conn.execute("DELETE FROM stock_announcements")
-                for it in all_items:
-                    await conn.execute(
-                        """
-                        INSERT INTO stock_announcements (id, code, tag, title, date, detail, category, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            it["id"],
-                            it["code"],
-                            it["tag"],
-                            it["title"],
-                            it.get("date"),
-                            it.get("detail", ""),
-                            it["category"],
-                            ts,
-                        ),
-                    )
+                await conn.executemany(
+                    """
+                    INSERT INTO stock_announcements (id, code, tag, title, date, detail, category, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    params,
+                )
                 await conn.commit()
             logger.info(f"Saved {len(all_items)} announcements to DB.")
         except Exception as e:
             logger.error(f"Failed to save announcements to DB: {e}")
 
     async def refresh_all_announcements(self, reason: str = "manual") -> dict[str, list[dict]]:
-        """全量抓取所有追蹤個股與熱門權值股的公告：注意、處置、重大訊息、除權息預告、財報/法說會日程"""
-        logger.info(f"Starting announcements refresh (reason: {reason})...")
+        """全量抓取全市場所有個股的公告：最新每月自結營收、重大訊息、除權息預告、財報/法說會日程、官方季報獲利、注意處置"""
+        logger.info(f"Starting announcements refresh across market (reason: {reason})...")
         wanted_codes = await db.get_all_subscribed_codes()
-        
-        # 加入重要熱門權值股
         top_weights = {"2330", "2317", "2454", "2382", "2308", "2881", "2882", "2303", "3231", "3711", "2603", "3008", "2357"}
         wanted_codes = wanted_codes.union(top_weights)
-        if not wanted_codes:
-            logger.info("No subscribed codes in watchlist.")
-            return {}
 
         loop = asyncio.get_running_loop()
         # 1. 抓取注意與處置 (Shioaji + TPEx 雙重備援)
         shioaji_items = await loop.run_in_executor(self._executor, self._fetch_shioaji_notice_punish, wanted_codes)
         tpex_punish_items = await loop.run_in_executor(self._executor, self._fetch_tpex_notice_punish, wanted_codes)
-        # 2. 抓取證交所與櫃買中心重大訊息
-        twse_news_items = await loop.run_in_executor(self._executor, self._fetch_twse_material_news, wanted_codes)
-        tpex_news_items = await loop.run_in_executor(self._executor, self._fetch_tpex_material_news, wanted_codes)
-        # 3. 抓取證交所與櫃買中心每月最新自結營收
-        revenue_items = await loop.run_in_executor(self._executor, self._fetch_twse_monthly_revenue, wanted_codes)
-        tpex_revenue_items = await loop.run_in_executor(self._executor, self._fetch_tpex_monthly_revenue, wanted_codes)
-        # 4. 抓取證交所與櫃買中心除權除息預告
-        exdiv_items = await loop.run_in_executor(self._executor, self._fetch_twse_exdividend, wanted_codes)
-        tpex_exdiv_items = await loop.run_in_executor(self._executor, self._fetch_tpex_exdividend, wanted_codes)
-        # 5. 抓取官方確認之個股法人說明會與財報公告（100% 官方申報，絕不使用演算法模型推估）
-        official_briefing_items = await loop.run_in_executor(self._executor, self._fetch_official_briefings_and_events, wanted_codes)
+        # 2. 抓取 MOPS 公開資訊觀測站即時每月自結營收 (全市場 2,000+ 上市櫃與 KY 股，含 N-1 月自動回退備援)
+        mops_revenue_items = await loop.run_in_executor(self._executor, self._fetch_mops_monthly_revenue)
+        # 3. 抓取官方確認之個股法人說明會、業績發表會與財報公告日程 (全市場無遺漏覆蓋)
+        official_briefing_items = await loop.run_in_executor(self._executor, self._fetch_official_briefings_and_events)
+        # 4. 抓取官方最新申報季報 EPS 與獲利 (TWSE 與 TPEx OpenAPI 權威數據)
+        twse_q_items = await loop.run_in_executor(self._executor, self._fetch_twse_quarterly_reports)
+        tpex_q_items = await loop.run_in_executor(self._executor, self._fetch_tpex_quarterly_reports)
+        # 5. 抓取全市場證交所與櫃買中心即時重大訊息 (含法說會、財報決議、盤後自結營收/損益)
+        twse_news_items = await loop.run_in_executor(self._executor, self._fetch_twse_material_news)
+        tpex_news_items = await loop.run_in_executor(self._executor, self._fetch_tpex_material_news)
+        # 6. 抓取證交所與櫃買中心每月最新自結營收彙總 (OpenAPI 備援)
+        revenue_items = await loop.run_in_executor(self._executor, self._fetch_twse_monthly_revenue)
+        tpex_revenue_items = await loop.run_in_executor(self._executor, self._fetch_tpex_monthly_revenue)
+        # 7. 抓取證交所與櫃買中心除權除息預告
+        exdiv_items = await loop.run_in_executor(self._executor, self._fetch_twse_exdividend)
+        tpex_exdiv_items = await loop.run_in_executor(self._executor, self._fetch_tpex_exdividend)
 
         # 彙整合併
         combined_by_code: dict[str, list[dict]] = {}
@@ -245,14 +269,21 @@ class AnnouncementService:
         all_sources = [
             shioaji_items,
             tpex_punish_items,
+            mops_revenue_items,
+            official_briefing_items,
+            twse_q_items,
+            tpex_q_items,
             twse_news_items,
             tpex_news_items,
             revenue_items,
             tpex_revenue_items,
             exdiv_items,
             tpex_exdiv_items,
-            official_briefing_items,
         ]
+
+        today = date.today()
+        target_month = 12 if today.month == 1 else today.month - 1
+        target_revenue_tag = f"自結{target_month}月"
 
         seen_ids = set()
         for item_list in all_sources:
@@ -260,15 +291,46 @@ class AnnouncementService:
                 it_id = it.get("id")
                 if it_id and it_id in seen_ids:
                     continue
+                c = it["code"]
+                cat = it["category"]
+
+                existing = combined_by_code.setdefault(c, [])
+                # 對於自結營收 (revenue)，每檔個股只保留當期最新法定月份 (如 11月只看 10月營收)，杜絕舊月份殘留
+                if cat == "revenue":
+                    tag_str = it.get("tag", "")
+                    title_str = it.get("title", "")
+                    if target_revenue_tag not in tag_str and f"{target_month}月" not in title_str:
+                        continue
+
+                    rev_idx = next((i for i, x in enumerate(existing) if x.get("category") == "revenue"), None)
+                    if rev_idx is not None:
+                        # 若已有營收公告，若新項目資訊更完整（如 MOPS 帶 MoM/YoY）或日期更新，則替換
+                        if "MoM" in it.get("detail", "") or str(it.get("date", "")) >= str(existing[rev_idx].get("date", "")):
+                            existing[rev_idx] = it
+                        continue
+                    else:
+                        existing.append(it)
+                elif cat == "earnings":
+                    # 若已有官方出表的季報 (包含詳細 EPS 數值)，則優先採用或更新
+                    earn_idx = next((i for i, x in enumerate(existing) if x.get("category") == "earnings" and "EPS" in x.get("title", "")), None)
+                    if earn_idx is not None and "EPS" not in it.get("title", ""):
+                        # 已有帶 EPS 的官方季報，略過不帶 EPS 的預告日程
+                        continue
+                    existing.append(it)
+                else:
+                    existing.append(it)
+
                 if it_id:
                     seen_ids.add(it_id)
-                c = it["code"]
-                combined_by_code.setdefault(c, []).append(it)
-                all_flat.append(it)
+
+        # 排序每檔股票的公告：以日期由新到舊 (最新/未來事件優先排序)
+        for c, it_list in combined_by_code.items():
+            it_list.sort(key=lambda x: str(x.get("date", "")), reverse=True)
+            all_flat.extend(it_list)
 
         self._cache = combined_by_code
         await self.save_to_db(all_flat)
-        logger.info(f"Announcements refresh complete. Total {len(all_flat)} items for {len(combined_by_code)} stocks.")
+        logger.info(f"Announcements refresh complete. Total {len(all_flat)} items for {len(combined_by_code)} stocks across market.")
         return self._cache
 
     def _fetch_shioaji_notice_punish(self, wanted_codes: set[str]) -> list[dict]:
@@ -430,8 +492,8 @@ class AnnouncementService:
 
         return results
 
-    def _fetch_twse_material_news(self, wanted_codes: set[str]) -> list[dict]:
-        """從證交所 OpenAPI 撈取最新重大訊息全文 (僅保留 3 日內最新消息)"""
+    def _fetch_twse_material_news(self, wanted_codes: Optional[set[str]] = None) -> list[dict]:
+        """從證交所 OpenAPI 撈取全市場上市公司重大訊息 (t187ap04_L)，含盤中/盤後即時自結營收與損益發布"""
         results: list[dict] = []
         today = date.today()
         try:
@@ -441,61 +503,101 @@ class AnnouncementService:
                 data = json.loads(resp.read().decode("utf-8"))
                 for it in data:
                     c = str(it.get("公司代號", "")).strip()
-                    if c in wanted_codes:
-                        date_raw = str(it.get("發言日期", "")).strip()
-                        time_raw = str(it.get("發言時間", "")).strip()
-                        subj = (it.get("主旨 ") or it.get("主旨") or "").strip()
-                        desc = it.get("說明", "").strip()
-                        fmt_date = date_raw
-                        d_obj = None
-                        if len(date_raw) == 7:  # 民國 1151011
-                            yy = int(date_raw[:3]) + 1911
-                            mm = int(date_raw[3:5])
-                            dd = int(date_raw[5:])
-                            fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
-                            d_obj = date(yy, mm, dd)
-                        # 重訊僅保留近 3 天內的最新重大訊息
+                    if wanted_codes and c not in wanted_codes:
+                        continue
+                    if not c or not (c.isdigit() or len(c) >= 4):
+                        continue
+
+                    date_raw = str(it.get("發言日期", "")).strip()
+                    time_raw = str(it.get("發言時間", "")).strip()
+                    subj = (it.get("主旨 ") or it.get("主旨") or "").strip()
+                    desc = it.get("說明", "").strip()
+                    fmt_date = date_raw
+                    d_obj = None
+                    if len(date_raw) == 7:  # 民國 1151011
+                        yy = int(date_raw[:3]) + 1911
+                        mm = int(date_raw[3:5])
+                        dd = int(date_raw[5:])
+                        fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
+                        d_obj = date(yy, mm, dd)
+                    subj_clean = subj.replace("\r\n", " ")
+                    is_briefing = any(k in subj_clean for k in ["法人說明會", "法說會", "業績發表會", "投資人說明會"])
+                    is_financial_report = any(k in subj_clean for k in ["董事會通過", "提報董事會", "董事會決議提報"]) and any(k in subj_clean for k in ["財務報告", "財務報表", "季報", "年報"])
+                    is_revenue = any(k in subj_clean for k in ["自結合併營收", "合併營收", "月營收", "營業額", "業績資料", "自結損益", "自結盈餘", "自結合併損益", "自結合併淨利"]) or ("營業額" in desc or "當月營收" in desc or "自結合併營收" in desc or "自結合併損益" in desc)
+
+                    # 若為法說會，嘗試從說明欄內提取真正的召開日期與時間
+                    meeting_d_obj = None
+                    if is_briefing:
+                        m_b_date = re.search(r'(?:召開法人說明會之日期|事實發生日)[：:\s]+(?:115|114|2026|2025)[年/.]?(\d{1,2})[月/.](\d{1,2})', desc)
+                        if m_b_date:
+                            try:
+                                bm = int(m_b_date.group(1))
+                                bd = int(m_b_date.group(2))
+                                meeting_d_obj = date(today.year, bm, bd)
+                            except Exception:
+                                pass
+
+                    # 篩選重大訊息時效：自結營收保留 45 天，法說會以召開日算（過後5天過期；未開則持續保留），財報保留 30 天，一般重訊保留 3 天
+                    if is_revenue:
+                        if d_obj and (today - d_obj).days > 45:
+                            continue
+                    elif is_briefing:
+                        target_check_d = meeting_d_obj or d_obj
+                        if target_check_d and (today - target_check_d).days > 5:
+                            continue
+                    elif is_financial_report:
+                        if d_obj and (today - d_obj).days > 30:
+                            continue
+                    else:
                         if d_obj and (today - d_obj).days > 3:
                             continue
 
-                        subj_clean = subj.replace("\r\n", " ")
-                        is_briefing = any(k in subj_clean for k in ["法人說明會", "法說會", "投資人說明會"])
-                        is_financial_report = any(k in subj_clean for k in ["董事會通過", "提報董事會", "董事會決議提報"]) and any(k in subj_clean for k in ["財務報告", "財務報表", "季報", "年報"])
-                        is_revenue = any(k in subj_clean for k in ["自結合併營收", "合併營收", "月營收", "營業額", "業績資料", "自結損益", "自結盈餘"]) or ("營業額" in desc or "當月營收" in desc or "自結合併營收" in desc)
-
-                        if is_revenue:
-                            import re
-                            m_month = re.search(r'(?:115|2026)?年?(\d{1,2})月份?', subj_clean)
-                            if not m_month:
-                                m_month = re.search(r'(?:115|2026)?年?(\d{1,2})月份?', desc[:100])
-                            month_label = f"{m_month.group(1)}月" if m_month else ""
-                            tag_str = f"自結{month_label}" if month_label else "自結"
-                            cat_str = "revenue"
-                        elif is_briefing:
-                            tag_str = "法說重訊"
-                            cat_str = "briefing"
-                        elif is_financial_report:
-                            tag_str = "財報重訊"
-                            cat_str = "earnings"
+                    if is_revenue:
+                        m_month = re.search(r'(?:115|2026)?年?(\d{1,2})月份?', subj_clean)
+                        if not m_month:
+                            m_month = re.search(r'(?:115|2026)?年?(\d{1,2})月份?', desc[:100])
+                        # 依選項 A：僅接收當期目標月份 (如 10月) 之自結營收重訊，未明確註明當期月份或舊月 (如 9月) 視為過期直接略過
+                        target_m = 12 if today.month == 1 else today.month - 1
+                        if not m_month or int(m_month.group(1)) != target_m:
+                            continue
+                        month_label = f"{target_m}月"
+                        tag_str = f"自結{month_label}"
+                        cat_str = "revenue"
+                    elif is_briefing:
+                        if meeting_d_obj:
+                            tag_str = f"法說會 {meeting_d_obj.strftime('%m/%d')}"
+                            fmt_date = meeting_d_obj.strftime("%Y-%m-%d")
                         else:
-                            tag_str = "重訊"
-                            cat_str = "news"
+                            tag_str = "法說重訊"
+                        cat_str = "briefing"
+                    elif is_financial_report:
+                        m_q = re.search(r'(?:第\s*([1-4一二三四])\s*季|Q([1-4]))', subj_clean + " " + desc[:100])
+                        q_str = ""
+                        if m_q:
+                            q_val = m_q.group(1) or m_q.group(2)
+                            q_map = {'一': '1', '二': '2', '三': '3', '四': '4', '1': '1', '2': '2', '3': '3', '4': '4'}
+                            q_str = f"Q{q_map.get(q_val, q_val)}"
+                        tag_str = f"{q_str}財報" if q_str else "財報重訊"
+                        cat_str = "earnings"
+                    else:
+                        tag_str = "重訊"
+                        cat_str = "news"
 
-                        results.append({
-                            "id": f"news-{c}-{date_raw}-{time_raw}",
-                            "code": c,
-                            "tag": tag_str,
-                            "title": subj_clean,
-                            "date": fmt_date,
-                            "detail": desc.replace("\r\n", "\n").strip(),
-                            "category": cat_str,
-                        })
+                    results.append({
+                        "id": f"news-{c}-{date_raw}-{time_raw}",
+                        "code": c,
+                        "tag": tag_str,
+                        "title": subj_clean,
+                        "date": fmt_date,
+                        "detail": desc.replace("\r\n", "\n").strip(),
+                        "category": cat_str,
+                    })
         except Exception as e:
             logger.warning(f"Error fetching TWSE material news: {e}")
         return results
 
-    def _fetch_tpex_material_news(self, wanted_codes: set[str]) -> list[dict]:
-        """從櫃買中心 TPEx OpenAPI 撈取上櫃公司重大訊息 (mopsfin_t187ap04_O)"""
+    def _fetch_tpex_material_news(self, wanted_codes: Optional[set[str]] = None) -> list[dict]:
+        """從櫃買中心 TPEx OpenAPI 撈取全市場上櫃公司重大訊息 (mopsfin_t187ap04_O)"""
         results: list[dict] = []
         today = date.today()
         try:
@@ -505,62 +607,210 @@ class AnnouncementService:
                 data = json.loads(resp.read().decode("utf-8"))
                 for it in data:
                     c = str(it.get("SecuritiesCompanyCode", "")).strip()
-                    if c in wanted_codes:
-                        date_raw = str(it.get("發言日期", "")).strip()
-                        time_raw = str(it.get("發言時間", "")).strip()
-                        subj = (it.get("主旨 ") or it.get("主旨") or "").strip()
-                        desc = str(it.get("說明", "")).strip()
-                        fmt_date = date_raw
-                        d_obj = None
-                        if len(date_raw) == 7:
-                            yy = int(date_raw[:3]) + 1911
-                            mm = int(date_raw[3:5])
-                            dd = int(date_raw[5:])
-                            fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
-                            d_obj = date(yy, mm, dd)
+                    if wanted_codes and c not in wanted_codes:
+                        continue
+                    if not c or not (c.isdigit() or len(c) >= 4):
+                        continue
+
+                    date_raw = str(it.get("發言日期", "")).strip()
+                    time_raw = str(it.get("發言時間", "")).strip()
+                    subj = (it.get("主旨 ") or it.get("主旨") or "").strip()
+                    desc = str(it.get("說明", "")).strip()
+                    fmt_date = date_raw
+                    d_obj = None
+                    if len(date_raw) == 7:
+                        yy = int(date_raw[:3]) + 1911
+                        mm = int(date_raw[3:5])
+                        dd = int(date_raw[5:])
+                        fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
+                        d_obj = date(yy, mm, dd)
+                    subj_clean = subj.replace("\r\n", " ")
+                    is_briefing = any(k in subj_clean for k in ["法人說明會", "法說會", "業績發表會", "投資人說明會"])
+                    is_financial_report = any(k in subj_clean for k in ["董事會通過", "提報董事會", "董事會決議提報"]) and any(k in subj_clean for k in ["財務報告", "財務報表", "季報", "年報"])
+                    is_revenue = any(k in subj_clean for k in ["自結合併營收", "合併營收", "月營收", "營業額", "業績資料", "自結損益", "自結盈餘", "自結合併損益", "自結合併淨利"]) or ("營業額" in desc or "當月營收" in desc or "自結合併營收" in desc or "自結合併損益" in desc)
+
+                    # 若為法說會，嘗試從說明欄內提取真正的召開日期與時間
+                    meeting_d_obj = None
+                    if is_briefing:
+                        m_b_date = re.search(r'(?:召開法人說明會之日期|事實發生日)[：:\s]+(?:115|114|2026|2025)[年/.]?(\d{1,2})[月/.](\d{1,2})', desc)
+                        if m_b_date:
+                            try:
+                                bm = int(m_b_date.group(1))
+                                bd = int(m_b_date.group(2))
+                                meeting_d_obj = date(today.year, bm, bd)
+                            except Exception:
+                                pass
+
+                    # 篩選重大訊息時效：自結營收保留 45 天，法說會以召開日算（過後5天過期；未開則持續保留），財報保留 30 天，一般重訊保留 3 天
+                    if is_revenue:
+                        if d_obj and (today - d_obj).days > 45:
+                            continue
+                    elif is_briefing:
+                        target_check_d = meeting_d_obj or d_obj
+                        if target_check_d and (today - target_check_d).days > 5:
+                            continue
+                    elif is_financial_report:
+                        if d_obj and (today - d_obj).days > 30:
+                            continue
+                    else:
                         if d_obj and (today - d_obj).days > 3:
                             continue
 
-                        subj_clean = subj.replace("\r\n", " ")
-                        is_briefing = any(k in subj_clean for k in ["法人說明會", "法說會", "投資人說明會"])
-                        is_financial_report = any(k in subj_clean for k in ["董事會通過", "提報董事會", "董事會決議提報"]) and any(k in subj_clean for k in ["財務報告", "財務報表", "季報", "年報"])
-                        is_revenue = any(k in subj_clean for k in ["自結合併營收", "合併營收", "月營收", "營業額", "業績資料", "自結損益", "自結盈餘"]) or ("營業額" in desc or "當月營收" in desc or "自結合併營收" in desc)
-
-                        if is_revenue:
-                            import re
-                            m_month = re.search(r'(?:115|2026)?年?(\d{1,2})月份?', subj_clean)
-                            if not m_month:
-                                m_month = re.search(r'(?:115|2026)?年?(\d{1,2})月份?', desc[:100])
-                            month_label = f"{m_month.group(1)}月" if m_month else ""
-                            tag_str = f"自結{month_label}" if month_label else "自結"
-                            cat_str = "revenue"
-                        elif is_briefing:
-                            tag_str = "法說重訊"
-                            cat_str = "briefing"
-                        elif is_financial_report:
-                            tag_str = "財報重訊"
-                            cat_str = "earnings"
+                    if is_revenue:
+                        m_month = re.search(r'(?:115|2026)?年?(\d{1,2})月份?', subj_clean)
+                        if not m_month:
+                            m_month = re.search(r'(?:115|2026)?年?(\d{1,2})月份?', desc[:100])
+                        # 依選項 A：僅接收當期目標月份 (如 10月) 之自結營收重訊，未明確註明當期月份或舊月 (如 9月) 視為過期直接略過
+                        target_m = 12 if today.month == 1 else today.month - 1
+                        if not m_month or int(m_month.group(1)) != target_m:
+                            continue
+                        month_label = f"{target_m}月"
+                        tag_str = f"自結{month_label}"
+                        cat_str = "revenue"
+                    elif is_briefing:
+                        if meeting_d_obj:
+                            tag_str = f"法說會 {meeting_d_obj.strftime('%m/%d')}"
+                            fmt_date = meeting_d_obj.strftime("%Y-%m-%d")
                         else:
-                            tag_str = "重訊"
-                            cat_str = "news"
+                            tag_str = "法說重訊"
+                        cat_str = "briefing"
+                    elif is_financial_report:
+                        m_q = re.search(r'(?:第\s*([1-4一二三四])\s*季|Q([1-4]))', subj_clean + " " + desc[:100])
+                        q_str = ""
+                        if m_q:
+                            q_val = m_q.group(1) or m_q.group(2)
+                            q_map = {'一': '1', '二': '2', '三': '3', '四': '4', '1': '1', '2': '2', '3': '3', '4': '4'}
+                            q_str = f"Q{q_map.get(q_val, q_val)}"
+                        tag_str = f"{q_str}財報" if q_str else "財報重訊"
+                        cat_str = "earnings"
+                    else:
+                        tag_str = "重訊"
+                        cat_str = "news"
 
-                        results.append({
-                            "id": f"news-{c}-{date_raw}-{time_raw}",
-                            "code": c,
-                            "tag": tag_str,
-                            "title": subj_clean,
-                            "date": fmt_date,
-                            "detail": desc.replace("\r\n", "\n").strip(),
-                            "category": cat_str,
-                        })
+                    results.append({
+                        "id": f"news-{c}-{date_raw}-{time_raw}",
+                        "code": c,
+                        "tag": tag_str,
+                        "title": subj_clean,
+                        "date": fmt_date,
+                        "detail": desc.replace("\r\n", "\n").strip(),
+                        "category": cat_str,
+                    })
         except Exception as e:
             logger.warning(f"Error fetching TPEx material news: {e}")
         return results
 
-    def _fetch_twse_monthly_revenue(self, wanted_codes: set[str]) -> list[dict]:
-        """從證交所 OpenAPI 撈取最新每月自結營收彙總 (t187ap05_L) (出表日 5 天內有效)"""
+    def _fetch_mops_monthly_revenue(self, wanted_codes: Optional[set[str]] = None) -> list[dict]:
+        """從 MOPS 公開資訊觀測站抓取全市場最新每月自結營收彙總 (當期目標月 100% 精準無遺漏，絕不混入舊月份)"""
         results: list[dict] = []
         today = date.today()
+
+        # 決定欲查詢之目標年月 (在 11 月時，法定申報營收為 10 月自結；舊月份一律排除)
+        if today.month == 1:
+            target_year = today.year - 1
+            target_month = 12
+        else:
+            target_year = today.year
+            target_month = today.month - 1
+
+        year_roc = target_year - 1911
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+
+        def fetch_page(mkt: str, yr: int, mn: int, sub: int):
+            u = f"https://mopsov.twse.com.tw/nas/t21/{mkt}/t21sc03_{yr}_{mn}_{sub}.html"
+            for attempt in range(3):
+                try:
+                    rq = urllib.request.Request(u, headers=headers)
+                    with urllib.request.urlopen(rq, timeout=8) as rp:
+                        return (mkt, yr, mn, sub, rp.read().decode("cp950", errors="ignore"))
+                except Exception as e:
+                    if attempt == 2:
+                        logger.warning(f"Error fetching MOPS monthly revenue for {u}: {e}")
+                    time.sleep(0.5)
+            return (mkt, yr, mn, sub, None)
+
+        pages_to_fetch = []
+        for market in ["sii", "otc"]:
+            for sub_type in [0, 1]:  # 0: 國內, 1: 國外第一上市櫃 (KY)
+                pages_to_fetch.append((market, year_roc, target_month, sub_type))
+
+        cur_month_stocks: dict[str, dict] = {}
+
+        for market, yr, mn, sub in pages_to_fetch:
+            mkt, y, m, s, html = fetch_page(market, yr, mn, sub)
+            if not html:
+                continue
+            soup = BeautifulSoup(html, "html.parser")
+            for tr in soup.find_all("tr"):
+                tds = [td.get_text(strip=True) for td in tr.find_all("td", recursive=False)]
+                if len(tds) >= 10 and tds[0].isdigit():
+                    code = tds[0].strip()
+                    if wanted_codes and code not in wanted_codes:
+                        continue
+                    name = tds[1].strip()
+                    cur_rev_raw = tds[2].replace(",", "")
+                    mom_raw = tds[5].replace(",", "")
+                    yoy_raw = tds[6].replace(",", "")
+                    memo = tds[10].strip() if len(tds) > 10 else ""
+                    try:
+                        cur_rev_amount = float(cur_rev_raw) * 1000
+                        mom_val = float(mom_raw)
+                        yoy_val = float(yoy_raw)
+                    except (ValueError, TypeError):
+                        continue
+
+                    cur_month_stocks[code] = {
+                        "code": code,
+                        "name": name,
+                        "amount": cur_rev_amount,
+                        "mom": mom_val,
+                        "yoy": yoy_val,
+                        "memo": memo,
+                        "month": target_month,
+                        "year_roc": year_roc,
+                    }
+            time.sleep(0.2)
+
+        # 法定申報日 (例如 10 月自結營收於 11 月 10 日前申報完畢)
+        target_date_str = f"{today.year}-{today.month:02d}-10"
+        month_label = f"{target_month}月"
+
+        for code, info in cur_month_stocks.items():
+            detail_lines = [
+                f"{month_label}自結營收: {format_chinese_amount(info['amount'])}",
+                f"月增率 (MoM): {'+' if info['mom'] > 0 else ''}{info['mom']:.2f}%",
+                f"年增率 (YoY): {'+' if info['yoy'] > 0 else ''}{info['yoy']:.2f}%",
+            ]
+            if info["memo"] and info["memo"] != "-":
+                detail_lines.append(f"公司說明: {info['memo']}")
+
+            results.append({
+                "id": f"rev-{code}-{info['year_roc']}{target_month:02d}",
+                "code": code,
+                "tag": f"自結{month_label}",
+                "title": f"最新{month_label}自結營收公告",
+                "date": target_date_str,
+                "detail": "\n".join(detail_lines),
+                "category": "revenue",
+            })
+
+        logger.info(f"MOPS monthly revenue fetch complete: {len(results)} stocks parsed for {month_label} across market.")
+        return results
+
+    def _fetch_twse_monthly_revenue(self, wanted_codes: Optional[set[str]] = None) -> list[dict]:
+        """從證交所 OpenAPI 撈取最新每月自結營收彙總 (t187ap05_L) (嚴格鎖定當期目標月，絕不回退舊月份)"""
+        results: list[dict] = []
+        today = date.today()
+        target_year = today.year - 1 if today.month == 1 else today.year
+        target_month = 12 if today.month == 1 else today.month - 1
+        year_roc = target_year - 1911
+        target_roc_m = f"{year_roc}{target_month:02d}"
+        target_date_str = f"{today.year}-{today.month:02d}-10"
+        month_label = f"{target_month}月"
+
         try:
             url = "https://openapi.twse.com.tw/v1/opendata/t187ap05_L"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -568,62 +818,54 @@ class AnnouncementService:
                 data = json.loads(resp.read().decode("utf-8"))
                 for it in data:
                     c = str(it.get("公司代號", "")).strip()
-                    if c in wanted_codes:
-                        date_raw = str(it.get("出表日期", "")).strip()
-                        fmt_date = date_raw
-                        d_obj = None
-                        if len(date_raw) == 7 and date_raw.isdigit():
-                            yy = int(date_raw[:3]) + 1911
-                            mm = int(date_raw[3:5])
-                            dd = int(date_raw[5:])
-                            fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
-                            d_obj = date(yy, mm, dd)
-                        elif len(date_raw) == 8 and date_raw.isdigit():
-                            yy = int(date_raw[:4])
-                            mm = int(date_raw[4:6])
-                            dd = int(date_raw[6:])
-                            fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
-                            d_obj = date(yy, mm, dd)
-                        # 自結日（出表發布日）超過 5 天自動取消過期
-                        if d_obj and (today - d_obj).days > 5:
-                            continue
+                    if wanted_codes and c not in wanted_codes:
+                        continue
+                    if not c or not (c.isdigit() or len(c) >= 4):
+                        continue
 
-                        m_str = str(it.get("資料年月", "")).strip()
-                        raw_cur = float(it.get("營業收入-當月營收", 0) or 0)
-                        cur_amount = raw_cur * 1000
-                        mom = float(it.get("營業收入-上月比較增減(%)", 0) or 0)
-                        yoy = float(it.get("營業收入-去年同月增減(%)", 0) or 0)
+                    m_str = str(it.get("資料年月", "")).strip()
+                    # 嚴格篩選：只接受當期目標月份 (如 11510)，舊月份 (如 11509) 直接丟棄
+                    if m_str != target_roc_m:
+                        continue
 
-                        month_label = ""
-                        if len(m_str) >= 5:
-                            month_label = f"{int(m_str[-2:])}月"
+                    raw_cur = float(it.get("營業收入-當月營收", 0) or 0)
+                    cur_amount = raw_cur * 1000
+                    mom = float(it.get("營業收入-上月比較增減(%)", 0) or 0)
+                    yoy = float(it.get("營業收入-去年同月增減(%)", 0) or 0)
 
-                        detail_lines = [
-                            f"{month_label}自結營收: {format_chinese_amount(cur_amount)}",
-                            f"月增率 (MoM): {'+' if mom > 0 else ''}{mom:.2f}%",
-                            f"年增率 (YoY): {'+' if yoy > 0 else ''}{yoy:.2f}%",
-                        ]
-                        memo = str(it.get("備註", "")).strip()
-                        if memo and memo != "-":
-                            detail_lines.append(f"公司說明: {memo}")
+                    detail_lines = [
+                        f"{month_label}自結營收: {format_chinese_amount(cur_amount)}",
+                        f"月增率 (MoM): {'+' if mom > 0 else ''}{mom:.2f}%",
+                        f"年增率 (YoY): {'+' if yoy > 0 else ''}{yoy:.2f}%",
+                    ]
+                    memo = str(it.get("備註", "")).strip()
+                    if memo and memo != "-":
+                        detail_lines.append(f"公司說明: {memo}")
 
-                        results.append({
-                            "id": f"rev-{c}-{m_str}",
-                            "code": c,
-                            "tag": "自結",
-                            "title": f"最新{month_label}自結營收公告",
-                            "date": fmt_date,
-                            "detail": "\n".join(detail_lines),
-                            "category": "revenue",
-                        })
+                    results.append({
+                        "id": f"rev-{c}-{m_str}",
+                        "code": c,
+                        "tag": f"自結{month_label}",
+                        "title": f"最新{month_label}自結營收公告",
+                        "date": target_date_str,
+                        "detail": "\n".join(detail_lines),
+                        "category": "revenue",
+                    })
         except Exception as e:
             logger.warning(f"Error fetching TWSE monthly revenue: {e}")
         return results
 
-    def _fetch_tpex_monthly_revenue(self, wanted_codes: set[str]) -> list[dict]:
-        """從櫃買中心 TPEx OpenAPI 撈取最新每月自結營收彙總 (mopsfin_t187ap05_O) (出表日 5 天內有效)"""
+    def _fetch_tpex_monthly_revenue(self, wanted_codes: Optional[set[str]] = None) -> list[dict]:
+        """從櫃買中心 TPEx OpenAPI 撈取最新每月自結營收彙總 (mopsfin_t187ap05_O) (嚴格鎖定當期目標月)"""
         results: list[dict] = []
         today = date.today()
+        target_year = today.year - 1 if today.month == 1 else today.year
+        target_month = 12 if today.month == 1 else today.month - 1
+        year_roc = target_year - 1911
+        target_roc_m = f"{year_roc}{target_month:02d}"
+        target_date_str = f"{today.year}-{today.month:02d}-10"
+        month_label = f"{target_month}月"
+
         try:
             url = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -631,61 +873,45 @@ class AnnouncementService:
                 data = json.loads(resp.read().decode("utf-8"))
                 for it in data:
                     c = str(it.get("公司代號", "")).strip()
-                    if c in wanted_codes:
-                        date_raw = str(it.get("出表日期", "")).strip()
-                        fmt_date = date_raw
-                        d_obj = None
-                        if len(date_raw) == 7 and date_raw.isdigit():
-                            yy = int(date_raw[:3]) + 1911
-                            mm = int(date_raw[3:5])
-                            dd = int(date_raw[5:])
-                            fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
-                            d_obj = date(yy, mm, dd)
-                        elif len(date_raw) == 8 and date_raw.isdigit():
-                            yy = int(date_raw[:4])
-                            mm = int(date_raw[4:6])
-                            dd = int(date_raw[6:])
-                            fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
-                            d_obj = date(yy, mm, dd)
-                        # 自結日（出表發布日）超過 5 天自動取消過期
-                        if d_obj and (today - d_obj).days > 5:
-                            continue
+                    if wanted_codes and c not in wanted_codes:
+                        continue
+                    if not c or not (c.isdigit() or len(c) >= 4):
+                        continue
 
-                        m_str = str(it.get("資料年月", "")).strip()
-                        raw_cur = float(it.get("營業收入-當月營收", 0) or 0)
-                        cur_amount = raw_cur * 1000
-                        mom = float(it.get("營業收入-上月比較增減(%)", 0) or 0)
-                        yoy = float(it.get("營業收入-去年同月增減(%)", 0) or 0)
+                    m_str = str(it.get("資料年月", "")).strip()
+                    # 嚴格篩選：只接受當期目標月份 (如 11510)
+                    if m_str != target_roc_m:
+                        continue
 
-                        month_label = ""
-                        if len(m_str) >= 5:
-                            month_label = f"{int(m_str[-2:])}月"
+                    raw_cur = float(it.get("營業收入-當月營收", 0) or 0)
+                    cur_amount = raw_cur * 1000
+                    mom = float(it.get("營業收入-上月比較增減(%)", 0) or 0)
+                    yoy = float(it.get("營業收入-去年同月增減(%)", 0) or 0)
 
-                        detail_lines = [
-                            f"{month_label}自結營收: {format_chinese_amount(cur_amount)}",
-                            f"月增率 (MoM): {'+' if mom > 0 else ''}{mom:.2f}%",
-                            f"年增率 (YoY): {'+' if yoy > 0 else ''}{yoy:.2f}%",
-                        ]
-                        memo = str(it.get("備註", "")).strip()
-                        if memo and memo != "-":
-                            detail_lines.append(f"公司說明: {memo}")
+                    detail_lines = [
+                        f"{month_label}自結營收: {format_chinese_amount(cur_amount)}",
+                        f"月增率 (MoM): {'+' if mom > 0 else ''}{mom:.2f}%",
+                        f"年增率 (YoY): {'+' if yoy > 0 else ''}{yoy:.2f}%",
+                    ]
+                    memo = str(it.get("備註", "")).strip()
+                    if memo and memo != "-":
+                        detail_lines.append(f"公司說明: {memo}")
 
-                        results.append({
-                            "id": f"rev-{c}-{m_str}",
-                            "code": c,
-                            "tag": "自結",
-                            "title": f"最新{month_label}自結營收公告",
-                            "date": fmt_date,
-                            "detail": "\n".join(detail_lines),
-                            "category": "revenue",
-                        })
+                    results.append({
+                        "id": f"rev-{c}-{m_str}",
+                        "code": c,
+                        "tag": f"自結{month_label}",
+                        "title": f"最新{month_label}自結營收公告",
+                        "date": target_date_str,
+                        "detail": "\n".join(detail_lines),
+                        "category": "revenue",
+                    })
         except Exception as e:
             logger.warning(f"Error fetching TPEx monthly revenue: {e}")
         return results
-        return results
 
-    def _fetch_twse_exdividend(self, wanted_codes: set[str]) -> list[dict]:
-        """從證交所 OpenAPI 撈取除權除息預告表（僅保留尚未除權息者，結束當天過後自動移除）"""
+    def _fetch_twse_exdividend(self, wanted_codes: Optional[set[str]] = None) -> list[dict]:
+        """從證交所 OpenAPI 撈取全市場除權除息預告表（僅保留尚未除權息者，結束當天過後自動移除）"""
         results: list[dict] = []
         today = date.today()
         try:
@@ -695,49 +921,53 @@ class AnnouncementService:
                 data = json.loads(resp.read().decode("utf-8"))
                 for it in data:
                     c = str(it.get("Code", "")).strip()
-                    if c in wanted_codes:
-                        date_raw = str(it.get("Date", "")).strip()
-                        d_obj = None
-                        fmt_date = date_raw
-                        tag_label = "除息"
-                        if len(date_raw) == 7:
-                            yy = int(date_raw[:3]) + 1911
-                            mm = int(date_raw[3:5])
-                            dd = int(date_raw[5:])
-                            d_obj = date(yy, mm, dd)
-                            fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
-                            ex_type = str(it.get("Exdividend", "息")).strip()
-                            tag_type = "除息" if "息" in ex_type else "除權"
-                            tag_label = f"{tag_type} {mm}/{dd}"
+                    if wanted_codes and c not in wanted_codes:
+                        continue
+                    if not c or not (c.isdigit() or len(c) >= 4):
+                        continue
 
-                        if d_obj and d_obj < today:
-                            continue
-
+                    date_raw = str(it.get("Date", "")).strip()
+                    d_obj = None
+                    fmt_date = date_raw
+                    tag_label = "除息"
+                    if len(date_raw) == 7:
+                        yy = int(date_raw[:3]) + 1911
+                        mm = int(date_raw[3:5])
+                        dd = int(date_raw[5:])
+                        d_obj = date(yy, mm, dd)
+                        fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
                         ex_type = str(it.get("Exdividend", "息")).strip()
-                        cash_div = str(it.get("CashDividend", "")).strip()
-                        stock_div = str(it.get("StockDividendRatio", "")).strip()
+                        tag_type = "除息" if "息" in ex_type else "除權"
+                        tag_label = f"{tag_type} {mm}/{dd}"
 
-                        detail_lines = []
-                        if cash_div and cash_div != "0.000000":
-                            detail_lines.append(f"每股現金股利: {cash_div} 元")
-                        if stock_div and stock_div != "0.000000":
-                            detail_lines.append(f"每股股票股利: {stock_div} 股")
+                    if d_obj and d_obj < today:
+                        continue
 
-                        results.append({
-                            "id": f"exdiv-{c}-{date_raw}",
-                            "code": c,
-                            "tag": tag_label,
-                            "title": f"除權除息預告 ({ex_type})",
-                            "date": fmt_date,
-                            "detail": "\n".join(detail_lines) if detail_lines else "詳見證券交易所除權息公告",
-                            "category": "exdividend",
-                        })
+                    ex_type = str(it.get("Exdividend", "息")).strip()
+                    cash_div = str(it.get("CashDividend", "")).strip()
+                    stock_div = str(it.get("StockDividendRatio", "")).strip()
+
+                    detail_lines = []
+                    if cash_div and cash_div != "0.000000":
+                        detail_lines.append(f"每股現金股利: {cash_div} 元")
+                    if stock_div and stock_div != "0.000000":
+                        detail_lines.append(f"每股股票股利: {stock_div} 股")
+
+                    results.append({
+                        "id": f"exdiv-{c}-{date_raw}",
+                        "code": c,
+                        "tag": tag_label,
+                        "title": f"除權除息預告 ({ex_type})",
+                        "date": fmt_date,
+                        "detail": "\n".join(detail_lines) if detail_lines else "詳見證券交易所除權息公告",
+                        "category": "exdividend",
+                    })
         except Exception as e:
             logger.warning(f"Error fetching TWSE exdividend: {e}")
         return results
 
-    def _fetch_tpex_exdividend(self, wanted_codes: set[str]) -> list[dict]:
-        """從櫃買中心 TPEx OpenAPI 撈取上櫃除權除息預告表 (tpex_exright_prepost)"""
+    def _fetch_tpex_exdividend(self, wanted_codes: Optional[set[str]] = None) -> list[dict]:
+        """從櫃買中心 TPEx OpenAPI 撈取全市場上櫃除權除息預告表 (tpex_exright_prepost)"""
         results: list[dict] = []
         today = date.today()
         try:
@@ -747,57 +977,183 @@ class AnnouncementService:
                 data = json.loads(resp.read().decode("utf-8"))
                 for it in data:
                     c = str(it.get("SecuritiesCompanyCode", "")).strip()
-                    if c in wanted_codes:
-                        date_raw = str(it.get("ExRrightsExDividendDate", "")).strip()
-                        d_obj = None
-                        fmt_date = date_raw
-                        tag_label = "除息"
-                        if len(date_raw) == 7:
-                            yy = int(date_raw[:3]) + 1911
-                            mm = int(date_raw[3:5])
-                            dd = int(date_raw[5:])
-                            d_obj = date(yy, mm, dd)
-                            fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
-                            ex_type = str(it.get("ExRrightsExDividend", "除息")).strip()
-                            tag_type = "除息" if "息" in ex_type else "除權"
-                            tag_label = f"{tag_type} {mm}/{dd}"
+                    if wanted_codes and c not in wanted_codes:
+                        continue
+                    if not c or not (c.isdigit() or len(c) >= 4):
+                        continue
 
-                        if d_obj and d_obj < today:
-                            continue
-
+                    date_raw = str(it.get("ExRrightsExDividendDate", "")).strip()
+                    d_obj = None
+                    fmt_date = date_raw
+                    tag_label = "除息"
+                    if len(date_raw) == 7:
+                        yy = int(date_raw[:3]) + 1911
+                        mm = int(date_raw[3:5])
+                        dd = int(date_raw[5:])
+                        d_obj = date(yy, mm, dd)
+                        fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
                         ex_type = str(it.get("ExRrightsExDividend", "除息")).strip()
-                        cash_div = str(it.get("CashDividend", "")).strip()
-                        stock_div = str(it.get("StockDividendRatio", "")).strip()
+                        tag_type = "除息" if "息" in ex_type else "除權"
+                        tag_label = f"{tag_type} {mm}/{dd}"
 
-                        detail_lines = []
-                        if cash_div and cash_div not in ["0.00000000", "0.00", "0"]:
-                            detail_lines.append(f"每股現金股利: {float(cash_div):.4f} 元")
-                        if stock_div and stock_div not in ["0.00000000", "0.00", "0"]:
-                            detail_lines.append(f"每股股票股利: {float(stock_div):.4f} 股")
+                    if d_obj and d_obj < today:
+                        continue
 
-                        results.append({
-                            "id": f"exdiv-{c}-{date_raw}",
-                            "code": c,
-                            "tag": tag_label,
-                            "title": f"上櫃除權除息預告 ({ex_type})",
-                            "date": fmt_date,
-                            "detail": "\n".join(detail_lines) if detail_lines else "詳見櫃買中心除權除息公告",
-                            "category": "exdividend",
-                        })
+                    ex_type = str(it.get("ExRrightsExDividend", "除息")).strip()
+                    cash_div = str(it.get("CashDividend", "")).strip()
+                    stock_div = str(it.get("StockDividendRatio", "")).strip()
+
+                    detail_lines = []
+                    c_div_num = safe_float(cash_div)
+                    s_div_num = safe_float(stock_div)
+                    if c_div_num > 0:
+                        detail_lines.append(f"每股現金股利: {c_div_num:.4f} 元")
+                    elif cash_div and cash_div not in ["0.00000000", "0.00", "0", "0.000000"]:
+                        detail_lines.append(f"每股現金股利: {cash_div}")
+
+                    if s_div_num > 0:
+                        detail_lines.append(f"每股股票股利: {s_div_num:.4f} 股")
+                    elif stock_div and stock_div not in ["0.00000000", "0.00", "0", "0.000000"]:
+                        detail_lines.append(f"每股股票股利: {stock_div}")
+
+                    results.append({
+                        "id": f"exdiv-{c}-{date_raw}",
+                        "code": c,
+                        "tag": tag_label,
+                        "title": f"上櫃除權除息預告 ({ex_type})",
+                        "date": fmt_date,
+                        "detail": "\n".join(detail_lines) if detail_lines else "詳見櫃買中心除權除息公告",
+                        "category": "exdividend",
+                    })
         except Exception as e:
             logger.warning(f"Error fetching TPEx exdividend: {e}")
         return results
 
-    def _fetch_official_briefings_and_events(self, wanted_codes: set[str]) -> list[dict]:
-        """從台股官方公開申報日程 (HiStock / MOPS) 撈取已確認之法人說明會與財報公告，絕不使用演算法模型推估"""
+    def _fetch_twse_quarterly_reports(self, wanted_codes: Optional[set[str]] = None) -> list[dict]:
+        """從證交所 OpenAPI (t187ap14_L) 撈取最新官方申報季報 (EPS、營業收入、稅後淨利)"""
         results: list[dict] = []
         today = date.today()
-        # 覆蓋今天起的近 5 週 (從上週起始點推至未來 3 週)
+        try:
+            url = "https://openapi.twse.com.tw/v1/opendata/t187ap14_L"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            for it in data:
+                c = str(it.get("公司代號", "")).strip()
+                if wanted_codes and c not in wanted_codes:
+                    continue
+                if not c or not (c.isdigit() or len(c) >= 4):
+                    continue
+
+                date_raw = str(it.get("出表日期", "")).strip()
+                d_obj = None
+                fmt_date = date_raw
+                if len(date_raw) == 7 and date_raw.isdigit():
+                    yy = int(date_raw[:3]) + 1911
+                    mm = int(date_raw[3:5])
+                    dd = int(date_raw[5:])
+                    fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
+                    d_obj = date(yy, mm, dd)
+                if d_obj and (today - d_obj).days > 45:
+                    continue
+
+                nm = str(it.get("公司名稱", "")).strip()
+                q = str(it.get("季別", "")).strip()
+                eps = str(it.get("基本每股盈餘(元)", "")).strip()
+                raw_rev = safe_float(it.get("營業收入", 0)) * 1000
+                raw_profit = safe_float(it.get("稅後淨利", 0)) * 1000
+                raw_op = safe_float(it.get("營業利益", 0)) * 1000
+
+                detail_lines = [
+                    f"115年第{q}季 (Q{q}) 官方申報財務報告：",
+                    f"基本每股盈餘 (EPS): {eps} 元" if eps and eps != "--" else "",
+                    f"稅後淨利: {format_chinese_amount(raw_profit)}" if raw_profit else "",
+                    f"營業收入: {format_chinese_amount(raw_rev)}" if raw_rev else "",
+                    f"營業利益: {format_chinese_amount(raw_op)}" if raw_op else "",
+                    f"官方申報出表日期: {fmt_date}",
+                ]
+                detail_txt = "\n".join([x for x in detail_lines if x])
+                results.append({
+                    "id": f"q-twse-{c}-{date_raw}-Q{q}",
+                    "code": c,
+                    "tag": f"Q{q}財報" if q else "季報",
+                    "title": f"{nm} Q{q} 財務報告 (EPS {eps}元)" if eps and eps != "--" else f"{nm} Q{q} 財務報告",
+                    "date": fmt_date,
+                    "detail": detail_txt,
+                    "category": "earnings",
+                })
+        except Exception as e:
+            logger.warning(f"Error fetching TWSE quarterly reports: {e}")
+        return results
+
+    def _fetch_tpex_quarterly_reports(self, wanted_codes: Optional[set[str]] = None) -> list[dict]:
+        """從櫃買中心 TPEx OpenAPI (mopsfin_t187ap14_O) 撈取最新官方申報季報 (EPS、營業收入、稅後淨利)"""
+        results: list[dict] = []
+        today = date.today()
+        try:
+            url = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap14_O"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            for it in data:
+                c = str(it.get("SecuritiesCompanyCode", "")).strip()
+                if wanted_codes and c not in wanted_codes:
+                    continue
+                if not c or not (c.isdigit() or len(c) >= 4):
+                    continue
+
+                date_raw = str(it.get("Date", "")).strip()
+                d_obj = None
+                fmt_date = date_raw
+                if len(date_raw) == 7 and date_raw.isdigit():
+                    yy = int(date_raw[:3]) + 1911
+                    mm = int(date_raw[3:5])
+                    dd = int(date_raw[5:])
+                    fmt_date = f"{yy}-{mm:02d}-{dd:02d}"
+                    d_obj = date(yy, mm, dd)
+                if d_obj and (today - d_obj).days > 45:
+                    continue
+
+                nm = str(it.get("CompanyName", "")).strip()
+                q = str(it.get("季別", "")).strip()
+                eps = str(it.get("基本每股盈餘", "")).strip()
+                raw_rev = safe_float(it.get("營業收入", 0)) * 1000
+                raw_profit = safe_float(it.get("稅後淨利", 0)) * 1000
+                raw_op = safe_float(it.get("營業利益", 0)) * 1000
+
+                detail_lines = [
+                    f"115年第{q}季 (Q{q}) 官方申報財務報告：",
+                    f"基本每股盈餘 (EPS): {eps} 元" if eps and eps != "--" else "",
+                    f"稅後淨利: {format_chinese_amount(raw_profit)}" if raw_profit else "",
+                    f"營業收入: {format_chinese_amount(raw_rev)}" if raw_rev else "",
+                    f"營業利益: {format_chinese_amount(raw_op)}" if raw_op else "",
+                    f"官方申報出表日期: {fmt_date}",
+                ]
+                detail_txt = "\n".join([x for x in detail_lines if x])
+                results.append({
+                    "id": f"q-tpex-{c}-{date_raw}-Q{q}",
+                    "code": c,
+                    "tag": f"Q{q}財報" if q else "季報",
+                    "title": f"{nm} Q{q} 財務報告 (EPS {eps}元)" if eps and eps != "--" else f"{nm} Q{q} 財務報告",
+                    "date": fmt_date,
+                    "detail": detail_txt,
+                    "category": "earnings",
+                })
+        except Exception as e:
+            logger.warning(f"Error fetching TPEx quarterly reports: {e}")
+        return results
+
+    def _fetch_official_briefings_and_events(self, wanted_codes: Optional[set[str]] = None) -> list[dict]:
+        """從台股官方公開申報日程 (HiStock / MOPS) 撈取全市場已確認之法人說明會、業績發表會與財報公告，絕不使用演算法模型推估"""
+        results: list[dict] = []
+        today = date.today()
+        # 覆蓋今天起的近 7 週 (從上週起始點推至未來 6 週，無縫連續覆蓋)
         dates_to_check = [
             today - timedelta(days=7),
-            today + timedelta(days=7),
-            today + timedelta(days=21),
-            today + timedelta(days=35),
+            today,
+            today + timedelta(days=14),
+            today + timedelta(days=28),
+            today + timedelta(days=42),
         ]
         seen_ids = set()
 
@@ -839,37 +1195,39 @@ class AnnouncementService:
                         continue
 
                     full_text = " ".join(td.get_text(strip=True) for td in tds)
-                    matches = re.finditer(r"(\d{4})\s*([\u4e00-\u9fa5A-Za-z0-9\-\*]+?)(法人說明會|財報公告)", full_text)
+                    matches = re.finditer(r"(\d{4})\s*([\u4e00-\u9fa5A-Za-z0-9\-\*]+?)(法人說明會|業績發表會|財報公告|法說會)", full_text)
                     for m in matches:
                         c = m.group(1)
                         nm = m.group(2)
                         ev = m.group(3)
-                        if c in wanted_codes:
-                            uid = f"official-{c}-{ev_date}-{ev}"
-                            if uid in seen_ids:
-                                continue
-                            seen_ids.add(uid)
+                        if wanted_codes and c not in wanted_codes:
+                            continue
+                        uid = f"official-{c}-{ev_date}-{ev}"
+                        if uid in seen_ids:
+                            continue
+                        seen_ids.add(uid)
 
-                            if "法人說明會" in ev:
-                                tag_lbl = f"法說 {ev_date.strftime('%m/%d')}"
-                                cat_lbl = "briefing"
-                                title_lbl = f"{nm} 法人說明會 ({ev_date.strftime('%m/%d')})"
-                                detail_txt = f"官方公開申報日程: {ev_date.strftime('%Y-%m-%d')}\n公司: {c} {nm}\n事項: 召開法人說明會"
-                            else:
-                                tag_lbl = f"財報 {ev_date.strftime('%m/%d')}"
-                                cat_lbl = "earnings"
-                                title_lbl = f"{nm} 財報公告 ({ev_date.strftime('%m/%d')})"
-                                detail_txt = f"官方公開申報日程: {ev_date.strftime('%Y-%m-%d')}\n公司: {c} {nm}\n事項: 董事會提報/通過財務報告"
+                        if "法人說明會" in ev or "業績發表會" in ev or "法說會" in ev:
+                            tag_lbl = f"法說會 {ev_date.strftime('%m/%d')}"
+                            cat_lbl = "briefing"
+                            title_lbl = f"{nm} 法人說明會 ({ev_date.strftime('%m/%d')})"
+                            ev_name = "業績發表會" if "業績發表會" in ev else "法人說明會"
+                            detail_txt = f"官方公開申報日程: {ev_date.strftime('%Y-%m-%d')}\n公司: {c} {nm}\n事項: 召開{ev_name}"
+                        else:
+                            tag_lbl = f"財報 {ev_date.strftime('%m/%d')}"
+                            cat_lbl = "earnings"
+                            title_lbl = f"{nm} 財報公告 ({ev_date.strftime('%m/%d')})"
+                            detail_txt = f"官方公開申報日程: {ev_date.strftime('%Y-%m-%d')}\n公司: {c} {nm}\n事項: 董事會提報/通過財務報告"
 
-                            results.append({
-                                "id": uid,
-                                "code": c,
-                                "tag": tag_lbl,
-                                "title": title_lbl,
-                                "date": ev_date.strftime("%Y-%m-%d"),
-                                "detail": detail_txt,
-                                "category": cat_lbl,
-                            })
+                        results.append({
+                            "id": uid,
+                            "code": c,
+                            "tag": tag_lbl,
+                            "title": title_lbl,
+                            "date": ev_date.strftime("%Y-%m-%d"),
+                            "detail": detail_txt,
+                            "category": cat_lbl,
+                        })
             except Exception as e:
                 logger.warning(f"Error fetching official briefings from {url}: {e}")
 

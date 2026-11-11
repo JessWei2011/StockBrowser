@@ -10,6 +10,7 @@ import {
   removeItem,
   reorderItems,
   refreshSystemQuotes,
+  fetchAnnouncements,
 } from './services/api';
 import { wsClient } from './services/websocket';
 import { Header } from './components/Header';
@@ -599,6 +600,31 @@ export const App: React.FC = () => {
     }, 30000);
     return () => clearInterval(interval);
   }, [loadForex]);
+
+  useEffect(() => {
+    // 定期輪詢最新公告與即時自結營收 (每 60 秒)，並在視窗重新聚焦時立即刷新
+    const refreshAnns = async () => {
+      try {
+        const fresh = await fetchAnnouncements();
+        if (fresh && Object.keys(fresh).length > 0) {
+          setAnnouncements(fresh);
+        }
+      } catch (e) {
+        // silent background poll error
+      }
+    };
+
+    const interval = setInterval(refreshAnns, 60000);
+    const handleFocus = () => {
+      refreshAnns();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
 
   const isVaultGroup = activeGroup?.id === 'g-vault' || activeGroup?.name === '財神庫' || activeGroup?.name === '財神金庫';
   const isWealthGroup = activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿';

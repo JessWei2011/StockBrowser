@@ -219,14 +219,19 @@ def _get_reports_index() -> dict[str, str]:
         return _reports_dir_index
     if not os.path.isdir(STOCK_CENTER_REPORTS_DIR):
         return {}
-    new_index = {}
+    new_index: dict[str, tuple[str, float]] = {}
     for root, _, files in os.walk(STOCK_CENTER_REPORTS_DIR):
         for f in files:
             if f.endswith(".html") and "_" in f:
                 c = f.split("_", 1)[0]
-                if c not in new_index:
-                    new_index[c] = os.path.join(root, f)
-    _reports_dir_index = new_index
+                full_path = os.path.join(root, f)
+                try:
+                    f_mtime = os.path.getmtime(full_path)
+                except OSError:
+                    continue
+                if c not in new_index or f_mtime > new_index[c][1]:
+                    new_index[c] = (full_path, f_mtime)
+    _reports_dir_index = {c: path for c, (path, _) in new_index.items()}
     _reports_dir_indexed_at = now
     return _reports_dir_index
 

@@ -27,7 +27,7 @@ export function parseAnnouncementDate(dateStr?: string | null): Date | null {
 
 /**
  * 判斷公告是否已過期：
- * 1. 自結 (revenue): 發布日（出表日）超過 5 天過期取消
+ * 1. 自結 (revenue): 在次月營收公布前均保留有效（45 天寬限期，避免月中報表交接期過早失效）
  * 2. 重訊 (news): 發布日超過 3 天過期取消
  * 3. 法說會 (briefing) 與 財報 (earnings): 召開/公布日超過 5 天過期取消（事前正常顯示預告，事後保留 5 天）
  * 4. 除權除息 (exdividend): 除權息基準日過後過期取消
@@ -43,7 +43,19 @@ export function isAnnouncementExpired(ann: StockAnnouncement, now: Date = new Da
   const diffDays = Math.floor((nowDateOnly.getTime() - targetDateOnly.getTime()) / (1000 * 60 * 60 * 24));
 
   if (ann.category === 'revenue') {
-    return diffDays > 5;
+    // 依使用者規則 (選項 A)：在 N 月 (例如 11 月)，只顯示 N-1 月 (10 月) 自結；舊月份 (9 月或更早) 一律過期取消
+    // 尚未公布或非當期目標月份者，直接不顯示標籤
+    const targetMonth = now.getMonth() === 0 ? 12 : now.getMonth();
+    const tagMatch = ann.tag?.match(/(\d{1,2})月/) || ann.title?.match(/(\d{1,2})月/);
+    if (tagMatch) {
+      const annMonth = parseInt(tagMatch[1], 10);
+      if (annMonth !== targetMonth) {
+        return true; // 舊月份營收強制過期取消！
+      }
+    } else {
+      return true; // 無法識別為當期目標月份者強制不顯示
+    }
+    return diffDays > 35;
   }
   if (ann.category === 'news') {
     return diffDays > 3;

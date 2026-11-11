@@ -13,6 +13,7 @@ export const FinancialNewsModal: React.FC<FinancialNewsModalProps> = ({
 }) => {
   const [data, setData] = useState<FinancialNewsResponse | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('全部');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -164,12 +165,35 @@ export const FinancialNewsModal: React.FC<FinancialNewsModalProps> = ({
           {/* 右側：佔滿空間，分成 3 欄固定大小卡片，N 列新聞向下延伸 */}
           <div className="news-content-pane">
             <div className="news-pane-header">
-              <div className="news-pane-title">
-                <strong>{selectedDate}</strong> 即時新聞
+              <div className="news-pane-title-group">
+                <div className="news-pane-title">
+                  <strong>{selectedDate}</strong> 即時新聞
+                </div>
+                <span className="news-pane-count">
+                  共 {data?.totalCount || 0} 則新聞
+                </span>
               </div>
-              <span className="news-pane-count">
-                共 {data?.totalCount || 0} 則新聞
-              </span>
+
+              {/* 智慧分類標籤篩選列 */}
+              <div className="news-category-pills">
+                {['全部', '法說', '財報', '營收', '除權息', '大盤', '產業'].map((cat) => {
+                  const count = cat === '全部'
+                    ? (data?.news.length || 0)
+                    : (data?.news.filter((n) => n.category === cat).length || 0);
+                  const isCatSelected = selectedCategory === cat;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      className={`news-cat-pill ${isCatSelected ? 'active' : ''} ${cat === '法說' ? 'pill-briefing' : cat === '財報' ? 'pill-earnings' : ''}`}
+                      onClick={() => setSelectedCategory(cat)}
+                    >
+                      {cat}
+                      <span className="pill-badge">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="news-pane-scroll-area">
@@ -179,57 +203,79 @@ export const FinancialNewsModal: React.FC<FinancialNewsModalProps> = ({
                 <div className="news-empty-state news-error-state">{error}</div>
               ) : !data || data.news.length === 0 ? (
                 <div className="news-empty-state">該日無新聞紀錄</div>
-              ) : (
-                <div className="news-cards-three-col-grid">
-                  {data.news.map((item: FinancialNewsItem) => {
-                    const isExpanded = expandedNewsIds.has(item.id);
-                    const isTitleLong = item.title.length > 100;
-                    const displayTitle = !isExpanded && isTitleLong ? `${item.title.slice(0, 100)}...` : item.title;
-                    const hasDetail = Boolean(item.detail && item.detail.trim().length > 0);
+              ) : (() => {
+                const filteredNews = data.news.filter((item: FinancialNewsItem) => {
+                  if (selectedCategory === '全部') return true;
+                  return item.category === selectedCategory;
+                });
 
-                    return (
-                      <div key={item.id} className={`news-card-item ${isExpanded ? 'is-expanded' : ''}`}>
-                        <div className="news-card-top">
-                          <span className="news-source-tag">{item.source}</span>
-                          <span className="news-time-tag">⏰ {item.time}</span>
-                        </div>
+                if (filteredNews.length === 0) {
+                  return (
+                    <div className="news-empty-state">
+                      目前分類【{selectedCategory}】暫無新聞
+                    </div>
+                  );
+                }
 
-                        <h4 className="news-card-title">{displayTitle}</h4>
+                return (
+                  <div className="news-cards-three-col-grid">
+                    {filteredNews.map((item: FinancialNewsItem) => {
+                      const isExpanded = expandedNewsIds.has(item.id);
+                      const isTitleLong = item.title.length > 100;
+                      const displayTitle = !isExpanded && isTitleLong ? `${item.title.slice(0, 100)}...` : item.title;
+                      const hasDetail = Boolean(item.detail && item.detail.trim().length > 0);
 
-                        {hasDetail && (
-                          <div className={`news-detail-wrapper ${isExpanded ? 'expanded' : 'collapsed'}`}>
-                            <p className="news-detail-text">{item.detail}</p>
+                      return (
+                        <div key={item.id} className={`news-card-item ${isExpanded ? 'is-expanded' : ''}`}>
+                          <div className="news-card-top">
+                            <div className="news-tag-left-group">
+                              <span className="news-source-tag">{item.source}</span>
+                              {item.category && item.category !== '焦點' && (
+                                <span className={`news-cat-tag cat-${item.category}`}>
+                                  {item.category}
+                                </span>
+                              )}
+                            </div>
+                            <span className="news-time-tag">⏰ {item.time}</span>
                           </div>
-                        )}
 
-                        <div className="news-card-bottom-bar">
+                          <h4 className="news-card-title">{displayTitle}</h4>
+
                           {hasDetail && (
-                            <button
-                              type="button"
-                              className="news-btn-toggle-expand"
-                              onClick={() => toggleExpand(item.id)}
-                            >
-                              {isExpanded ? '收起全文 ▴' : '閱讀全文 ▾'}
-                            </button>
+                            <div className={`news-detail-wrapper ${isExpanded ? 'expanded' : 'collapsed'}`}>
+                              <p className="news-detail-text">{item.detail}</p>
+                            </div>
                           )}
 
-                          {item.link && (
-                            <a
-                              href={item.link}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="news-external-link"
-                              title="開啟原文"
-                            >
-                              來源 ↗
-                            </a>
-                          )}
+                          <div className="news-card-bottom-bar">
+                            {hasDetail && (
+                              <button
+                                type="button"
+                                className="news-btn-toggle-expand"
+                                onClick={() => toggleExpand(item.id)}
+                              >
+                                {isExpanded ? '收起全文 ▴' : '閱讀全文 ▾'}
+                              </button>
+                            )}
+
+                            {item.link && (
+                              <a
+                                href={item.link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="news-external-link"
+                                title="開啟原文"
+                              >
+                                來源 ↗
+                              </a>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
