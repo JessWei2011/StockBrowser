@@ -15,6 +15,16 @@ STOCK_CENTER_DIR = "/Users/jess/Desktop/Python/StockCenter"
 STOCK_CENTER_REPORTS_DIR = os.path.join(STOCK_CENTER_DIR, "reports")
 STOCK_CENTER_STATE_FILE = os.path.join(STOCK_CENTER_DIR, "reports_state.json")
 
+import threading
+_generation_locks_lock = threading.Lock()
+_generation_locks: dict[str, threading.Lock] = {}
+
+def _get_generation_lock(code: str) -> threading.Lock:
+    with _generation_locks_lock:
+        if code not in _generation_locks:
+            _generation_locks[code] = threading.Lock()
+        return _generation_locks[code]
+
 _last_generation_attempt: dict[str, float] = {}
 
 def get_latest_market_cutoff() -> datetime:
@@ -381,18 +391,28 @@ def parse_stock_report(
     is_stale = is_report_stale(filepath) if (filepath and os.path.exists(filepath)) else True
 
     if auto_generate and (not filepath or not os.path.exists(filepath) or is_stale):
-        now_ts = time.time()
-        last_attempt = _last_generation_attempt.get(code, 0)
-        # 5 分鐘冷卻防連環重複呼叫
-        if now_ts - last_attempt > 300:
-            _last_generation_attempt[code] = now_ts
-            reason = "not found" if not filepath else "stale"
-            logger.info(f"Report for stock {code} is {reason}. Triggering on-demand generation via StockCenter...")
-            success = generate_stock_report_via_stockcenter(code)
-            if success:
-                global _reports_dir_indexed_at
-                _reports_dir_indexed_at = 0.0
-                filepath = find_stock_report_path(code)
+        lock = _get_generation_lock(code)
+        # 透過 lock 確保同一檔股票只有一個執行緒在執行 StockCenter 生成，併發請求會排隊等待並直接讀取新檔
+        with lock:
+            filepath = find_stock_report_path(code)
+            is_stale = is_report_stale(filepath) if (filepath and os.path.exists(filepath)) else True
+            if not filepath or not os.path.exists(filepath) or is_stale:
+                now_ts = time.time()
+                last_attempt = _last_generation_attempt.get(code, 0)
+                # 若完全無報告，冷卻時間設為 60 秒（失敗允許快速重試）；若僅是既有報告過期，冷卻 300 秒
+                cooldown = 60 if not filepath else 300
+                if now_ts - last_attempt > cooldown:
+                    _last_generation_attempt[code] = now_ts
+                    reason = "not found" if not filepath else "stale"
+                    logger.info(f"Report for stock {code} is {reason}. Triggering on-demand generation via StockCenter...")
+                    success = generate_stock_report_via_stockcenter(code)
+                    if success:
+                        global _reports_dir_indexed_at
+                        _reports_dir_indexed_at = 0.0
+                        filepath = find_stock_report_path(code)
+                    else:
+                        # 生成失敗時重設嘗試時間，不硬鎖 5 分鐘
+                        _last_generation_attempt[code] = 0.0
 
     if not filepath or not os.path.exists(filepath):
         logger.warning(f"Report for stock {code} could not be found or generated in {STOCK_CENTER_REPORTS_DIR}")

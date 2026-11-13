@@ -151,7 +151,8 @@ export async function fetchAnnouncements(): Promise<Record<string, StockAnnounce
 }
 
 export async function fetchStockChart(code: string): Promise<any> {
-  const res = await fetchWithTimeout(`${API_BASE}/api/v1/charts/${encodeURIComponent(code)}`);
+  // 給予 60 秒充裕等待時間，確保新個股連動 StockCenter 現場生成時不被前端提早截斷中斷
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/charts/${encodeURIComponent(code)}`, {}, 60000);
   if (!res.ok) throw new Error(`Chart data not found: ${res.statusText}`);
   return res.json();
 }

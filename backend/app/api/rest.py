@@ -108,6 +108,21 @@ async def add_item(group_id: str, body: AddItemRequest):
         raise HTTPException(status_code=400, detail="Stock code cannot be empty")
     try:
         item = await watchlist_service.add_item(group_id, code)
+
+        # 立即在背景非同步預生成該個股的 StockCenter 技術分析報告，確保點擊 K 線時無需等待
+        async def _bg_prefetch(c: str):
+            try:
+                from backend.app.services.stock_chart_service import find_stock_report_path, is_report_stale, generate_stock_report_via_stockcenter, is_etf_or_bond
+                if is_etf_or_bond(c):
+                    return
+                p = await asyncio.to_thread(find_stock_report_path, c)
+                if not p or not os.path.exists(p) or is_report_stale(p):
+                    logger.info(f"Background pre-fetching StockCenter report for newly added stock {c}...")
+                    await asyncio.to_thread(generate_stock_report_via_stockcenter, c)
+            except Exception as ex:
+                logger.warning(f"Background prefetch failed for {c}: {ex}")
+
+        asyncio.create_task(_bg_prefetch(code))
         return item
     except KeyError as e:
         raise HTTPException(status_code=404, detail="自選群組不存在")
