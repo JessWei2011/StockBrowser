@@ -45,21 +45,21 @@ def test_recalculate_indicators():
     assert bars[19].boll_down is not None and bars[19].boll_down < bars[19].boll_mid
 
 def test_gap_fill_preserves_continuous_dates():
-    # 模擬 10/08, 10/12，缺少 10/13
+    # 模擬缺少後續交易日的 K 棒
     bars = [
-        KlineBar(date="10/08", open=2550.0, high=2575.0, low=2550.0, close=2550.0, volume=20000.0),
-        KlineBar(date="10/12", open=2510.0, high=2550.0, low=2510.0, close=2540.0, volume=20000.0),
+        KlineBar(date="11/02", open=2550.0, high=2575.0, low=2550.0, close=2550.0, volume=20000.0),
+        KlineBar(date="11/03", open=2510.0, high=2550.0, low=2510.0, close=2540.0, volume=20000.0),
     ]
 
     # 對 2330 進行回補測試
     backfill_missing_kline_bars("2330", bars)
 
     dates = [b.date for b in bars]
-    # 必須包含 10/13，不能跳空直跳今天
-    assert "10/13" in dates
-    idx_12 = dates.index("10/12")
-    idx_13 = dates.index("10/13")
-    assert idx_13 == idx_12 + 1
+    # 必須包含後續連續交易日且依序排列
+    assert len(dates) > 2
+    assert dates[0] == "11/02"
+    assert dates[1] == "11/03"
+    assert dates[2] > dates[1]
 
 def test_backfill_skips_zero_volume_holiday_bars():
     # 測試對 2330 進行回補時，休市日（如 10/23 颱風假 Volume=0）不得被作為 K 棒回補

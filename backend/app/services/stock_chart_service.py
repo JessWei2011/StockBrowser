@@ -162,6 +162,10 @@ class MarginFlowItem(BaseModel):
     margin_change: int
     short_balance: int
     short_change: int
+    margin_utilization: Optional[float] = None
+    margin_maintenance: Optional[float] = None
+    margin_cost: Optional[float] = None
+    margin_limit: Optional[int] = None
 
 class HolderFlowItem(BaseModel):
     date: str
@@ -624,6 +628,15 @@ def parse_stock_report(
                 kline_bars.append(today_bar)
                 recalculate_indicators(kline_bars)
                 is_appended = True
+
+    # 5.5 計算個股融資維持率與融資使用率
+    if not is_index and margin_data:
+        try:
+            from backend.app.services.margin_service import enrich_margin_data
+            is_otc = bool(filepath and "(TWO)" in filepath)
+            enrich_margin_data(code, is_otc, kline_bars, margin_data)
+        except Exception as e:
+            logger.warning(f"Failed to enrich margin metrics for {code}: {e}")
 
     return StockAnalysisChartData(
         code=code,

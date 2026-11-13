@@ -11,6 +11,7 @@ import {
   reorderItems,
   refreshSystemQuotes,
   fetchAnnouncements,
+  fetchStockIndicators,
 } from './services/api';
 import { wsClient } from './services/websocket';
 import { Header } from './components/Header';
@@ -63,6 +64,20 @@ export const App: React.FC = () => {
     autoPromptConfirm?: boolean;
   } | null>(null);
   const [selectedChartCode, setSelectedChartCode] = useState<string | null>(null);
+  // 支援獨立新分頁直接開啟個股全螢幕技術分析走勢圖 (?chart=2330 或 ?stock=2330)
+  const [standaloneChartCode, setStandaloneChartCode] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('chart') || params.get('stock') || null;
+  });
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      setStandaloneChartCode(params.get('chart') || params.get('stock') || null);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const [isNewsModalOpen, setIsNewsModalOpen] = useState(false);
   const [upstream, setUpstream] = useState<UpstreamStatus>({
@@ -413,6 +428,15 @@ export const App: React.FC = () => {
           return g;
         })
       );
+
+      // 8. 補充獲取該新增股票的 MA 指標與近 19 日歷史收盤價，供即時均線計算
+      fetchStockIndicators([cleanCode])
+        .then((newInd) => {
+          if (newInd && newInd[cleanCode]) {
+            setIndicators((prev) => ({ ...prev, [cleanCode]: newInd[cleanCode] }));
+          }
+        })
+        .catch(() => {});
     } catch (err: any) {
       // 8. 失敗時回滾樂觀更新
       setGroups((prev) =>
@@ -629,6 +653,56 @@ export const App: React.FC = () => {
   const isVaultGroup = activeGroup?.id === 'g-vault' || activeGroup?.name === '財神庫' || activeGroup?.name === '財神金庫';
   const isWealthGroup = activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿';
   const isSystemGroup = isVaultGroup || isWealthGroup || Boolean(activeGroup?.isSystemGroup);
+
+  // 獨立新分頁全螢幕個股技術分析圖渲染
+  if (standaloneChartCode) {
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialTab = (urlParams.get('tab') as any) || 'chips';
+    const quote = quotes[standaloneChartCode];
+    const currentPrice = quote?.last ?? null;
+    const changePercent = quote?.changePercent ?? null;
+
+    return (
+      <div className="standalone-chart-app" data-theme={theme}>
+        <StockChartDrawer
+          code={standaloneChartCode}
+          isOpen={true}
+          isStandalone={true}
+          onClose={() => {
+            // 1. 若為 script 開啟，優先將焦點切換回原分頁並關閉當前獨立分頁
+            try {
+              if (window.opener && !window.opener.closed) {
+                window.opener.focus();
+                window.close();
+                return;
+              }
+            } catch (e) {
+              console.warn('Failed to focus opener:', e);
+            }
+
+            // 2. 嘗試關閉此獨立分頁
+            window.close();
+
+            // 3. 備援機制：若非 script 開啟 (例如直接貼上網址)，瀏覽器可能會阻止 window.close()
+            // 此時清除 query param 倒回本分頁的總覽清單
+            setTimeout(() => {
+              const url = new URL(window.location.href);
+              url.searchParams.delete('chart');
+              url.searchParams.delete('stock');
+              url.searchParams.delete('tab');
+              window.history.pushState({}, '', url.pathname + (url.search ? url.search : ''));
+              setStandaloneChartCode(null);
+            }, 100);
+          }}
+          theme={theme}
+          onToggleTheme={handleToggleTheme}
+          currentPrice={currentPrice}
+          changePercent={changePercent}
+          initialTab={initialTab}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="stock-browser-app">
@@ -1068,6 +1142,7 @@ export const App: React.FC = () => {
         initialTab={marketModalTab}
         twIndices={marketIndices}
         twMarketStatus={twMarketBadge}
+        theme={theme}
       />
 
       <FinancialNewsModal

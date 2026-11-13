@@ -13,6 +13,35 @@ interface PriceBadgeItem {
   rawY?: number;
 }
 
+const BUFFER_DAYS = 30; // 擴充未來留白緩衝槽位，讓最新當天 K 棒置於約 2/3 處或置中
+const MIN_VISIBLE_BARS = 6; // 最小可放大檢視根數
+
+/**
+ * 依據欲呈現之真實 K 棒數量與未來留白緩衝槽位，計算錨定於最新 K 棒的 dataZoom 範圍
+ * 讓當天最新 K 棒置於視窗約 2/3 處 (約 64%~66% 位置，右側保留約 34%~36% 視野空間，方便觀察近期走勢)
+ */
+function calcZoomFromVisibleBars(visibleBars: number, realTotal: number, bufferDays = BUFFER_DAYS) {
+  const totalSlots = realTotal + bufferDays;
+  const lastRealIndex = realTotal - 1;
+
+  // 當可視根數 <= 60 根時，精準保持當日 K 棒在視窗 2/3 處 (約 65%)；極度放大時往中央微幅置中 (~58%)；縮小至全年時平滑回貼
+  let targetRatio = 0.65;
+  if (visibleBars <= 25) {
+    targetRatio = 0.58 + (visibleBars / 25) * 0.07;
+  } else if (visibleBars > 60) {
+    const p = Math.min(1, (visibleBars - 60) / Math.max(1, realTotal - 60));
+    targetRatio = 0.65 + p * 0.35;
+  }
+
+  const totalVisibleSlots = visibleBars / targetRatio;
+  const rightBufferSlots = Math.min(bufferDays, Math.round(totalVisibleSlots * (1 - targetRatio)));
+  const endIndex = Math.min(totalSlots - 1, lastRealIndex + rightBufferSlots);
+  const startIndex = Math.max(0, Math.round(endIndex - totalVisibleSlots));
+  const start = Math.max(0, (startIndex / (totalSlots - 1)) * 100);
+  const end = Math.min(100, (endIndex / (totalSlots - 1)) * 100);
+  return { start, end };
+}
+
 /**
  * 右側 Y 軸彩色防重疊數值膠囊標籤 (與個股 K 線風格一致)
  * 標示最新收盤/現價、MA 均線群 (5/10/20/60/120/240) 與 BOLL (上/下軌)
@@ -173,6 +202,7 @@ interface GlobalIndexChartModalProps {
   changePercent?: number | null;
   statusLabel?: string;
   statusClass?: string;
+  theme?: 'light' | 'dark';
 }
 
 export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
@@ -185,6 +215,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
   changePercent: propChangePercent,
   statusLabel,
   statusClass = 'open',
+  theme,
 }) => {
   const [data, setData] = useState<StockChartData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -193,7 +224,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
   // 指標開關
   const [showMA, setShowMA] = useState(true);
   const [showBoll, setShowBoll] = useState(false);
-  const [activeRange, setActiveRange] = useState<'1Y' | '2Y' | '6M' | '3M'>('1Y');
+  const [activeRange, setActiveRange] = useState<'1Y' | '2Y' | '6M' | '3M'>('3M');
 
   const mainChartRef = useRef<HTMLDivElement | null>(null);
   const mainInstanceRef = useRef<echarts.ECharts | null>(null);
@@ -253,24 +284,34 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
     });
   }, [propPrice]);
 
-  // 快捷切換顯示區間 (2Y=全部, 1Y=年線視野240日, 6M=半年120日, 3M=季線60日)
+  // 快捷切換顯示區間 (3M=季線60日置於2/3處, 6M=半年120日, 1Y=年線視野240日, 2Y=全部歷史)
   const applyRangeZoom = (range: '1Y' | '2Y' | '6M' | '3M', totalBars: number) => {
     setActiveRange(range);
     const chart = mainInstanceRef.current;
     if (!chart || totalBars <= 0) return;
 
-    let targetBars = 240;
-    if (range === '2Y') targetBars = totalBars;
-    else if (range === '1Y') targetBars = Math.min(240, totalBars);
+    if (range === '2Y') {
+      chart.dispatchAction({
+        type: 'dataZoom',
+        start: 0,
+        end: 100,
+      });
+      zoomRangeRef.current = { start: 0, end: 100 };
+      return;
+    }
+
+    let targetBars = 60;
+    if (range === '1Y') targetBars = Math.min(240, totalBars);
     else if (range === '6M') targetBars = Math.min(120, totalBars);
     else if (range === '3M') targetBars = Math.min(60, totalBars);
 
-    const startPct = Math.max(0, Math.round(((totalBars - targetBars) / totalBars) * 100));
+    const { start, end } = calcZoomFromVisibleBars(targetBars, totalBars, BUFFER_DAYS);
     chart.dispatchAction({
       type: 'dataZoom',
-      start: startPct,
-      end: 100,
+      start,
+      end,
     });
+    zoomRangeRef.current = { start, end };
   };
 
   // 繪製 ECharts
@@ -285,15 +326,19 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
     const chart = echarts.init(mainChartRef.current);
     mainInstanceRef.current = chart;
 
-    const isDark = document.body.classList.contains('theme-dark') || !document.body.classList.contains('theme-light');
+    const isDark = (theme ?? document.documentElement.getAttribute('data-theme')) === 'dark';
     const upColor = '#ef4444'; // 台股標準紅漲
     const downColor = '#22c55e'; // 台股標準綠跌
     const textColor = isDark ? '#94a3b8' : '#475569';
-    const gridBorder = isDark ? '#334155' : '#e2e8f0';
+    // 日期軸基礎線、邊界與縱橫格線全面採用淺灰色/半透明柔和色，避免深黑暗色線條覆蓋遮蔽 K 棒上下影線
+    const gridBorder = isDark ? 'rgba(148, 163, 184, 0.28)' : '#cbd5e1';
+    const dateBaseLine = isDark ? 'rgba(148, 163, 184, 0.35)' : '#cbd5e1'; // 日期基礎軸線 (淺灰色)
+    const gridSplitLine = isDark ? 'rgba(148, 163, 184, 0.15)' : '#e2e8f0'; // 日期縱向格線 (柔和淺灰色)
 
     const kline: KlineBar[] = data.kline || [];
     const totalBars = kline.length;
-    const dates = kline.map((k: KlineBar) => k.date);
+    // 擴充 X 軸日期並增加 BUFFER_DAYS 根留白緩衝槽位，讓最新當天 K 棒置於 2/3 處或置中
+    const expandedDates = kline.map((k: KlineBar) => k.date).concat(new Array(BUFFER_DAYS).fill(''));
     // ECharts K線格式: [open, close, lowest, highest]
     const candles = kline.map((k: KlineBar) => [k.open, k.close, k.low, k.high]);
 
@@ -325,11 +370,11 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
       };
     });
 
-    // 初始預設視野：優先保留使用者當前縮放範圍（避免 15s 輪詢或即時報價跳動時還原重設）
-    const defaultBars = Math.min(240, totalBars);
-    const defaultStart = Math.max(0, Math.round(((totalBars - defaultBars) / totalBars) * 100));
-    const initStart = zoomRangeRef.current?.start ?? defaultStart;
-    const initEnd = zoomRangeRef.current?.end ?? 100;
+    // 初始預設視野：錨定當天最新 K 棒於視窗 2/3 處 (預設呈現近 60 根季線視野，類似個股技術圖)
+    const initBars = Math.min(60, totalBars);
+    const calculatedInit = calcZoomFromVisibleBars(initBars, totalBars, BUFFER_DAYS);
+    const initStart = zoomRangeRef.current?.start ?? calculatedInit.start;
+    const initEnd = zoomRangeRef.current?.end ?? calculatedInit.end;
 
     // 系列數據
     const seriesList: any[] = [
@@ -339,6 +384,8 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
         data: candles,
         xAxisIndex: 0,
         yAxisIndex: 0,
+        z: 3, // 確保 K 棒實體與上下影線圖層置於背景格線與軸線之上，清晰無任何遮蔽
+        barMaxWidth: 42,
         itemStyle: {
           color: upColor,
           color0: downColor,
@@ -473,6 +520,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           if (!Array.isArray(params) || params.length === 0) return '';
           const p0 = params[0];
           const idx = p0.dataIndex;
+          if (idx >= totalBars) return '';
           const k = kline[idx];
           if (!k) return '';
 
@@ -505,49 +553,51 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
         ? [
             {
               type: 'category',
-              data: dates,
+              data: expandedDates,
               gridIndex: 0,
               boundaryGap: false,
-              axisLine: { lineStyle: { color: gridBorder } },
+              axisLine: { lineStyle: { color: dateBaseLine } },
               axisLabel: { show: false },
-              splitLine: { show: true, lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+              splitLine: { show: true, lineStyle: { color: gridSplitLine } },
             },
             {
               type: 'category',
-              data: dates,
+              data: expandedDates,
               gridIndex: 1,
               boundaryGap: false,
-              axisLine: { lineStyle: { color: gridBorder } },
+              axisLine: { lineStyle: { color: dateBaseLine } },
               axisLabel: {
                 color: textColor,
                 fontSize: 11,
                 formatter: (val: string) => {
-                  if (val && val.length === 10 && val.includes('-')) {
+                  if (!val) return '';
+                  if (val.length === 10 && val.includes('-')) {
                     return val.substring(2).replace(/-/g, '/');
                   }
                   return val;
                 },
               },
-              splitLine: { show: true, lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+              splitLine: { show: true, lineStyle: { color: gridSplitLine } },
             },
           ]
         : [
             {
               type: 'category',
-              data: dates,
+              data: expandedDates,
               boundaryGap: false,
-              axisLine: { lineStyle: { color: gridBorder } },
+              axisLine: { lineStyle: { color: dateBaseLine } },
               axisLabel: {
                 color: textColor,
                 fontSize: 11,
                 formatter: (val: string) => {
-                  if (val && val.length === 10 && val.includes('-')) {
+                  if (!val) return '';
+                  if (val.length === 10 && val.includes('-')) {
                     return val.substring(2).replace(/-/g, '/');
                   }
                   return val;
                 },
               },
-              splitLine: { show: true, lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+              splitLine: { show: true, lineStyle: { color: gridSplitLine } },
             },
           ],
       yAxis: hasVolumeData
@@ -558,7 +608,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
               gridIndex: 0,
               position: 'right',
               axisLine: { show: true, lineStyle: { color: gridBorder } },
-              splitLine: { lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+              splitLine: { lineStyle: { color: gridSplitLine } },
               axisLabel: {
                 color: textColor,
                 fontSize: 11,
@@ -586,7 +636,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
               scale: true,
               position: 'right',
               axisLine: { show: true, lineStyle: { color: gridBorder } },
-              splitLine: { lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+              splitLine: { lineStyle: { color: gridSplitLine } },
               axisLabel: {
                 color: textColor,
                 fontSize: 11,
@@ -602,12 +652,17 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           end: initEnd,
           zoomOnMouseWheel: true,
           moveOnMouseMove: true,
+          moveOnMouseWheel: false,
+          minSpan: (MIN_VISIBLE_BARS / (totalBars + BUFFER_DAYS)) * 100,
+          maxSpan: 100,
         },
         {
           type: 'slider',
           xAxisIndex: hasVolumeData ? [0, 1] : [0],
           start: initStart,
           end: initEnd,
+          minSpan: (MIN_VISIBLE_BARS / (totalBars + BUFFER_DAYS)) * 100,
+          maxSpan: 100,
           bottom: '8px',
           height: '20px',
           borderColor: gridBorder,
@@ -662,7 +717,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
         chart.dispose();
       }
     };
-  }, [data, isOpen, showMA, showBoll]);
+  }, [data, isOpen, showMA, showBoll, theme]);
 
   // ESC 鍵關閉支援
   useEffect(() => {
@@ -741,9 +796,25 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
             <div className="chart-range-pill-group">
               <button
                 type="button"
+                className={`range-pill-btn ${activeRange === '3M' ? 'active' : ''}`}
+                onClick={() => applyRangeZoom('3M', totalBars)}
+                title="季線視野 (近 60 交易日，當日 K 棒置於 2/3 處)"
+              >
+                季線 (60日)
+              </button>
+              <button
+                type="button"
+                className={`range-pill-btn ${activeRange === '6M' ? 'active' : ''}`}
+                onClick={() => applyRangeZoom('6M', totalBars)}
+                title="半年線視野 (120 交易日)"
+              >
+                半年 (120日)
+              </button>
+              <button
+                type="button"
                 className={`range-pill-btn ${activeRange === '1Y' ? 'active' : ''}`}
                 onClick={() => applyRangeZoom('1Y', totalBars)}
-                title="聚焦近 1 年 (240 交易日) 走勢"
+                title="年線視野 (240 交易日)"
               >
                 1年 (240日)
               </button>
@@ -754,22 +825,6 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
                 title="查看完整 2 年 (500 交易日) 全部歷史"
               >
                 全部 (2年)
-              </button>
-              <button
-                type="button"
-                className={`range-pill-btn ${activeRange === '6M' ? 'active' : ''}`}
-                onClick={() => applyRangeZoom('6M', totalBars)}
-                title="半年線 (120 交易日)"
-              >
-                半年 (120日)
-              </button>
-              <button
-                type="button"
-                className={`range-pill-btn ${activeRange === '3M' ? 'active' : ''}`}
-                onClick={() => applyRangeZoom('3M', totalBars)}
-                title="季線 (60 交易日)"
-              >
-                季線 (60日)
               </button>
             </div>
 

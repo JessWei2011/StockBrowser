@@ -1,6 +1,7 @@
 import React from 'react';
 import type { QuoteState, WatchlistItem, StockAnnouncement, StockMaSummary } from '../types';
 import { filterActiveAnnouncements } from '../utils/announcements';
+import { getRealtimeMaIndicators } from '../utils/maUtils';
 
 interface CompactCardListProps {
   items: WatchlistItem[];
@@ -106,10 +107,23 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
           changeClass = 'color-down';
         }
 
-        // 3. 處置與注意標籤文字
+        // 3. 處置與注意標籤文字（與電腦版完全一致：處置、注意）
+        const rawAnns = announcements[item.code] || [];
+        const stockAnns = filterActiveAnnouncements(rawAnns);
+        const dispAnn = stockAnns.find((a) => a.category === 'disposition');
+        const hasDisp = Boolean(dispAnn || dispositionLevel > 0 || dispositionPeriod);
+        const dispTitle = dispAnn
+          ? `${dispAnn.title}\n${dispAnn.detail || ''}`.trim()
+          : (dispositionPeriod ? `處置股票 (期間: ${dispositionPeriod})` : '處置股票');
+
         const lvlStr = dispositionLevel === 2 ? '二' : (dispositionLevel === 3 ? '三' : (dispositionLevel === 1 ? '一' : ''));
         const dispPrefix = lvlStr ? `處置${lvlStr}` : '處置';
         const dispText = dispositionPeriod ? `${dispPrefix} ${dispositionPeriod}` : dispPrefix;
+        const dispLabel = dispAnn?.tag || dispText;
+
+        const attAnn = stockAnns.find((a) => a.category === 'attention');
+        const hasAtt = !hasDisp && Boolean(attAnn || isAttention);
+        const attTitle = attAnn ? `${attAnn.title}\n${attAnn.detail || ''}`.trim() : '注意股票';
 
         const isDimmed = Boolean(
           isWealthGroup && (
@@ -121,23 +135,6 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
 
         const isOtc = ((item.exchange || q?.exchange || '').toUpperCase() === 'OTC');
         const isEtfOrBond = item.code.startsWith('00') || ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase());
-
-        const rawAnns = announcements[item.code] || [];
-        const stockAnns = filterActiveAnnouncements(rawAnns);
-        const dispAnn = stockAnns.find((a) => a.category === 'disposition');
-        const hasDisp = dispAnn || dispositionLevel > 0 || dispositionPeriod;
-        const dispTitle = dispAnn ? `${dispAnn.title}\n${dispAnn.detail || ''}`.trim() : (dispositionPeriod ? `處置股票 (期間: ${dispositionPeriod})` : '處置股票');
-        const dispLabel = dispAnn?.tag || dispText;
-
-        const attAnn = stockAnns.find((a) => a.category === 'attention');
-        const hasAtt = !hasDisp && (attAnn || isAttention);
-        const attTitle = attAnn ? `${attAnn.title}\n${attAnn.detail || ''}`.trim() : '注意股票';
-
-        const revAnn = stockAnns.find((a) => a.category === 'revenue');
-        const earnAnn = stockAnns.find((a) => a.category === 'earnings');
-        const briefAnn = stockAnns.find((a) => a.category === 'briefing');
-        const newsAnn = stockAnns.find((a) => a.category === 'news');
-        const exdivAnn = stockAnns.find((a) => a.category === 'exdividend');
 
         return (
           <div
@@ -164,31 +161,6 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
                   {hasAtt && (
                     <span className="stock-badge badge-attention" title={attTitle}>
                       [注意]
-                    </span>
-                  )}
-                  {revAnn && (
-                    <span className="stock-badge badge-revenue" title={`${revAnn.title}\n${revAnn.detail || ''}`.trim()}>
-                      [{revAnn.tag}]
-                    </span>
-                  )}
-                  {earnAnn && (
-                    <span className="stock-badge badge-earnings" title={`${earnAnn.title}\n${earnAnn.detail || ''}`.trim()}>
-                      [{earnAnn.tag}]
-                    </span>
-                  )}
-                  {briefAnn && (
-                    <span className="stock-badge badge-briefing" title={`${briefAnn.title}\n${briefAnn.detail || ''}`.trim()}>
-                      [{briefAnn.tag}]
-                    </span>
-                  )}
-                  {newsAnn && (
-                    <span className="stock-badge badge-news" title={`${newsAnn.title}\n${newsAnn.detail || ''}`.trim()}>
-                      [{newsAnn.tag}]
-                    </span>
-                  )}
-                  {exdivAnn && (
-                    <span className="stock-badge badge-exdiv" title={`${exdivAnn.title}\n${exdivAnn.detail || ''}`.trim()}>
-                      [{exdivAnn.tag}]
                     </span>
                   )}
                 </div>
@@ -251,18 +223,28 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
                 {!isEtfOrBond ? (() => {
                   const ind = indicators[item.code];
                   const currP = (q?.last && q.last > 0) ? q.last : ((prev && prev > 0) ? prev : null);
-                  const ma5 = ind?.ma5;
-                  const ma10 = ind?.ma10;
-                  const ma20 = ind?.ma20;
-                  const is5Up = (ma5 !== null && ma5 !== undefined && currP !== null) ? currP >= ma5 : null;
-                  const is10Up = (ma10 !== null && ma10 !== undefined && currP !== null) ? currP >= ma10 : null;
-                  const is20Up = (ma20 !== null && ma20 !== undefined && currP !== null) ? currP >= ma20 : null;
+                  const { ma5, ma10, ma20, is5Up, is10Up, is20Up } = getRealtimeMaIndicators(ind, currP);
 
                   return (
                     <div className="ma-tag-group ma-tag-group-card">
-                      <span className={`ma-tag ${is5Up === true ? 'tag-up' : (is5Up === false ? 'tag-down' : 'tag-neutral')}`} title="5MA">5M</span>
-                      <span className={`ma-tag ${is10Up === true ? 'tag-up' : (is10Up === false ? 'tag-down' : 'tag-neutral')}`} title="10MA">10M</span>
-                      <span className={`ma-tag ${is20Up === true ? 'tag-up' : (is20Up === false ? 'tag-down' : 'tag-neutral')}`} title="20MA">20M</span>
+                      <span
+                        className={`ma-tag ${is5Up === true ? 'tag-up' : (is5Up === false ? 'tag-down' : 'tag-neutral')}`}
+                        title={ma5 !== null && ma5 !== undefined ? `5MA: ${ma5.toFixed(2)}${currP !== null ? ` (現價 ${currP.toFixed(2)} ${is5Up ? '衝破/站上' : '跌破'})` : ''}` : '5MA'}
+                      >
+                        5M
+                      </span>
+                      <span
+                        className={`ma-tag ${is10Up === true ? 'tag-up' : (is10Up === false ? 'tag-down' : 'tag-neutral')}`}
+                        title={ma10 !== null && ma10 !== undefined ? `10MA: ${ma10.toFixed(2)}${currP !== null ? ` (現價 ${currP.toFixed(2)} ${is10Up ? '衝破/站上' : '跌破'})` : ''}` : '10MA'}
+                      >
+                        10M
+                      </span>
+                      <span
+                        className={`ma-tag ${is20Up === true ? 'tag-up' : (is20Up === false ? 'tag-down' : 'tag-neutral')}`}
+                        title={ma20 !== null && ma20 !== undefined ? `20MA: ${ma20.toFixed(2)}${currP !== null ? ` (現價 ${currP.toFixed(2)} ${is20Up ? '衝破/站上' : '跌破'})` : ''}` : '20MA'}
+                      >
+                        20M
+                      </span>
                     </div>
                   );
                 })() : (

@@ -2399,10 +2399,13 @@ button, input, select, textarea {
   .flat-code {
     font-size: 15.5px;
     letter-spacing: -0.3px;
+    flex-shrink: 0;
   }
   .flat-name {
     font-size: 14px;
     font-weight: 600;
+    flex-shrink: 0;
+    white-space: nowrap;
   }
   .flat-primary-right {
     gap: 6px;
@@ -2418,7 +2421,6 @@ button, input, select, textarea {
     min-width: 60px;
     height: 26px;
     font-size: 11.5px;
-    color: #ffffff !important;
   }
   .flat-row-metrics-modern {
     padding-top: 5px;
@@ -4817,6 +4819,125 @@ button, input, select, textarea {
   color: var(--text-main);
 }
 
+/* ==================== 個股技術分析：新開分頁與獨立全螢幕模式 ==================== */
+.standalone-chart-app {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  position: fixed;
+  inset: 0;
+  background-color: var(--bg-main);
+  z-index: 1000;
+}
+
+.chart-drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-drawer-popout {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-drawer-popout:hover {
+  background-color: var(--color-primary, #0284c7);
+  color: #ffffff;
+  border-color: var(--color-primary, #0284c7);
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.25);
+  transform: translateY(-1px);
+}
+
+.btn-drawer-popout .popout-icon {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.btn-standalone-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background-color: var(--bg-hover);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-right: 6px;
+  transition: all 0.15s ease;
+}
+
+.btn-standalone-back:hover {
+  background-color: var(--color-primary, #0284c7);
+  color: #ffffff;
+  border-color: var(--color-primary, #0284c7);
+}
+
+.btn-standalone-back .back-arrow {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.btn-standalone-theme {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-standalone-theme:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.chart-drawer-overlay.is-standalone-overlay {
+  background: var(--bg-main);
+  backdrop-filter: none;
+  justify-content: stretch;
+  animation: none;
+}
+
+.chart-drawer-panel.is-standalone {
+  width: 100vw;
+  max-width: 100vw;
+  height: 100vh;
+  border-left: none;
+  box-shadow: none;
+  animation: none;
+}
+
+.chart-drawer-panel.is-standalone .chart-container-main {
+  height: 60%;
+  min-height: 360px;
+}
+
+.chart-drawer-panel.is-standalone .chart-container-sub {
+  flex: 1;
+  min-height: 200px;
+}
+
 .chart-drawer-body {
   flex: 1;
   display: flex;
@@ -4950,8 +5071,116 @@ button, input, select, textarea {
 
 .chart-container-sub {
   width: 100%;
-  height: 42%;
-  min-height: 180px;
+  flex: 1;
+  min-height: 160px;
+}
+
+/* ==================== 抽屜：資券主力變動（融資維持率與使用率） ==================== */
+.margin-summary-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 6px 14px;
+  background-color: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.margin-summary-metrics {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.margin-metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.margin-metric-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.margin-metric-value-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.margin-metric-val {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-main);
+}
+
+.margin-metric-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.margin-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  line-height: 1.3;
+}
+
+.margin-badge.badge-safe {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.margin-badge.badge-warning {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.margin-badge.badge-danger {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.margin-submode-toggles {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background-color: var(--bg-secondary);
+  padding: 2px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+
+.margin-submode-btn {
+  background: transparent;
+  border: none;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.margin-submode-btn:hover {
+  color: var(--text-main);
+}
+
+.margin-submode-btn.active {
+  background-color: var(--bg-card);
+  color: #a855f7;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 /* ==================== 財神筆：下單前二次防護確認視窗 (Super Prominent) ==================== */
@@ -8904,22 +9133,27 @@ button, input, select, textarea {
   font-size: 12px;
   font-weight: 700;
   font-feature-settings: 'tnum';
-  color: #ffffff !important;
   line-height: 1;
+  background-color: transparent !important;
+  box-sizing: border-box;
 }
 
+/* 漲跌幅一律使用方框空心 (Hollow Outline)，避免與漲停/跌停實心色塊混淆 */
 .flat-pct-badge.color-up {
-  background-color: #ef4444 !important;
-  color: #ffffff !important;
+  background-color: transparent !important;
+  border: 1.5px solid #ef4444 !important;
+  color: #ef4444 !important;
 }
 
 .flat-pct-badge.color-down {
-  background-color: #22c55e !important;
-  color: #ffffff !important;
+  background-color: transparent !important;
+  border: 1.5px solid #22c55e !important;
+  color: #22c55e !important;
 }
 
 .flat-pct-badge.color-neutral {
-  background-color: var(--bg-hover) !important;
+  background-color: transparent !important;
+  border: 1px solid var(--border-subtle) !important;
   color: var(--text-muted) !important;
 }
 

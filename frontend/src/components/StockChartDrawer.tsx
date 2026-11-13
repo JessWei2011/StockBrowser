@@ -10,6 +10,9 @@ interface StockChartDrawerProps {
   theme: 'dark' | 'light';
   currentPrice?: number | null;
   changePercent?: number | null;
+  isStandalone?: boolean;
+  initialTab?: TabKey;
+  onToggleTheme?: () => void;
 }
 
 type TabKey = 'chips' | 'margin' | 'holders' | 'kd' | 'rsi';
@@ -197,11 +200,28 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
   theme,
   currentPrice,
   changePercent,
+  isStandalone = false,
+  initialTab = 'chips',
+  onToggleTheme,
 }) => {
   const [data, setData] = useState<StockChartData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>('chips');
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
+  const [marginSubMode, setMarginSubMode] = useState<'maintenance' | 'balance'>('maintenance');
+
+  // 若外部指定 initialTab 變更，同步更新
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [code, initialTab]);
+
+  const latestMargin = data?.margin && data.margin.length > 0 ? data.margin[0] : null;
+  const hasMarginMetrics = Boolean(
+    latestMargin &&
+      (latestMargin.margin_utilization != null || latestMargin.margin_maintenance != null)
+  );
 
   const mainChartRef = useRef<HTMLDivElement | null>(null);
   const subChartRef = useRef<HTMLDivElement | null>(null);
@@ -271,7 +291,8 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
 
     const isDark = theme === 'dark';
     const textColor = isDark ? '#94a3b8' : '#64748b';
-    const gridBorder = isDark ? '#334155' : '#e2e8f0';
+    const dateBaseLine = isDark ? 'rgba(148, 163, 184, 0.35)' : '#cbd5e1'; // 日期基礎軸線 (淺灰色)
+    const gridSplitLine = isDark ? 'rgba(148, 163, 184, 0.15)' : '#e2e8f0'; // 日期縱向格線 (柔和淺灰色)
     const upColor = '#ef4444'; // 紅漲
     const downColor = '#10b981'; // 綠跌
 
@@ -355,18 +376,18 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
           data: expandedDates,
           gridIndex: 0,
           boundaryGap: false,
-          axisLine: { lineStyle: { color: gridBorder } },
+          axisLine: { lineStyle: { color: dateBaseLine } },
           axisLabel: { show: false },
-          splitLine: { show: true, lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+          splitLine: { show: true, lineStyle: { color: gridSplitLine } },
         },
         {
           type: 'category',
           data: expandedDates,
           gridIndex: 1,
           boundaryGap: false,
-          axisLine: { lineStyle: { color: gridBorder } },
+          axisLine: { lineStyle: { color: dateBaseLine } },
           axisLabel: { color: textColor, fontSize: 11 },
-          splitLine: { show: true, lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+          splitLine: { show: true, lineStyle: { color: gridSplitLine } },
         },
       ],
       yAxis: [
@@ -376,7 +397,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
           position: 'right',
           splitArea: { show: false },
           axisLabel: { color: textColor, fontSize: 11 },
-          splitLine: { show: true, lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+          splitLine: { show: true, lineStyle: { color: gridSplitLine } },
         },
         {
           scale: true,
@@ -420,6 +441,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
           name: 'K線',
           type: 'candlestick',
           data: candles,
+          z: 3, // 確保 K 棒實體與上下影線圖層置於背景格線與軸線之上，清晰無任何遮蔽
           barMaxWidth: 45, // 放大時單根 K 棒最大寬度，呈現超清晰粗厚實體與影線
           itemStyle: {
             color: upColor,
@@ -631,61 +653,206 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
         ],
       };
     } else if (activeTab === 'margin') {
-      // 主力：融資融券增減
+      // 主力：融資融券與信用維持率/使用率
       const flow = [...data.margin].reverse();
       const dates = flow.map((m) => m.date.slice(5));
       const marginChange = flow.map((m) => m.margin_change);
       const marginBalance = flow.map((m) => m.margin_balance);
+      const marginMaint = flow.map((m) => m.margin_maintenance ?? null);
+      const marginUtil = flow.map((m) => m.margin_utilization ?? null);
 
-      subOption = {
-        animation: false,
-        tooltip: { trigger: 'axis' },
-        legend: {
-          data: ['融資增減', '融資餘額'],
-          textStyle: { color: textColor, fontSize: 11 },
-          top: 0,
-        },
-        grid: { left: '45px', right: '20px', top: '28px', bottom: '20px' },
-        xAxis: {
-          type: 'category',
-          data: dates,
-          axisLine: { lineStyle: { color: gridBorder } },
-          axisLabel: { color: textColor, fontSize: 11 },
-        },
-        yAxis: [
-          {
-            type: 'value',
-            name: '增減',
-            position: 'right',
-            axisLabel: { color: textColor, fontSize: 10 },
-            splitLine: { lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
-          },
-          {
-            type: 'value',
-            name: '餘額',
-            position: 'left',
-            axisLabel: { color: textColor, fontSize: 10 },
-            splitLine: { show: false },
-          },
-        ],
-        series: [
-          {
-            name: '融資增減',
-            type: 'bar',
-            data: marginChange,
-            itemStyle: {
-              color: (p: any) => (p.value >= 0 ? '#ef4444' : '#10b981'),
-            },
-          },
-          {
-            name: '融資餘額',
-            type: 'line',
-            yAxisIndex: 1,
-            data: marginBalance,
-            lineStyle: { color: '#f59e0b', width: 2 },
-          },
-        ],
+      const hasMaintData = flow.some((m) => m.margin_maintenance != null);
+
+      // 共用 Tooltip 格式化工具：完整顯示維持率、使用率、餘額與增減
+      const tooltipFormatter = (params: any) => {
+        if (!Array.isArray(params) || params.length === 0) return '';
+        const idx = params[0].dataIndex;
+        const m = flow[idx];
+        if (!m) return '';
+        const maintStr = m.margin_maintenance != null ? `${m.margin_maintenance.toFixed(1)}%` : '--';
+        const utilStr = m.margin_utilization != null ? `${m.margin_utilization.toFixed(2)}%` : '--';
+        const costStr = m.margin_cost != null ? `NT$ ${m.margin_cost.toFixed(1)}` : '--';
+        const diff130 = m.margin_maintenance != null ? (m.margin_maintenance - 130).toFixed(1) : null;
+        const safetyText =
+          diff130 != null
+            ? Number(diff130) < 0
+              ? `低於追繳門檻 ${diff130}%`
+              : `距130%追繳線 +${diff130}%`
+            : '';
+        const safetyColor =
+          m.margin_maintenance != null
+            ? m.margin_maintenance < 130
+              ? '#ef4444'
+              : m.margin_maintenance < 145
+              ? '#f59e0b'
+              : '#10b981'
+            : textColor;
+
+        let res = `<div style="font-weight:700;margin-bottom:4px;">${m.date} 資券信用分析</div>`;
+        if (m.margin_maintenance != null) {
+          res += `<div><span style="color:#a855f7;font-weight:700;">◆ 融資維持率:</span> <b>${maintStr}</b> <span style="color:${safetyColor};font-size:11px;">(${safetyText})</span></div>`;
+        }
+        if (m.margin_utilization != null) {
+          res += `<div><span style="color:#06b6d4;font-weight:700;">◆ 融資使用率:</span> <b>${utilStr}</b> ${
+            m.margin_limit ? `<span style="font-size:11px;color:${textColor};">(限額: ${m.margin_limit.toLocaleString()}張)</span>` : ''
+          }</div>`;
+        }
+        if (m.margin_cost != null) {
+          res += `<div style="font-size:11px;color:${textColor};margin-top:2px;">估算融資成本: ${costStr}</div>`;
+        }
+        res += `<div style="font-size:11px;color:${textColor};">融資餘額: ${m.margin_balance.toLocaleString()} 張 (${
+          m.margin_change >= 0 ? '+' : ''
+        }${m.margin_change.toLocaleString()})</div>`;
+        return res;
       };
+
+      if (marginSubMode === 'maintenance' && hasMaintData) {
+        // 子視圖 1：融資維持率 & 融資使用率走勢
+        subOption = {
+          animation: false,
+          tooltip: {
+            trigger: 'axis',
+            axisPointer: { type: 'cross' },
+            backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+            borderColor: isDark ? '#334155' : '#cbd5e1',
+            textStyle: { color: isDark ? '#f8fafc' : '#0f172a', fontSize: 12 },
+            formatter: tooltipFormatter,
+          },
+          legend: {
+            data: ['融資維持率', '融資使用率'],
+            textStyle: { color: textColor, fontSize: 11 },
+            top: 0,
+          },
+          grid: { left: '50px', right: '48px', top: '28px', bottom: '20px' },
+          xAxis: {
+            type: 'category',
+            data: dates,
+            axisLine: { lineStyle: { color: gridBorder } },
+            axisLabel: { color: textColor, fontSize: 11 },
+          },
+          yAxis: [
+            {
+              type: 'value',
+              name: '維持率',
+              position: 'left',
+              axisLabel: { formatter: '{value}%', color: textColor, fontSize: 10 },
+              min: (value: any) => Math.max(100, Math.floor((value.min - 10) / 10) * 10),
+              splitLine: { lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+            },
+            {
+              type: 'value',
+              name: '使用率',
+              position: 'right',
+              axisLabel: { formatter: '{value}%', color: textColor, fontSize: 10 },
+              min: 0,
+              max: (value: any) => Math.max(10, Math.min(100, Math.ceil((value.max + 5) / 5) * 5)),
+              splitLine: { show: false },
+            },
+          ],
+          series: [
+            {
+              name: '融資維持率',
+              type: 'line',
+              data: marginMaint,
+              smooth: true,
+              showSymbol: false,
+              lineStyle: { color: '#a855f7', width: 2.2 },
+              markLine: {
+                silent: true,
+                symbol: 'none',
+                data: [
+                  {
+                    yAxis: 130,
+                    lineStyle: { color: '#ef4444', type: 'dashed', width: 1.5 },
+                    label: {
+                      formatter: '130% 追繳警戒',
+                      position: 'insideEndTop',
+                      color: '#ef4444',
+                      fontSize: 10,
+                    },
+                  },
+                  {
+                    yAxis: 160,
+                    lineStyle: { color: '#10b981', type: 'dotted', width: 1.2 },
+                    label: {
+                      formatter: '160% 安全線',
+                      position: 'insideEndTop',
+                      color: '#10b981',
+                      fontSize: 10,
+                    },
+                  },
+                ],
+              },
+            },
+            {
+              name: '融資使用率',
+              type: 'line',
+              yAxisIndex: 1,
+              data: marginUtil,
+              smooth: true,
+              showSymbol: false,
+              lineStyle: { color: '#06b6d4', width: 2 },
+            },
+          ],
+        };
+      } else {
+        // 子視圖 2：融資增減柱狀圖 & 融資餘額折線圖
+        subOption = {
+          animation: false,
+          tooltip: {
+            trigger: 'axis',
+            backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+            borderColor: isDark ? '#334155' : '#cbd5e1',
+            textStyle: { color: isDark ? '#f8fafc' : '#0f172a', fontSize: 12 },
+            formatter: tooltipFormatter,
+          },
+          legend: {
+            data: ['融資增減', '融資餘額'],
+            textStyle: { color: textColor, fontSize: 11 },
+            top: 0,
+          },
+          grid: { left: '45px', right: '20px', top: '28px', bottom: '20px' },
+          xAxis: {
+            type: 'category',
+            data: dates,
+            axisLine: { lineStyle: { color: gridBorder } },
+            axisLabel: { color: textColor, fontSize: 11 },
+          },
+          yAxis: [
+            {
+              type: 'value',
+              name: '增減',
+              position: 'right',
+              axisLabel: { color: textColor, fontSize: 10 },
+              splitLine: { lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+            },
+            {
+              type: 'value',
+              name: '餘額',
+              position: 'left',
+              axisLabel: { color: textColor, fontSize: 10 },
+              splitLine: { show: false },
+            },
+          ],
+          series: [
+            {
+              name: '融資增減',
+              type: 'bar',
+              data: marginChange,
+              itemStyle: {
+                color: (p: any) => (p.value >= 0 ? '#ef4444' : '#10b981'),
+              },
+            },
+            {
+              name: '融資餘額',
+              type: 'line',
+              yAxisIndex: 1,
+              data: marginBalance,
+              lineStyle: { color: '#f59e0b', width: 2 },
+            },
+          ],
+        };
+      }
     } else if (activeTab === 'holders') {
       // 大戶：集保週報 400張 / 1000張大戶比例 (依日期由舊到新排序，確保左舊右新)
       const flow = [...data.holders].sort((a, b) => a.date.localeCompare(b.date));
@@ -962,33 +1129,58 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
       chart.off('datazoom', handleSubDataZoom);
       window.removeEventListener('resize', handleResize);
     };
-  }, [data, activeTab, theme, isOpen]);
+  }, [data, activeTab, theme, isOpen, marginSubMode]);
+
+  // ESC 鍵支援關閉走勢圖/分頁
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   // 同步兩張圖表的十字游標 (Connect)
   useEffect(() => {
     if (mainInstanceRef.current && subInstanceRef.current) {
       echarts.connect([mainInstanceRef.current, subInstanceRef.current]);
     }
-  }, [data, activeTab]);
+  }, [data, activeTab, marginSubMode]);
 
   if (!isOpen) return null;
 
   return (
     <div
-      className="chart-drawer-overlay"
+      className={`chart-drawer-overlay ${isStandalone ? 'is-standalone-overlay' : ''}`}
       onClick={(e) => {
-        e.stopPropagation();
-        onClose();
+        if (!isStandalone) {
+          e.stopPropagation();
+          onClose();
+        }
       }}
     >
       <aside
-        className="chart-drawer-panel"
+        className={`chart-drawer-panel ${isStandalone ? 'is-standalone' : ''}`}
         onClick={(e) => e.stopPropagation()}
         aria-label="個股動態技術分析走勢圖"
       >
-        {/* 抽屜頂部標題列 */}
+        {/* 抽屜/分頁頂部標題列 */}
         <div className="chart-drawer-header">
           <div className="chart-drawer-title-area">
+            {isStandalone && (
+              <button
+                type="button"
+                className="btn-standalone-back"
+                onClick={onClose}
+                title="關閉此獨立分頁並切換回原瀏覽分頁"
+              >
+                <span className="back-arrow">‹</span>
+                <span>返回原分頁總覽</span>
+              </button>
+            )}
             <span className="chart-stock-code">{code}</span>
             <span className="chart-stock-name">{data?.name || '載入中...'}</span>
             {currentPrice !== undefined && currentPrice !== null && (
@@ -1007,9 +1199,43 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
               </span>
             )}
           </div>
-          <button className="btn-drawer-close" onClick={onClose} title="關閉走勢圖 (Esc)">
-            ✕
-          </button>
+          <div className="chart-drawer-actions">
+            {!isStandalone && (
+              <button
+                type="button"
+                className="btn-drawer-popout"
+                onClick={() => {
+                  if (!code) return;
+                  const url = `${window.location.origin}${window.location.pathname}?chart=${encodeURIComponent(code)}&tab=${encodeURIComponent(activeTab)}`;
+                  window.open(url, '_blank');
+                  // 自動收起原分頁的 1/3 抽屜，讓原分頁直接呈現完整股票自選總覽列表
+                  onClose();
+                }}
+                title="在新分頁開啟全螢幕技術分析走勢圖，原分頁自動還原為完整股票列表"
+              >
+                <span className="popout-icon">↗</span>
+                <span className="popout-text">新分頁開啟</span>
+              </button>
+            )}
+            {isStandalone && onToggleTheme && (
+              <button
+                type="button"
+                className="btn-standalone-theme"
+                onClick={onToggleTheme}
+                title={theme === 'dark' ? '切換日間模式' : '切換夜間模式'}
+              >
+                {theme === 'dark' ? '☀️ 日間' : '🌙 夜間'}
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn-drawer-close"
+              onClick={onClose}
+              title={isStandalone ? '關閉此分頁並切回原分頁總覽 (Esc)' : '關閉走勢圖 (Esc)'}
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* 內容區塊 */}
@@ -1074,6 +1300,104 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
                   📊 RSI 指標
                 </button>
               </div>
+
+              {/* 2.5 資券主力關鍵指標摘要欄 */}
+              {activeTab === 'margin' && hasMarginMetrics && latestMargin && (
+                <div className="margin-summary-bar">
+                  <div className="margin-summary-metrics">
+                    <div className="margin-metric-card">
+                      <span className="margin-metric-label">⚡ 融資使用率</span>
+                      <div className="margin-metric-value-wrap">
+                        <span className="margin-metric-val">
+                          {latestMargin.margin_utilization != null
+                            ? `${latestMargin.margin_utilization.toFixed(2)}%`
+                            : '--'}
+                        </span>
+                        {latestMargin.margin_utilization != null && (
+                          <span
+                            className={`margin-badge ${
+                              latestMargin.margin_utilization > 60
+                                ? 'badge-danger'
+                                : latestMargin.margin_utilization > 30
+                                ? 'badge-warning'
+                                : 'badge-safe'
+                            }`}
+                          >
+                            {latestMargin.margin_utilization > 60
+                              ? '水位偏高'
+                              : latestMargin.margin_utilization > 30
+                              ? '適中'
+                              : '籌碼健康'}
+                          </span>
+                        )}
+                      </div>
+                      {latestMargin.margin_limit && (
+                        <span className="margin-metric-sub">
+                          餘額 {latestMargin.margin_balance.toLocaleString()} / 限額{' '}
+                          {latestMargin.margin_limit.toLocaleString()} 張
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="margin-metric-card">
+                      <span className="margin-metric-label">🛡️ 融資維持率</span>
+                      <div className="margin-metric-value-wrap">
+                        <span className="margin-metric-val">
+                          {latestMargin.margin_maintenance != null
+                            ? `${latestMargin.margin_maintenance.toFixed(1)}%`
+                            : '--'}
+                        </span>
+                        {latestMargin.margin_maintenance != null && (
+                          <span
+                            className={`margin-badge ${
+                              latestMargin.margin_maintenance < 130
+                                ? 'badge-danger'
+                                : latestMargin.margin_maintenance < 145
+                                ? 'badge-warning'
+                                : 'badge-safe'
+                            }`}
+                          >
+                            {latestMargin.margin_maintenance < 130
+                              ? '已達追繳門檻'
+                              : latestMargin.margin_maintenance < 145
+                              ? '追繳警戒 (門檻130%)'
+                              : '安全水位'}
+                          </span>
+                        )}
+                      </div>
+                      {latestMargin.margin_cost != null && (
+                        <span className="margin-metric-sub">
+                          估算成本: NT$ {latestMargin.margin_cost.toFixed(1)} (距追繳{' '}
+                          {latestMargin.margin_maintenance != null
+                            ? (latestMargin.margin_maintenance - 130 > 0 ? '+' : '') +
+                              (latestMargin.margin_maintenance - 130).toFixed(1) +
+                              '%'
+                            : '--'}
+                          )
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 子模式切換按鈕 */}
+                  <div className="margin-submode-toggles">
+                    <button
+                      className={`margin-submode-btn ${marginSubMode === 'maintenance' ? 'active' : ''}`}
+                      onClick={() => setMarginSubMode('maintenance')}
+                      title="檢視融資維持率與使用率走勢圖"
+                    >
+                      🛡️ 維持率 & 使用率
+                    </button>
+                    <button
+                      className={`margin-submode-btn ${marginSubMode === 'balance' ? 'active' : ''}`}
+                      onClick={() => setMarginSubMode('balance')}
+                      title="檢視每日融資張數餘額與增減柱狀圖"
+                    >
+                      📊 資券張數變化
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* 3. 次圖指標容器 */}
               <div className="chart-container-sub" ref={subChartRef} />

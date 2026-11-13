@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { QuoteState, WatchlistItem, StockAnnouncement, StockMaSummary } from '../types';
 import { filterActiveAnnouncements } from '../utils/announcements';
+import { getRealtimeMaIndicators } from '../utils/maUtils';
 
 interface QuoteTableProps {
   items: WatchlistItem[];
@@ -368,14 +369,7 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                       const isEtfOrBond = item.code.startsWith('00') || ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase());
                       const ind = indicators[item.code];
                       const currP = (q?.last && q.last > 0) ? q.last : ((prev && prev > 0) ? prev : null);
-
-                      const ma5 = ind?.ma5;
-                      const ma10 = ind?.ma10;
-                      const ma20 = ind?.ma20;
-
-                      const is5Up = (ma5 !== null && ma5 !== undefined && currP !== null) ? currP >= ma5 : null;
-                      const is10Up = (ma10 !== null && ma10 !== undefined && currP !== null) ? currP >= ma10 : null;
-                      const is20Up = (ma20 !== null && ma20 !== undefined && currP !== null) ? currP >= ma20 : null;
+                      const { ma5, ma10, ma20, is5Up, is10Up, is20Up } = getRealtimeMaIndicators(ind, currP);
 
                       return (
                         <div className="action-cell-content">

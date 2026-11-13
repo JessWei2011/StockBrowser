@@ -49,6 +49,26 @@ def format_chinese_amount(val: Any) -> str:
     else:
         return f"{num:,.2f}".rstrip("0").rstrip(".")
 
+def calc_revenue_trend(mom: float, yoy: float) -> tuple[str, str]:
+    """計算自結月營收之市場習慣用語 (選項 B：四字完整版，如 年月雙增、年增月減 等)"""
+    if yoy > 0 and mom > 0:
+        return "年月雙增", "年月雙增 (營收動能強勁，同業與旺季雙成長)"
+    elif yoy > 0 and mom < 0:
+        return "年增月減", "年增月減 (優於去年同期，但較上月回溫放緩)"
+    elif yoy < 0 and mom > 0:
+        return "年減月增", "年減月增 (較上月回升，但遜於去年同期)"
+    elif yoy < 0 and mom < 0:
+        return "年月雙減", "年月雙減 (營收動能低迷，雙雙衰退)"
+    elif yoy > 0:
+        return "年增", "年增 (優於去年同期)"
+    elif yoy < 0:
+        return "年減", "年減 (遜於去年同期)"
+    elif mom > 0:
+        return "月增", "月增 (較上月成長)"
+    elif mom < 0:
+        return "月減", "月減 (較上月下滑)"
+    return "", "持平"
+
 class AnnouncementService:
     def __init__(self):
         # 內存快取: code -> list[dict]
@@ -250,8 +270,8 @@ class AnnouncementService:
         # 3. 抓取官方確認之個股法人說明會、業績發表會與財報公告日程 (全市場無遺漏覆蓋)
         official_briefing_items = await loop.run_in_executor(self._executor, self._fetch_official_briefings_and_events)
         # 4. 抓取官方最新申報季報 EPS 與獲利 (TWSE 與 TPEx OpenAPI 權威數據)
-        twse_q_items = await loop.run_in_executor(self._executor, self._fetch_twse_quarterly_reports)
-        tpex_q_items = await loop.run_in_executor(self._executor, self._fetch_tpex_quarterly_reports)
+        twse_q_items = await loop.run_in_executor(self._executor, self._fetch_twse_quarterly_reports, wanted_codes)
+        tpex_q_items = await loop.run_in_executor(self._executor, self._fetch_tpex_quarterly_reports, wanted_codes)
         # 5. 抓取全市場證交所與櫃買中心即時重大訊息 (含法說會、財報決議、盤後自結營收/損益)
         twse_news_items = await loop.run_in_executor(self._executor, self._fetch_twse_material_news)
         tpex_news_items = await loop.run_in_executor(self._executor, self._fetch_tpex_material_news)
@@ -311,10 +331,12 @@ class AnnouncementService:
                     else:
                         existing.append(it)
                 elif cat == "earnings":
-                    # 若已有官方出表的季報 (包含詳細 EPS 數值)，則優先採用或更新
-                    earn_idx = next((i for i, x in enumerate(existing) if x.get("category") == "earnings" and "EPS" in x.get("title", "")), None)
-                    if earn_idx is not None and "EPS" not in it.get("title", ""):
-                        # 已有帶 EPS 的官方季報，略過不帶 EPS 的預告日程
+                    # 若已有官方出表的季報 (包含詳細 EPS 數值或市場評等)，則優先採用或更新
+                    earn_idx = next((i for i, x in enumerate(existing) if x.get("category") == "earnings"), None)
+                    if earn_idx is not None:
+                        # 若新項目帶有市場評等 (如 季年雙增) 或帶有 EPS 數值，則替換
+                        if "增" in it.get("tag", "") or "減" in it.get("tag", "") or "轉" in it.get("tag", "") or "EPS" in it.get("title", ""):
+                            existing[earn_idx] = it
                         continue
                     existing.append(it)
                 else:
@@ -779,10 +801,17 @@ class AnnouncementService:
         month_label = f"{target_month}月"
 
         for code, info in cur_month_stocks.items():
+            mom = info["mom"]
+            yoy = info["yoy"]
+            trend_label, trend_desc = calc_revenue_trend(mom, yoy)
+            tag_str = f"自結{month_label} {trend_label}".strip() if trend_label else f"自結{month_label}"
+            title_str = f"最新{month_label}自結營收公告 ({trend_label})" if trend_label else f"最新{month_label}自結營收公告"
+
             detail_lines = [
                 f"{month_label}自結營收: {format_chinese_amount(info['amount'])}",
-                f"月增率 (MoM): {'+' if info['mom'] > 0 else ''}{info['mom']:.2f}%",
-                f"年增率 (YoY): {'+' if info['yoy'] > 0 else ''}{info['yoy']:.2f}%",
+                f"市場評等: 【{trend_label}】 ({trend_desc})" if trend_label else "",
+                f"年增率 (YoY): {'+' if yoy > 0 else ''}{yoy:.2f}% ({'年增' if yoy > 0 else '年減'})",
+                f"月增率 (MoM): {'+' if mom > 0 else ''}{mom:.2f}% ({'月增' if mom > 0 else '月減'})",
             ]
             if info["memo"] and info["memo"] != "-":
                 detail_lines.append(f"公司說明: {info['memo']}")
@@ -790,10 +819,10 @@ class AnnouncementService:
             results.append({
                 "id": f"rev-{code}-{info['year_roc']}{target_month:02d}",
                 "code": code,
-                "tag": f"自結{month_label}",
-                "title": f"最新{month_label}自結營收公告",
+                "tag": tag_str,
+                "title": title_str,
                 "date": target_date_str,
-                "detail": "\n".join(detail_lines),
+                "detail": "\n".join([x for x in detail_lines if x]),
                 "category": "revenue",
             })
 
@@ -832,11 +861,15 @@ class AnnouncementService:
                     cur_amount = raw_cur * 1000
                     mom = float(it.get("營業收入-上月比較增減(%)", 0) or 0)
                     yoy = float(it.get("營業收入-去年同月增減(%)", 0) or 0)
+                    trend_label, trend_desc = calc_revenue_trend(mom, yoy)
+                    tag_str = f"自結{month_label} {trend_label}".strip() if trend_label else f"自結{month_label}"
+                    title_str = f"最新{month_label}自結營收公告 ({trend_label})" if trend_label else f"最新{month_label}自結營收公告"
 
                     detail_lines = [
                         f"{month_label}自結營收: {format_chinese_amount(cur_amount)}",
-                        f"月增率 (MoM): {'+' if mom > 0 else ''}{mom:.2f}%",
-                        f"年增率 (YoY): {'+' if yoy > 0 else ''}{yoy:.2f}%",
+                        f"市場評等: 【{trend_label}】 ({trend_desc})" if trend_label else "",
+                        f"年增率 (YoY): {'+' if yoy > 0 else ''}{yoy:.2f}% ({'年增' if yoy > 0 else '年減'})",
+                        f"月增率 (MoM): {'+' if mom > 0 else ''}{mom:.2f}% ({'月增' if mom > 0 else '月減'})",
                     ]
                     memo = str(it.get("備註", "")).strip()
                     if memo and memo != "-":
@@ -845,10 +878,10 @@ class AnnouncementService:
                     results.append({
                         "id": f"rev-{c}-{m_str}",
                         "code": c,
-                        "tag": f"自結{month_label}",
-                        "title": f"最新{month_label}自結營收公告",
+                        "tag": tag_str,
+                        "title": title_str,
                         "date": target_date_str,
-                        "detail": "\n".join(detail_lines),
+                        "detail": "\n".join([x for x in detail_lines if x]),
                         "category": "revenue",
                     })
         except Exception as e:
@@ -887,11 +920,15 @@ class AnnouncementService:
                     cur_amount = raw_cur * 1000
                     mom = float(it.get("營業收入-上月比較增減(%)", 0) or 0)
                     yoy = float(it.get("營業收入-去年同月增減(%)", 0) or 0)
+                    trend_label, trend_desc = calc_revenue_trend(mom, yoy)
+                    tag_str = f"自結{month_label} {trend_label}".strip() if trend_label else f"自結{month_label}"
+                    title_str = f"最新{month_label}自結營收公告 ({trend_label})" if trend_label else f"最新{month_label}自結營收公告"
 
                     detail_lines = [
                         f"{month_label}自結營收: {format_chinese_amount(cur_amount)}",
-                        f"月增率 (MoM): {'+' if mom > 0 else ''}{mom:.2f}%",
-                        f"年增率 (YoY): {'+' if yoy > 0 else ''}{yoy:.2f}%",
+                        f"市場評等: 【{trend_label}】 ({trend_desc})" if trend_label else "",
+                        f"年增率 (YoY): {'+' if yoy > 0 else ''}{yoy:.2f}% ({'年增' if yoy > 0 else '年減'})",
+                        f"月增率 (MoM): {'+' if mom > 0 else ''}{mom:.2f}% ({'月增' if mom > 0 else '月減'})",
                     ]
                     memo = str(it.get("備註", "")).strip()
                     if memo and memo != "-":
@@ -900,10 +937,10 @@ class AnnouncementService:
                     results.append({
                         "id": f"rev-{c}-{m_str}",
                         "code": c,
-                        "tag": f"自結{month_label}",
-                        "title": f"最新{month_label}自結營收公告",
+                        "tag": tag_str,
+                        "title": title_str,
                         "date": target_date_str,
-                        "detail": "\n".join(detail_lines),
+                        "detail": "\n".join([x for x in detail_lines if x]),
                         "category": "revenue",
                     })
         except Exception as e:
@@ -1029,15 +1066,137 @@ class AnnouncementService:
             logger.warning(f"Error fetching TPEx exdividend: {e}")
         return results
 
+    def _fetch_histock_eps_grid(self, code: str) -> Optional[dict]:
+        """從 HiStock 撈取指定個股歷年季度每股盈餘 (EPS) 表格以計算 QoQ 與 YoY 習慣用語"""
+        try:
+            url = f"https://histock.tw/stock/{urllib.parse.quote(code)}/{urllib.parse.quote('每股盈餘')}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=3) as r:
+                html = r.read().decode("utf-8", errors="ignore")
+                table = re.search(r"<table[^>]*>(.*?)</table>", html, re.DOTALL)
+                if not table:
+                    return None
+                rows = re.findall(r"<tr[^>]*>(.*?)</tr>", table.group(1), re.DOTALL)
+                headers = []
+                grid = {}
+                for row in rows:
+                    th_td = re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", row, re.DOTALL)
+                    clean = [re.sub(r"<[^>]+>", "", cell).strip() for cell in th_td]
+                    if not clean:
+                        continue
+                    if "季別" in clean[0]:
+                        headers = clean[1:]
+                    elif clean[0] in ("Q1", "Q2", "Q3", "Q4"):
+                        q = clean[0]
+                        grid[q] = {headers[i]: clean[i + 1] for i in range(min(len(headers), len(clean) - 1))}
+                return grid
+        except Exception:
+            return None
+
+    def _calc_quarterly_trend(self, grid: Optional[dict], q_str: str, year_str: str = "2026") -> tuple[str, str, Optional[float]]:
+        """計算季度財報之市場習慣用語 (選項 B：季年雙增 / 季減年增 / 季增年減 / 季年雙減 / 轉虧為盈)"""
+        if not grid:
+            return "", "", None
+        q_key = f"Q{q_str}" if not str(q_str).startswith("Q") else str(q_str)
+        cur_val = grid.get(q_key, {}).get(year_str)
+        if not cur_val or cur_val == "-":
+            return "", "", None
+        try:
+            cur = float(cur_val)
+        except Exception:
+            return "", "", None
+
+        q_order = ["Q1", "Q2", "Q3", "Q4"]
+        if q_key not in q_order:
+            return "", "", cur
+        idx = q_order.index(q_key)
+        if idx > 0:
+            prev_q_val = grid.get(q_order[idx - 1], {}).get(year_str)
+        else:
+            prev_q_val = grid.get("Q4", {}).get(str(int(year_str) - 1))
+
+        prev_y_val = grid.get(q_key, {}).get(str(int(year_str) - 1))
+
+        prev_q = float(prev_q_val) if prev_q_val and prev_q_val != "-" else None
+        prev_y = float(prev_y_val) if prev_y_val and prev_y_val != "-" else None
+
+        qoq_desc = ""
+        yoy_desc = ""
+        is_qoq_up = (cur > prev_q) if prev_q is not None else None
+        is_yoy_up = (cur > prev_y) if prev_y is not None else None
+
+        if prev_q is not None:
+            if prev_q < 0 and cur > 0:
+                qoq_desc = "轉虧為盈"
+            elif prev_q > 0 and cur < 0:
+                qoq_desc = "由盈轉虧"
+            elif prev_q != 0:
+                qoq_pct = (cur - prev_q) / abs(prev_q) * 100
+                qoq_desc = f"季增 {qoq_pct:+.1f}%" if qoq_pct > 0 else f"季減 {abs(qoq_pct):.1f}%"
+
+        if prev_y is not None:
+            if prev_y < 0 and cur > 0:
+                yoy_desc = "轉虧為盈"
+            elif prev_y > 0 and cur < 0:
+                yoy_desc = "由盈轉虧"
+            elif prev_y != 0:
+                yoy_pct = (cur - prev_y) / abs(prev_y) * 100
+                yoy_desc = f"年增 {yoy_pct:+.1f}%" if yoy_pct > 0 else f"年減 {abs(yoy_pct):.1f}%"
+
+        trend_tag = ""
+        if "轉虧為盈" in (qoq_desc, yoy_desc):
+            trend_tag = "轉虧為盈"
+        elif "由盈轉虧" in (qoq_desc, yoy_desc):
+            trend_tag = "由盈轉虧"
+        elif is_qoq_up is True and is_yoy_up is True:
+            trend_tag = "季年雙增"
+        elif is_qoq_up is False and is_yoy_up is True:
+            trend_tag = "季減年增"
+        elif is_qoq_up is True and is_yoy_up is False:
+            trend_tag = "季增年減"
+        elif is_qoq_up is False and is_yoy_up is False:
+            trend_tag = "季年雙減"
+        elif is_yoy_up is True:
+            trend_tag = "年增"
+        elif is_yoy_up is False:
+            trend_tag = "年減"
+
+        eval_parts = []
+        if qoq_desc:
+            eval_parts.append(qoq_desc)
+        if yoy_desc:
+            eval_parts.append(yoy_desc)
+        eval_str = ", ".join(eval_parts)
+
+        return trend_tag, eval_str, cur
+
     def _fetch_twse_quarterly_reports(self, wanted_codes: Optional[set[str]] = None) -> list[dict]:
-        """從證交所 OpenAPI (t187ap14_L) 撈取最新官方申報季報 (EPS、營業收入、稅後淨利)"""
+        """從證交所 OpenAPI (t187ap14_L) 撈取最新官方申報季報 (EPS、營業收入、稅後淨利，含習慣用語評等)"""
         results: list[dict] = []
         today = date.today()
+        eps_grids: dict[str, dict] = {}
+
         try:
             url = "https://openapi.twse.com.tw/v1/opendata/t187ap14_L"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=8) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
+
+            # 僅針對實際出表且符合 wanted_codes 的個股並行抓取歷史季度 EPS 評等
+            matched_codes = {str(it.get("公司代號", "")).strip() for it in data}
+            if wanted_codes:
+                matched_codes = matched_codes.intersection(wanted_codes)
+            if matched_codes:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+                    future_map = {ex.submit(self._fetch_histock_eps_grid, c): c for c in matched_codes}
+                    for f in concurrent.futures.as_completed(future_map):
+                        c = future_map[f]
+                        try:
+                            res = f.result()
+                            if res:
+                                eps_grids[c] = res
+                        except Exception:
+                            pass
             for it in data:
                 c = str(it.get("公司代號", "")).strip()
                 if wanted_codes and c not in wanted_codes:
@@ -1064,9 +1223,20 @@ class AnnouncementService:
                 raw_profit = safe_float(it.get("稅後淨利", 0)) * 1000
                 raw_op = safe_float(it.get("營業利益", 0)) * 1000
 
+                grid = eps_grids.get(c)
+                if not grid and wanted_codes and c in wanted_codes:
+                    grid = self._fetch_histock_eps_grid(c)
+                    if grid:
+                        eps_grids[c] = grid
+
+                trend_tag, eval_str, single_q_eps = self._calc_quarterly_trend(grid, q, str(today.year))
+                tag_label = f"Q{q}財報 {trend_tag}".strip() if trend_tag else (f"Q{q}財報" if q else "季報")
+
                 detail_lines = [
                     f"115年第{q}季 (Q{q}) 官方申報財務報告：",
-                    f"基本每股盈餘 (EPS): {eps} 元" if eps and eps != "--" else "",
+                    f"市場評等: 【{trend_tag}】 ({eval_str})" if trend_tag and eval_str else (f"市場評等: 【{trend_tag}】" if trend_tag else ""),
+                    f"單季每股盈餘 (EPS): {single_q_eps:.2f} 元" if single_q_eps is not None else "",
+                    f"前三季累計 EPS: {eps} 元" if eps and eps != "--" and q == "3" else (f"基本每股盈餘 (EPS): {eps} 元" if eps and eps != "--" else ""),
                     f"稅後淨利: {format_chinese_amount(raw_profit)}" if raw_profit else "",
                     f"營業收入: {format_chinese_amount(raw_rev)}" if raw_rev else "",
                     f"營業利益: {format_chinese_amount(raw_op)}" if raw_op else "",
@@ -1076,8 +1246,8 @@ class AnnouncementService:
                 results.append({
                     "id": f"q-twse-{c}-{date_raw}-Q{q}",
                     "code": c,
-                    "tag": f"Q{q}財報" if q else "季報",
-                    "title": f"{nm} Q{q} 財務報告 (EPS {eps}元)" if eps and eps != "--" else f"{nm} Q{q} 財務報告",
+                    "tag": tag_label,
+                    "title": f"{nm} Q{q} 財務報告 ({trend_tag})" if trend_tag else (f"{nm} Q{q} 財務報告 (EPS {eps}元)" if eps and eps != "--" else f"{nm} Q{q} 財務報告"),
                     "date": fmt_date,
                     "detail": detail_txt,
                     "category": "earnings",
@@ -1090,11 +1260,29 @@ class AnnouncementService:
         """從櫃買中心 TPEx OpenAPI (mopsfin_t187ap14_O) 撈取最新官方申報季報 (EPS、營業收入、稅後淨利)"""
         results: list[dict] = []
         today = date.today()
+        eps_grids: dict[str, dict] = {}
+
         try:
             url = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap14_O"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=8) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
+
+            # 僅針對實際出表且符合 wanted_codes 的個股並行抓取歷史季度 EPS 評等
+            matched_codes = {str(it.get("SecuritiesCompanyCode", "")).strip() for it in data}
+            if wanted_codes:
+                matched_codes = matched_codes.intersection(wanted_codes)
+            if matched_codes:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+                    future_map = {ex.submit(self._fetch_histock_eps_grid, c): c for c in matched_codes}
+                    for f in concurrent.futures.as_completed(future_map):
+                        c = future_map[f]
+                        try:
+                            res = f.result()
+                            if res:
+                                eps_grids[c] = res
+                        except Exception:
+                            pass
             for it in data:
                 c = str(it.get("SecuritiesCompanyCode", "")).strip()
                 if wanted_codes and c not in wanted_codes:
@@ -1121,9 +1309,20 @@ class AnnouncementService:
                 raw_profit = safe_float(it.get("稅後淨利", 0)) * 1000
                 raw_op = safe_float(it.get("營業利益", 0)) * 1000
 
+                grid = eps_grids.get(c)
+                if not grid and wanted_codes and c in wanted_codes:
+                    grid = self._fetch_histock_eps_grid(c)
+                    if grid:
+                        eps_grids[c] = grid
+
+                trend_tag, eval_str, single_q_eps = self._calc_quarterly_trend(grid, q, str(today.year))
+                tag_label = f"Q{q}財報 {trend_tag}".strip() if trend_tag else (f"Q{q}財報" if q else "季報")
+
                 detail_lines = [
                     f"115年第{q}季 (Q{q}) 官方申報財務報告：",
-                    f"基本每股盈餘 (EPS): {eps} 元" if eps and eps != "--" else "",
+                    f"市場評等: 【{trend_tag}】 ({eval_str})" if trend_tag and eval_str else (f"市場評等: 【{trend_tag}】" if trend_tag else ""),
+                    f"單季每股盈餘 (EPS): {single_q_eps:.2f} 元" if single_q_eps is not None else "",
+                    f"前三季累計 EPS: {eps} 元" if eps and eps != "--" and q == "3" else (f"基本每股盈餘 (EPS): {eps} 元" if eps and eps != "--" else ""),
                     f"稅後淨利: {format_chinese_amount(raw_profit)}" if raw_profit else "",
                     f"營業收入: {format_chinese_amount(raw_rev)}" if raw_rev else "",
                     f"營業利益: {format_chinese_amount(raw_op)}" if raw_op else "",
@@ -1133,8 +1332,8 @@ class AnnouncementService:
                 results.append({
                     "id": f"q-tpex-{c}-{date_raw}-Q{q}",
                     "code": c,
-                    "tag": f"Q{q}財報" if q else "季報",
-                    "title": f"{nm} Q{q} 財務報告 (EPS {eps}元)" if eps and eps != "--" else f"{nm} Q{q} 財務報告",
+                    "tag": tag_label,
+                    "title": f"{nm} Q{q} 財務報告 ({trend_tag})" if trend_tag else (f"{nm} Q{q} 財務報告 (EPS {eps}元)" if eps and eps != "--" else f"{nm} Q{q} 財務報告"),
                     "date": fmt_date,
                     "detail": detail_txt,
                     "category": "earnings",

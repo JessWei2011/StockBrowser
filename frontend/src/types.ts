@@ -338,6 +338,10 @@ export interface MarginFlowItem {
   margin_change: number;
   short_balance: number;
   short_change: number;
+  margin_utilization?: number | null;
+  margin_maintenance?: number | null;
+  margin_cost?: number | null;
+  margin_limit?: number | null;
 }
 
 export interface HolderFlowItem {

@@ -14,6 +14,7 @@ interface GlobalIndicesModalProps {
     badgeLabel: string;
     badgeType: string;
   };
+  theme?: 'light' | 'dark';
 }
 
 const getTxfSession = (twMarketStatus?: { isOpen: boolean; badgeLabel: string; badgeType: string }) => {
@@ -178,6 +179,7 @@ const GlobalIndicesModalContent: React.FC<GlobalIndicesModalProps> = ({
   initialTab = 'all',
   twIndices,
   twMarketStatus,
+  theme,
 }) => {
   const [activeTab, setActiveTab] = useState<'all' | 'tw' | 'us' | 'asia'>(initialTab);
   // 優先由本地快取載入國際指數（秒開無等待）
@@ -640,6 +642,7 @@ const GlobalIndicesModalContent: React.FC<GlobalIndicesModalProps> = ({
         }
         statusLabel={selectedChartIndex?.statusLabel}
         statusClass={selectedChartIndex?.statusClass}
+        theme={theme}
       />
     </div>
   );
