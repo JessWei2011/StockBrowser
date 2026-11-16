@@ -292,6 +292,7 @@ class ShioajiAdapter:
         self._last_morning_sync_date: Optional[str] = None
         self._last_preopen_warmup_date: Optional[str] = None
         self._orders_cleared_at: Optional[datetime] = None
+        self._cleared_order_ids: set[str] = set()
         self._last_reconnect_attempt_ts: float = 0.0
         self.stock_account: Any = None
         self.ca_activated: bool = False
@@ -385,6 +386,9 @@ class ShioajiAdapter:
                 if is_weekday and is_morning_window and self._last_morning_sync_date != today_str:
                     logger.info(f"Triggering scheduled 08:30 morning reconnect & sync for {today_str}...")
                     self._last_morning_sync_date = today_str
+                    if hasattr(self, "_cleared_order_ids") and self._cleared_order_ids:
+                        self._cleared_order_ids.clear()
+                    self._orders_cleared_at = None
                     # 執行完整的重新登入與連線重建 (重設底層 Solace 報價連線)
                     await self.reconnect()
                     # 刷新最新合約、基準昨收與當日最新 snapshot
@@ -1817,12 +1821,8 @@ class ShioajiAdapter:
         else:
             auto_cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-        # 2. 手動清除時間點判斷 (若使用者曾手動點擊「清除歷史單」)
-        effective_cutoff = auto_cutoff
-        if getattr(self, "_orders_cleared_at", None):
-            effective_cutoff = max(effective_cutoff, self._orders_cleared_at)
-        if effective_cutoff.tzinfo is not None:
-            effective_cutoff = effective_cutoff.astimezone().replace(tzinfo=None)
+        if auto_cutoff.tzinfo is not None:
+            auto_cutoff = auto_cutoff.astimezone().replace(tzinfo=None)
 
         orders: list[dict[str, Any]] = []
         try:
@@ -1872,8 +1872,8 @@ class ShioajiAdapter:
                 if order_dt and order_dt.tzinfo is not None:
                     order_dt = order_dt.astimezone().replace(tzinfo=None)
 
-                # 若委託時間早於有效起算點 (例如已過收盤 15:00 或手動清除前)，則視為歷史已結案單，自動排除
-                if order_dt and order_dt < effective_cutoff:
+                # 跨日或收盤 15:00 以後之歷史單自動排除
+                if order_dt and order_dt < auto_cutoff:
                     continue
 
                 if order_dt:
@@ -1889,6 +1889,12 @@ class ShioajiAdapter:
                 active_qty = max(0, orig_qty - cancel_qty - deal_qty) if is_active else 0
                 if not is_active and status_str == "Filled":
                     active_qty = 0
+
+                # 僅過濾手動清空之已完成/已取消歷史單；進行中之掛單待撮合單（active_qty > 0）完整保留
+                is_order_active = is_active and active_qty > 0
+                cleared_order_ids = getattr(self, "_cleared_order_ids", None)
+                if not is_order_active and cleared_order_ids and order_id in cleared_order_ids:
+                    continue
 
                 orig_price = safe_float(getattr(t.order, "price", 0.0)) or 0.0
                 mod_price = safe_float(getattr(t.status, "modified_price", 0.0)) or 0.0
@@ -1930,12 +1936,51 @@ class ShioajiAdapter:
         return orders
 
     def clear_orders(self) -> dict[str, Any]:
-        """手動清空今日委託單歷史紀錄"""
+        """手動清空今日歷史委託單（僅清除已成交與已取消/失敗之歷史單，保留掛單中之委託單）"""
+        if not hasattr(self, "_cleared_order_ids") or self._cleared_order_ids is None:
+            self._cleared_order_ids = set()
+
+        cleared_count = 0
+        if self.api and self.is_logged_in:
+            try:
+                account = getattr(self, "stock_account", None)
+                if not account and hasattr(self.api, "stock_account"):
+                    account = self.api.stock_account
+                if account:
+                    try:
+                        self.api.update_status(account=account)
+                    except Exception:
+                        pass
+                trades = self.api.list_trades()
+                for t in trades:
+                    order_id = getattr(t.order, "id", "")
+                    if not order_id:
+                        continue
+
+                    status_raw = getattr(t.status, "status", "Pending")
+                    status_str = getattr(status_raw, "value", str(status_raw)).replace("OrderStatus.", "")
+
+                    orig_qty = safe_int(getattr(t.order, "quantity", 0)) or 0
+                    deal_qty = safe_int(getattr(t.status, "deal_quantity", 0)) or 0
+                    cancel_qty = safe_int(getattr(t.status, "cancel_quantity", 0)) or 0
+
+                    is_active = status_str in ("Submitted", "PendingSubmit", "PreSubmitted", "PartFilled")
+                    active_qty = max(0, orig_qty - cancel_qty - deal_qty) if is_active else 0
+
+                    # 僅清掉已完成交易（Filled）以及棄單/取消/失敗（Cancelled/Failed）等非掛單中歷史單
+                    if not (is_active and active_qty > 0):
+                        if order_id not in self._cleared_order_ids:
+                            self._cleared_order_ids.add(order_id)
+                            cleared_count += 1
+            except Exception as e:
+                logger.error(f"Error checking trades in clear_orders: {e}", exc_info=True)
+
         self._orders_cleared_at = datetime.now()
-        logger.info(f"User manually cleared orders history at {self._orders_cleared_at}")
+        logger.info(f"User manually cleared {cleared_count} historical orders (total cleared: {len(self._cleared_order_ids)}) at {self._orders_cleared_at}")
         return {
             "success": True,
-            "message": "今日委託單紀錄已清空",
+            "message": f"今日委託單紀錄已清空（已清除 {cleared_count} 筆歷史單，進行中掛單已保留）",
+            "clearedCount": cleared_count,
             "clearedAt": self._orders_cleared_at.isoformat()
         }
 

@@ -596,12 +596,23 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     }
   };
 
-  // 手動清除歷史委託單紀錄
+  // 手動清除歷史委託單紀錄（僅清空已成交與已取消單，保留進行中的掛單）
   const handleClearOrders = async () => {
     const activeList = orders.filter((o) => o.canCancel);
-    let confirmMsg = '確定要清空今日委託單歷史紀錄嗎？';
+    const historyList = orders.filter((o) => !o.canCancel);
+
+    if (historyList.length === 0) {
+      if (activeList.length > 0) {
+        alert('目前所有委託單皆為掛單待撮合中，歷史單已清空或無歷史單。\n進行中的掛單將完整保留。');
+      } else {
+        alert('目前尚無任何委託單紀錄。');
+      }
+      return;
+    }
+
+    let confirmMsg = `確定要清空已成交與已取消的歷史委託單嗎？（共 ${historyList.length} 筆）`;
     if (activeList.length > 0) {
-      confirmMsg = `目前尚有 ${activeList.length} 筆掛單待撮合。\n\n「清空歷史單」僅清空畫面歷史顯示，不會向券商撤銷進行中的掛單。\n\n確定要清空紀錄嗎？`;
+      confirmMsg += `\n\n📌 目前進行中的 ${activeList.length} 筆掛單將會完整保留。`;
     }
 
     if (!window.confirm(confirmMsg)) return;
@@ -609,10 +620,17 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     try {
       setIsClearingOrders(true);
       await clearOrders();
-      setOrders([]);
+      // 保留正在掛單待撮合的委託單，僅移除非在途歷史單
+      setOrders((prev) => prev.filter((o) => o.canCancel));
       setOrderNoticeType('info');
-      setOrderNotice('✔ 今日委託單歷史紀錄已清空');
+      setOrderNotice(
+        `✔ 已清空 ${historyList.length} 筆歷史單${
+          activeList.length > 0 ? `，${activeList.length} 筆掛單已保留` : ''
+        }`
+      );
       setTimeout(() => setOrderNotice(null), 5000);
+      // 向後端更新委託清單，確保掛單資訊與券商完全一致
+      await loadOrders();
     } catch (err: any) {
       console.error('Failed to clear orders:', err);
       alert('清空紀錄失敗：' + (err.message || '請稍後再試'));
@@ -1438,7 +1456,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                       className="btn-clear-orders"
                       onClick={handleClearOrders}
                       disabled={isClearingOrders || orders.length === 0}
-                      title={orders.length === 0 ? "目前尚無委託單可清空" : "清空目前顯示的歷史委託單紀錄"}
+                      title={orders.length === 0 ? "目前尚無委託單可清空" : "清空已成交與已取消的歷史單（進行中掛單將完整保留）"}
                     >
                       {isClearingOrders ? '🧹 清空中...' : '🧹 清空歷史單'}
                     </button>

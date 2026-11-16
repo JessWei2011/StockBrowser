@@ -216,7 +216,7 @@ export const VaultDetailView: React.FC<VaultDetailViewProps> = ({
   };
 
   return (
-    <div className="vault-detail-page">
+    <div className="vault-detail-page" data-theme={theme}>
       {/* 頂部功能與摘要導覽列 */}
       <header className="vault-detail-header">
         <div className="vault-header-left">
