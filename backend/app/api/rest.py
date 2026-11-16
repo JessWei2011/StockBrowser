@@ -1,5 +1,6 @@
 import asyncio
 from typing import Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Query
 from backend.app.services.watchlist_service import watchlist_service
 from backend.app.services.shioaji_adapter import shioaji_adapter
@@ -99,6 +100,11 @@ async def delete_group(group_id: str):
     await watchlist_service.delete_group(group_id)
     return {"status": "ok"}
 
+@router.post("/active-group/{group_id}")
+async def set_active_group(group_id: str):
+    await watchlist_service.set_active_group(group_id)
+    return {"status": "ok", "groupId": group_id}
+
 @router.post("/groups/{group_id}/items")
 async def add_item(group_id: str, body: AddItemRequest):
     if group_id in ("g-vault", "g-wealth"):
@@ -123,6 +129,12 @@ async def add_item(group_id: str, body: AddItemRequest):
                 logger.warning(f"Background prefetch failed for {c}: {ex}")
 
         asyncio.create_task(_bg_prefetch(code))
+
+        # 立即在背景非同步預生成該個股的 AI 筆記（業務/客戶/AI交會點）
+        from backend.app.services.ai_note_service import ai_note_service
+        stock_name = item.name if item else ""
+        asyncio.create_task(ai_note_service.ensure_note(code, stock_name))
+
         return item
     except KeyError as e:
         raise HTTPException(status_code=404, detail="自選群組不存在")
@@ -555,6 +567,74 @@ async def resume_pending_smart_order(order_id: str):
     if not ok:
         raise HTTPException(status_code=400, detail="無法恢復 (單號不存在或狀態不符)")
     return {"status": "ok", "message": f"已重新啟動盯盤 {order_id}"}
+
+
+# =========================================================================
+# 個股 AI 產業筆記 (業務/客戶/AI交會點 - 100字內)
+# =========================================================================
+
+class StockAiNoteResponse(BaseModel):
+    code: str
+    name: str = ""
+    business: str = ""
+    customers: str = ""
+    ai_relation: str = ""
+    raw_text: str = ""
+    updated_at: str = ""
+    error: Optional[str] = None
+
+class UpdateStockAiNoteRequest(BaseModel):
+    business: str
+    customers: str
+    ai_relation: str
+    name: Optional[str] = ""
+
+@router.get("/stocks/ai-notes")
+async def get_all_ai_notes():
+    """取得所有已快取之個股 AI 筆記字典"""
+    from backend.app.services.ai_note_service import ai_note_service
+    return await ai_note_service.get_all_notes()
+
+@router.get("/stocks/{code}/ai-note", response_model=StockAiNoteResponse)
+async def get_or_generate_stock_ai_note(code: str, name: Optional[str] = None):
+    """取得指定個股之 AI 筆記，若無快取則即時自動生成"""
+    code = code.strip().upper()
+    from backend.app.services.ai_note_service import ai_note_service
+    stock_name = name or ""
+    if not stock_name:
+        contract = shioaji_adapter.contracts_cache.get(code)
+        if contract:
+            stock_name = contract.get("name", "")
+    note = await ai_note_service.generate_note(code, stock_name, force=False)
+    return note
+
+@router.post("/stocks/{code}/ai-note/generate", response_model=StockAiNoteResponse)
+async def regenerate_stock_ai_note(code: str, name: Optional[str] = None):
+    """強制重新使用 Gemini API 生成指定個股之 AI 筆記"""
+    code = code.strip().upper()
+    from backend.app.services.ai_note_service import ai_note_service
+    stock_name = name or ""
+    if not stock_name:
+        contract = shioaji_adapter.contracts_cache.get(code)
+        if contract:
+            stock_name = contract.get("name", "")
+    note = await ai_note_service.generate_note(code, stock_name, force=True)
+    return note
+
+@router.put("/stocks/{code}/ai-note", response_model=StockAiNoteResponse)
+async def update_stock_ai_note(code: str, body: UpdateStockAiNoteRequest):
+    """手動修改與儲存個股 AI 筆記"""
+    code = code.strip().upper()
+    from backend.app.services.ai_note_service import ai_note_service
+    note = await ai_note_service.update_note(
+        code=code,
+        business=body.business,
+        customers=body.customers,
+        ai_relation=body.ai_relation,
+        name=body.name or ""
+    )
+    return note
+
 
 
 

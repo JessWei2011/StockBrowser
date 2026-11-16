@@ -1573,6 +1573,455 @@ button, input, select, textarea {
   font-size: 13px;
 }
 
+/* 均線 20MA 後方之個股 AI 筆記按鈕 */
+.stock-note-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fbbf24;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.stock-note-btn:hover {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.55);
+  transform: scale(1.15);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.35);
+}
+
+.stock-note-btn.active {
+  background: rgba(245, 158, 11, 0.25);
+  border-color: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
+}
+
+.stock-note-btn-compact {
+  font-size: 10px;
+  padding: 1px 3px;
+  margin-left: 2px;
+}
+
+/* =========================================================================
+   個股 AI 產業筆記 Popover 懸浮氣泡框
+   ========================================================================= */
+
+.note-popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99998;
+}
+
+.backdrop-desktop {
+  background: transparent;
+}
+
+.backdrop-mobile {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.stock-note-popover-card {
+  background: rgba(18, 24, 38, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  color: #f1f5f9;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: popoverFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  font-family: inherit;
+}
+
+@keyframes popoverFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.note-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.note-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.note-stock-code {
+  font-family: monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.note-stock-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.note-ai-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.12);
+  padding: 1px 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.note-ai-sparkle {
+  font-size: 10px;
+}
+
+.note-close-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.note-close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f1f5f9;
+}
+
+.note-popover-content {
+  padding: 12px 14px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* 格式 1: 三段結構卡片 */
+.note-popover-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.note-section-card {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 8px 10px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.note-section-card:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.note-sec-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.badge-tag-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  line-height: 1.2;
+  letter-spacing: 0.5px;
+}
+
+.tag-lbl-biz {
+  background: rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+}
+
+.tag-lbl-cust {
+  background: rgba(52, 211, 153, 0.18);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.4);
+}
+
+.tag-lbl-ai {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.note-sec-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.note-sec-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #cbd5e1;
+  word-break: break-word;
+}
+
+/* 載入與骨架屏狀態 */
+.note-popover-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 18px 8px;
+  gap: 12px;
+  text-align: center;
+}
+
+.note-loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2.5px solid rgba(245, 158, 11, 0.2);
+  border-top-color: #fbbf24;
+  border-radius: 50%;
+  animation: noteSpin 0.8s linear infinite;
+}
+
+@keyframes noteSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.note-loading-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #e2e8f0;
+}
+
+.note-loading-sub {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.note-skeleton-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.note-skeleton-line {
+  height: 12px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.1) 50%, rgba(255, 255, 255, 0.05) 75%);
+  background-size: 200% 100%;
+  animation: notePulse 1.5s infinite;
+  border-radius: 4px;
+}
+
+.sk-w-80 { width: 85%; }
+.sk-w-100 { width: 100%; }
+.sk-w-60 { width: 65%; }
+
+@keyframes notePulse {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* 編輯表單 */
+.note-popover-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.note-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.note-edit-label {
+  font-size: 11px;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.note-edit-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #f1f5f9;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 6px 8px;
+  resize: vertical;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.note-edit-textarea:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.3);
+}
+
+.note-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.btn-note-cancel {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #cbd5e1;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-note-cancel:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.btn-note-save {
+  background: #0284c7;
+  border: 1px solid #38bdf8;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-note-save:hover {
+  background: #0369a1;
+}
+
+/* 錯誤狀態卡片 */
+.note-popover-error-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 8px;
+  text-align: center;
+}
+
+.note-error-icon {
+  font-size: 24px;
+}
+
+.note-error-msg {
+  font-size: 12px;
+  color: #f87171;
+  line-height: 1.5;
+}
+
+.btn-note-retry {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-note-retry:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: #ef4444;
+  color: #ffffff;
+}
+
+/* 底部操作列 */
+.note-popover-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: rgba(0, 0, 0, 0.25);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+}
+
+.note-footer-meta {
+  color: #64748b;
+  font-size: 10px;
+}
+
+.note-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-note-action {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  transition: all 0.15s ease;
+}
+
+.btn-note-action:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #f1f5f9;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.btn-note-regen:hover {
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+
 .btn-cell-delete {
   background: transparent;
   border: none;

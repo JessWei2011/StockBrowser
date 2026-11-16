@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { QuoteState, WatchlistItem, StockAnnouncement, StockMaSummary } from '../types';
 import { filterActiveAnnouncements } from '../utils/announcements';
 import { getRealtimeMaIndicators } from '../utils/maUtils';
+import { StockNotePopover } from './StockNotePopover';
 
 interface CompactCardListProps {
   items: WatchlistItem[];
@@ -29,6 +30,22 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
   onOpenOrder,
   isReorderMode = false,
 }) => {
+  const [activeNoteTarget, setActiveNoteTarget] = useState<{
+    code: string;
+    name: string;
+    rect: DOMRect | null;
+  } | null>(null);
+
+  const handleOpenNote = (e: React.MouseEvent<HTMLButtonElement>, code: string, name: string) => {
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (activeNoteTarget && activeNoteTarget.code === code) {
+      setActiveNoteTarget(null);
+    } else {
+      setActiveNoteTarget({ code, name, rect });
+    }
+  };
+
   const formatPrice = (val: number | null | undefined, isSim?: boolean): React.ReactNode => {
     if (val === null || val === undefined || isNaN(val) || val <= 0) return '—';
     let text: string;
@@ -245,6 +262,14 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
                       >
                         20M
                       </span>
+                      <button
+                        type="button"
+                        className={`stock-note-btn stock-note-btn-compact ${activeNoteTarget?.code === item.code ? 'active' : ''}`}
+                        title={`查看 ${item.name || item.code} AI 產業筆記`}
+                        onClick={(e) => handleOpenNote(e, item.code, item.name || q?.name || '')}
+                      >
+                        📝
+                      </button>
                     </div>
                   );
                 })() : (
@@ -309,6 +334,16 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
           </div>
         );
       })}
+
+      {activeNoteTarget && (
+        <StockNotePopover
+          code={activeNoteTarget.code}
+          name={activeNoteTarget.name}
+          isOpen={Boolean(activeNoteTarget)}
+          onClose={() => setActiveNoteTarget(null)}
+          targetRect={activeNoteTarget.rect}
+        />
+      )}
     </div>
   );
 };

@@ -73,6 +73,22 @@ class WatchlistService:
                 logger.info(f"Unsubscribing from obsolete codes: {to_remove}")
                 await shioaji_adapter.async_unsubscribe_codes(to_remove, timeout=3.0)
 
+            # 初始同步時，若尚未指定 active_group_codes，預設以第一個非系統自選群組作為活躍群組
+            if not shioaji_adapter.active_group_codes:
+                groups = await db.get_all_groups()
+                first_wl = next((g for g in groups if not g.isSystemGroup and g.items), None)
+                if first_wl:
+                    codes = {it.code for it in first_wl.items}
+                    await shioaji_adapter.async_set_active_group_codes(codes)
+
+    async def set_active_group(self, group_id: str):
+        """根據前端當前瀏覽群組動態配置盤中零股高優先級配額"""
+        groups = await db.get_all_groups()
+        target = next((g for g in groups if g.id == group_id), None)
+        if target:
+            codes = {it.code for it in target.items}
+            await shioaji_adapter.async_set_active_group_codes(codes)
+
     def _trigger_sync(self):
         """觸發背景訂閱同步；若已有同步正在執行，則標記 dirty，待目前同步完成後自動執行一次 trailing sync"""
         self._sync_dirty = True

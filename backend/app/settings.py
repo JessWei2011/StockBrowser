@@ -22,4 +22,22 @@ class Settings:
     # 支援在收盤或週末期間微幅模擬跳動，方便測試 1Hz 推播及 UI 渲染
     ENABLE_OFFHOURS_MOCK_TICKS: bool = os.getenv("ENABLE_OFFHOURS_MOCK_TICKS", "true").lower() in ("true", "1", "t")
 
+    # Gemini API Key (用於生成個股 AI 產業筆記：業務/客戶/AI交會點)
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+
+    def __init__(self):
+        if not self.GEMINI_API_KEY:
+            # 優先嘗試從同層級 StockCenter/.env 讀取共用金鑰
+            stockcenter_env = BASE_DIR.parent / "StockCenter" / ".env"
+            if stockcenter_env.exists():
+                try:
+                    with open(stockcenter_env, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line.startswith("GEMINI_API_KEY="):
+                                self.GEMINI_API_KEY = line.split("=", 1)[1].strip()
+                                break
+                except Exception:
+                    pass
+
 settings = Settings()

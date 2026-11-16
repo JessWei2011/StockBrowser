@@ -255,6 +255,10 @@ def format_index_amount(raw_amount: Optional[float]) -> tuple[Optional[float], O
     text = f"{int(round(val_in_yi)):,}億"
     return val_in_yi_rounded, text
 
+# Solace 報價連線主題上限控管 (永豐 Solace 硬上限 200，保留安全緩衝設為 195)
+MAX_SOLACE_TOPICS = 195
+INDEX_TOPICS = 2  # TSE (IX0001) 與 OTC (IX0043) 大盤指數
+
 class ShioajiAdapter:
     def __init__(self):
         self.api: Optional[sj.Shioaji] = None
@@ -262,6 +266,8 @@ class ShioajiAdapter:
         self.is_logged_in = False
         self.last_quote_time: Optional[str] = None
         self.subscribed_codes: set[str] = set()
+        self.subscribed_odd_codes: set[str] = set()
+        self.active_group_codes: set[str] = set()
         self.contracts_cache: dict[str, dict] = {}
         self.disposition_dates_cache: dict[str, dict[str, Any]] = {}
         self.market_indices: dict[str, dict[str, Any]] = {
@@ -607,6 +613,7 @@ class ShioajiAdapter:
 
             codes_to_resub = set(self.subscribed_codes)
             self.subscribed_codes.clear()
+            self.subscribed_odd_codes.clear()
             self.subscribe_codes(codes_to_resub)
             logger.info(f"Reconnected and successfully resubscribed {len(codes_to_resub)} stocks.")
             return True
@@ -741,6 +748,7 @@ class ShioajiAdapter:
                 if code_str:
                     codes.append(code_str)
                 qty = float(getattr(p, 'quantity', 0) or 0)
+                yd_qty = float(getattr(p, 'yd_quantity', None) if getattr(p, 'yd_quantity', None) is not None else qty)
                 price = float(getattr(p, 'price', 0) or 0)
                 pnl = float(getattr(p, 'pnl', 0) or 0)
                 last_p = float(getattr(p, 'last_price', 0) or 0)
@@ -756,6 +764,7 @@ class ShioajiAdapter:
                         "name": s_name,
                         "exchange": s_ex,
                         "quantity": qty,
+                        "yd_quantity": yd_qty,
                         "cost_price": price,
                         "initial_last": last_p if last_p > 0 else price,
                         "initial_pnl": pnl
@@ -771,6 +780,10 @@ class ShioajiAdapter:
             }
             self.cached_wealth_summary = summary
             logger.info(f"Fetched {len(codes)} stock positions from Shioaji. PnL: {summary['totalPnl']}, ROI: {summary['returnPercent']}%")
+            try:
+                self._rebalance_odd_lot_subscriptions()
+            except Exception as e:
+                logger.debug(f"Error rebalancing odd lots after fetch positions: {e}")
             return codes, summary
         except Exception as e:
             logger.error(f"Failed to fetch stock positions from Shioaji: {e}", exc_info=True)
@@ -810,6 +823,7 @@ class ShioajiAdapter:
                 "name": name,
                 "exchange": exchange,
                 "quantity": p.get("quantity", 0.0),
+                "ydQuantity": p.get("yd_quantity", p.get("quantity", 0.0)),
                 "costPrice": p.get("cost_price", 0.0),
                 "initialLast": p.get("initial_last", p.get("cost_price", 0.0)),
                 "initialPnl": p.get("initial_pnl", 0.0),
@@ -1300,17 +1314,112 @@ class ShioajiAdapter:
                     odd_lot_source_ts=source_ts
                 )
                 self.last_quote_time = source_ts
+                logger.info(f"Odd lot tick: {code} -> {close_p} (sourceTs: {source_ts})")
         except Exception as e:
-            logger.debug(f"Error parsing odd lot tick callback: {e}")
+            logger.error(f"Error parsing odd lot tick callback: {e}", exc_info=True)
+
+    def _subscribe_odd_lot(self, code: str):
+        """訂閱個股盤中零股 Tick（含 Solace 總主題限額控管）"""
+        if not self.api or not self.is_logged_in:
+            return
+        if code in self.subscribed_odd_codes:
+            return
+        if (len(self.subscribed_codes) + len(self.subscribed_odd_codes) + INDEX_TOPICS) >= MAX_SOLACE_TOPICS:
+            return
+        info = self.contracts_cache.get(code)
+        if info and "contract" in info:
+            try:
+                self.api.subscribe(
+                    info["contract"],
+                    quote_type=sj.QuoteType.Tick,
+                    version=sj.QuoteVersion.v1,
+                    intraday_odd=True
+                )
+                self.subscribed_odd_codes.add(code)
+                logger.info(f"Subscribed Odd Lot Tick for {code} (total odd topics: {len(self.subscribed_odd_codes)})")
+            except Exception as e:
+                logger.warning(f"Failed to subscribe Odd Lot Tick for {code}: {e}")
+
+    def _unsubscribe_odd_lot(self, code: str):
+        """退訂個股盤中零股 Tick"""
+        if not self.api or not self.is_logged_in:
+            return
+        if code not in self.subscribed_odd_codes:
+            return
+        info = self.contracts_cache.get(code)
+        if info and "contract" in info:
+            try:
+                self.api.unsubscribe(
+                    info["contract"],
+                    quote_type=sj.QuoteType.Tick,
+                    version=sj.QuoteVersion.v1,
+                    intraday_odd=True
+                )
+                logger.info(f"Unsubscribed Odd Lot Tick for {code}")
+            except Exception as e:
+                logger.debug(f"Failed to unsubscribe Odd Lot Tick for {code}: {e}")
+        self.subscribed_odd_codes.discard(code)
+
+    def _rebalance_odd_lot_subscriptions(self):
+        """
+        動態重平衡盤中零股訂閱：
+        優先順序 1: 真實持股庫存 (財神庫/財神簿)
+        優先順序 2: 前端當前瀏覽群組 (activeGroup)
+        優先順序 3: 其他自選股
+        嚴格保證 Quote + OddLot + Index 總主題數 <= MAX_SOLACE_TOPICS (195)
+        """
+        if not self.api or not self.is_logged_in:
+            return
+
+        pos_codes = {p["code"] for p in self.stock_positions_detail}
+        priority_codes: list[str] = []
+
+        # 1. 持股庫存最優先
+        for c in pos_codes:
+            if c in self.subscribed_codes and c not in priority_codes:
+                priority_codes.append(c)
+
+        # 2. 目前瀏覽群組次之
+        for c in self.active_group_codes:
+            if c in self.subscribed_codes and c not in priority_codes:
+                priority_codes.append(c)
+
+        # 3. 其他自選股票
+        for c in self.subscribed_codes:
+            if c not in priority_codes:
+                priority_codes.append(c)
+
+        # 計算可用零股配額 (Solace 總上限 195 減去 Quote 與指數主題)
+        available_odd_slots = max(0, MAX_SOLACE_TOPICS - len(self.subscribed_codes) - INDEX_TOPICS)
+        target_odd_codes = set(priority_codes[:available_odd_slots])
+
+        # 退訂不再需要零股推播的股票
+        to_unsub = self.subscribed_odd_codes - target_odd_codes
+        for code in to_unsub:
+            self._unsubscribe_odd_lot(code)
+
+        # 增訂新納入配額的零股
+        to_sub = target_odd_codes - self.subscribed_odd_codes
+        for code in to_sub:
+            self._subscribe_odd_lot(code)
+
+    def set_active_group_codes(self, codes: set[str]):
+        """更新前端目前瀏覽的群組個股，自動動態調整盤中零股訂閱分配"""
+        if self.active_group_codes == codes:
+            return
+        self.active_group_codes = set(codes)
+        logger.info(f"Active group codes updated: {len(self.active_group_codes)} codes. Rebalancing odd lot subscriptions...")
+        self._rebalance_odd_lot_subscriptions()
+
+    async def async_set_active_group_codes(self, codes: set[str]):
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(self._broker_executor, self.set_active_group_codes, codes)
 
     def subscribe_codes(self, codes: set[str]):
-        """增量訂閱新加入的股票"""
+        """增量訂閱新加入的股票（嚴格控管 Solace 主題總量不超過 195）"""
         to_add = codes - self.subscribed_codes
         if not to_add:
             return
-
-        if len(self.subscribed_codes) + len(to_add) > 200:
-            raise ValueError(f"Exceeds maximum 200 subscriptions (current: {len(self.subscribed_codes)}, requested: +{len(to_add)})")
 
         for code in to_add:
             info = self.contracts_cache.get(code)
@@ -1338,34 +1447,43 @@ class ShioajiAdapter:
         # 批次取得快照
         self._fetch_snapshots(list(to_add))
 
-        # 呼叫 Shioaji API 訂閱即時行情 (整股 Quote + 盤中零股 Tick)
+        # 呼叫 Shioaji API 訂閱即時行情 (嚴格限額控管)
         if self.api and self.is_logged_in:
             for code in to_add:
                 info = self.contracts_cache.get(code)
                 if info and "contract" in info:
-                    try:
-                        self.api.subscribe(
-                            info["contract"],
-                            quote_type=sj.QuoteType.Quote,
-                            version=sj.QuoteVersion.v1
-                        )
-                        self.subscribed_codes.add(code)
-                        logger.info(f"Subscribed Quote for {code}")
-                    except Exception as e:
-                        logger.error(f"Failed to subscribe Quote for {code}: {e}")
+                    # 若主題總數即將超標，優先釋放非關鍵零股主題以容納整股 Quote
+                    while (len(self.subscribed_codes) + len(self.subscribed_odd_codes) + INDEX_TOPICS) >= MAX_SOLACE_TOPICS:
+                        pos_codes = {p["code"] for p in self.stock_positions_detail}
+                        evictable = [c for c in self.subscribed_odd_codes if c not in pos_codes and c not in self.active_group_codes]
+                        if not evictable:
+                            evictable = [c for c in self.subscribed_odd_codes if c not in pos_codes]
+                        if not evictable and self.subscribed_odd_codes:
+                            evictable = list(self.subscribed_odd_codes)
+                        if evictable:
+                            self._unsubscribe_odd_lot(evictable[0])
+                        else:
+                            break
 
-                    try:
-                        self.api.subscribe(
-                            info["contract"],
-                            quote_type=sj.QuoteType.Tick,
-                            version=sj.QuoteVersion.v1,
-                            intraday_odd=True
-                        )
-                        logger.info(f"Subscribed Odd Lot Tick for {code}")
-                    except Exception as e:
-                        logger.warning(f"Failed to subscribe Odd Lot Tick for {code}: {e}")
+                    if (len(self.subscribed_codes) + len(self.subscribed_odd_codes) + INDEX_TOPICS) < MAX_SOLACE_TOPICS:
+                        try:
+                            self.api.subscribe(
+                                info["contract"],
+                                quote_type=sj.QuoteType.Quote,
+                                version=sj.QuoteVersion.v1
+                            )
+                            self.subscribed_codes.add(code)
+                            logger.info(f"Subscribed Quote for {code}")
+                        except Exception as e:
+                            logger.error(f"Failed to subscribe Quote for {code}: {e}")
+                    else:
+                        logger.warning(f"Solace topic limit reached ({MAX_SOLACE_TOPICS}), skipping Quote stream for {code}")
+                        self.subscribed_codes.add(code)
                 else:
                     self.subscribed_codes.add(code)
+
+            # 動態重新分配盤中零股訂閱配額
+            self._rebalance_odd_lot_subscriptions()
         else:
             for code in to_add:
                 self.subscribed_codes.add(code)
@@ -1373,6 +1491,8 @@ class ShioajiAdapter:
     def unsubscribe_codes(self, codes: set[str]):
         """取消訂閱不再使用的股票"""
         for code in codes:
+            if code in self.subscribed_odd_codes:
+                self._unsubscribe_odd_lot(code)
             if code in self.subscribed_codes:
                 info = self.contracts_cache.get(code)
                 if self.api and self.is_logged_in and info and "contract" in info:
@@ -1385,19 +1505,11 @@ class ShioajiAdapter:
                         logger.info(f"Unsubscribed Quote for {code}")
                     except Exception as e:
                         logger.error(f"Failed to unsubscribe Quote for {code}: {e}")
-
-                    try:
-                        self.api.unsubscribe(
-                            info["contract"],
-                            quote_type=sj.QuoteType.Tick,
-                            version=sj.QuoteVersion.v1,
-                            intraday_odd=True
-                        )
-                        logger.info(f"Unsubscribed Odd Lot Tick for {code}")
-                    except Exception as e:
-                        pass
                 self.subscribed_codes.discard(code)
                 quote_store.remove_quote(code)
+
+        # 釋放後重新平衡零股配額
+        self._rebalance_odd_lot_subscriptions()
 
     async def async_subscribe_codes(self, codes: set[str], timeout: float = 3.0):
         """非同步執行緒隔離訂閱行情與批次快照，絕不阻塞主 asyncio 事件迴圈"""
@@ -1551,6 +1663,9 @@ class ShioajiAdapter:
         """送出委託單至永豐金證券"""
         if not self.api or not self.is_logged_in:
             raise RuntimeError("Shioaji 尚未連線或未登入")
+
+        if int(quantity) <= 0:
+            raise ValueError("下單數量不合理（委託數量必須大於 0）")
 
         code = code.strip().upper()
         contract = None
@@ -1828,6 +1943,7 @@ class ShioajiAdapter:
         """取消特定委託單"""
         if not self.api or not self.is_logged_in:
             raise RuntimeError("Shioaji 尚未連線或未登入")
+
         account = getattr(self, "stock_account", None)
         if not account and hasattr(self.api, "stock_account"):
             account = self.api.stock_account
@@ -1858,6 +1974,7 @@ class ShioajiAdapter:
         """修改委託價格或減量"""
         if not self.api or not self.is_logged_in:
             raise RuntimeError("Shioaji 尚未連線或未登入")
+
         account = getattr(self, "stock_account", None)
         if not account and hasattr(self.api, "stock_account"):
             account = self.api.stock_account

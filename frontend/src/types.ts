@@ -128,6 +128,7 @@ export interface StockPosition {
   name: string;
   exchange?: string;
   quantity: number;
+  ydQuantity?: number;
   costPrice: number;
   initialLast?: number;
   initialPnl?: number;
@@ -459,5 +460,17 @@ export interface ForexRateResponse {
   source: string;
   updateTime: string;
 }
+
+export interface StockAiNote {
+  code: string;
+  name: string;
+  business: string;
+  customers: string;
+  ai_relation: string;
+  raw_text?: string;
+  updated_at?: string;
+  error?: string;
+}
+
 
 

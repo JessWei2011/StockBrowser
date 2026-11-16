@@ -160,6 +160,18 @@ async def init_db():
         await db.execute("""
         CREATE INDEX IF NOT EXISTS idx_smart_orders_status ON smart_orders(status);
         """)
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS stock_ai_notes (
+            code TEXT PRIMARY KEY,
+            name TEXT NOT NULL DEFAULT '',
+            business TEXT NOT NULL DEFAULT '',
+            customers TEXT NOT NULL DEFAULT '',
+            ai_relation TEXT NOT NULL DEFAULT '',
+            raw_text TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """)
         await db.commit()
 
         # 檢查是否需要預設種子資料
@@ -625,4 +637,44 @@ async def delete_smart_order(order_id: str) -> bool:
         cur = await db.execute("DELETE FROM smart_orders WHERE id = ?", (order_id,))
         await db.commit()
         return cur.rowcount > 0
+
+async def get_stock_ai_note(code: str) -> Optional[dict]:
+    async with get_db_connection() as db:
+        async with db.execute("SELECT * FROM stock_ai_notes WHERE code = ?", (code,)) as cur:
+            row = await cur.fetchone()
+            if row:
+                return dict(row)
+            return None
+
+async def get_all_stock_ai_notes() -> dict[str, dict]:
+    async with get_db_connection() as db:
+        async with db.execute("SELECT * FROM stock_ai_notes") as cur:
+            rows = await cur.fetchall()
+            return {row["code"]: dict(row) for row in rows}
+
+async def save_stock_ai_note(code: str, name: str, business: str, customers: str, ai_relation: str, raw_text: str = "") -> dict:
+    ts = now_iso()
+    async with get_db_connection() as db:
+        await db.execute("""
+        INSERT INTO stock_ai_notes (code, name, business, customers, ai_relation, raw_text, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(code) DO UPDATE SET
+            name = CASE WHEN excluded.name != '' THEN excluded.name ELSE stock_ai_notes.name END,
+            business = excluded.business,
+            customers = excluded.customers,
+            ai_relation = excluded.ai_relation,
+            raw_text = excluded.raw_text,
+            updated_at = excluded.updated_at
+        """, (code, name, business, customers, ai_relation, raw_text, ts, ts))
+        await db.commit()
+    return {
+        "code": code,
+        "name": name,
+        "business": business,
+        "customers": customers,
+        "ai_relation": ai_relation,
+        "raw_text": raw_text,
+        "updated_at": ts
+    }
+
 

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { QuoteState, WatchlistItem, StockAnnouncement, StockMaSummary } from '../types';
 import { filterActiveAnnouncements } from '../utils/announcements';
 import { getRealtimeMaIndicators } from '../utils/maUtils';
+import { StockNotePopover } from './StockNotePopover';
 
 interface QuoteTableProps {
   items: WatchlistItem[];
@@ -31,6 +32,21 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
 }) => {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const [activeNoteTarget, setActiveNoteTarget] = useState<{
+    code: string;
+    name: string;
+    rect: DOMRect | null;
+  } | null>(null);
+
+  const handleOpenNote = (e: React.MouseEvent<HTMLButtonElement>, code: string, name: string) => {
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (activeNoteTarget && activeNoteTarget.code === code) {
+      setActiveNoteTarget(null);
+    } else {
+      setActiveNoteTarget({ code, name, rect });
+    }
+  };
 
   const formatPrice = (val: number | null | undefined, isSim?: boolean): React.ReactNode => {
     if (val === null || val === undefined || isNaN(val) || val <= 0) return '—';
@@ -394,6 +410,14 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                               >
                                 20MA
                               </span>
+                              <button
+                                type="button"
+                                className={`stock-note-btn ${activeNoteTarget?.code === item.code ? 'active' : ''}`}
+                                title={`查看 ${item.name || item.code} AI 產業筆記 (業務/客戶/AI交會)`}
+                                onClick={(e) => handleOpenNote(e, item.code, item.name || q?.name || '')}
+                              >
+                                📝
+                              </button>
                             </div>
                           ) : isWealthGroup ? (
                             <span className="color-neutral ma-empty">—</span>
@@ -433,6 +457,16 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
           )}
         </tbody>
       </table>
+
+      {activeNoteTarget && (
+        <StockNotePopover
+          code={activeNoteTarget.code}
+          name={activeNoteTarget.name}
+          isOpen={Boolean(activeNoteTarget)}
+          onClose={() => setActiveNoteTarget(null)}
+          targetRect={activeNoteTarget.rect}
+        />
+      )}
     </div>
   );
 };

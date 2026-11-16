@@ -65,7 +65,7 @@ export const AssistantDrawer: React.FC<AssistantDrawerProps> = ({
   const [orderType, setOrderType] = useState<'limit' | 'market'>('limit');
   const [stockCode, setStockCode] = useState(initialOrderCode || (positions[0]?.code || '2330'));
   const [orderPrice, setOrderPrice] = useState<string>('');
-  const [orderQty, setOrderQty] = useState<number>(1);
+  const [orderQty, setOrderQty] = useState<number | ''>(1);
   const [orderNotice, setOrderNotice] = useState<string | null>(null);
 
   // 當 initialOrderCode 變更時同步更新
@@ -128,7 +128,8 @@ export const AssistantDrawer: React.FC<AssistantDrawerProps> = ({
 
   // 試算金額 (含手續費 0.1425% 與賣出證交稅 0.3%/0.1%)
   const numPrice = parseFloat(orderPrice) || (lastPrice && lastPrice > 0 ? lastPrice : 0);
-  const totalShares = orderUnit === 'lot' ? orderQty * 1000 : orderQty;
+  const numericQty = typeof orderQty === 'number' ? orderQty : (parseInt(String(orderQty), 10) || 0);
+  const totalShares = orderUnit === 'lot' ? numericQty * 1000 : numericQty;
   const estimatedAmount = Math.round(numPrice * totalShares);
   const estimatedFee = Math.max(20, Math.round(estimatedAmount * 0.001425));
   const isEtf = stockCode.startsWith('00');
@@ -140,7 +141,14 @@ export const AssistantDrawer: React.FC<AssistantDrawerProps> = ({
 
   const handleSubmitOrder = (e: React.FormEvent) => {
     e.preventDefault();
-    setOrderNotice(`【委託雛形展示】已建立「${orderAction === 'buy' ? '買進' : '賣出'}」${stockCode} 價格: ${orderPrice || '市價'} 數量: ${orderQty} ${orderUnit === 'lot' ? '張' : '股'}，預估款項: ${estimatedTotal.toLocaleString()} 元。待後續下單 API 串接完成。`);
+    if (numericQty <= 0) {
+      setOrderNotice('下單數量不合理（數量不可為 0），禁止下單！請輸入大於 0 的數量。');
+      setTimeout(() => {
+        setOrderNotice(null);
+      }, 3500);
+      return;
+    }
+    setOrderNotice(`【委託雛形展示】已建立「${orderAction === 'buy' ? '買進' : '賣出'}」${stockCode} 價格: ${orderPrice || '市價'} 數量: ${numericQty} ${orderUnit === 'lot' ? '張' : '股'}，預估款項: ${estimatedTotal.toLocaleString()} 元。待後續下單 API 串接完成。`);
     setTimeout(() => {
       setOrderNotice(null);
     }, 4500);
@@ -233,6 +241,17 @@ export const AssistantDrawer: React.FC<AssistantDrawerProps> = ({
                   </div>
                 ) : (
                   <>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '6px 10px' }}>
+                      <button
+                        type="button"
+                        className="vault-sort-pill vault-detail-open-btn"
+                        onClick={() => window.open('?view=vault-detail', '_blank')}
+                        title="以獨立新分頁開啟完整證券庫存損益試算表"
+                        style={{ fontSize: '12px', padding: '4px 10px' }}
+                      >
+                        📋 損益試算 ↗
+                      </button>
+                    </div>
                     <div className="sidebar-vault-col-header">
                       <span className="col-h-stock">商品</span>
                       <span className="col-h-qty">股數</span>
@@ -550,21 +569,36 @@ export const AssistantDrawer: React.FC<AssistantDrawerProps> = ({
                     <button
                       type="button"
                       className="btn-step"
-                      onClick={() => setOrderQty((q) => Math.max(1, q - 1))}
+                      onClick={() => setOrderQty((q) => {
+                        const cur = typeof q === 'number' ? q : (parseInt(String(q), 10) || 0);
+                        return Math.max(0, cur - 1);
+                      })}
                     >
                       -
                     </button>
                     <input
                       type="number"
-                      min="1"
+                      min="0"
                       className="form-input qty-input"
                       value={orderQty}
-                      onChange={(e) => setOrderQty(Math.max(1, parseInt(e.target.value) || 1))}
+                      placeholder="0"
+                      onChange={(e) => {
+                        const val = e.target.value.trim();
+                        if (val === '') {
+                          setOrderQty('');
+                        } else {
+                          const parsed = parseInt(val, 10);
+                          setOrderQty(isNaN(parsed) ? '' : Math.max(0, parsed));
+                        }
+                      }}
                     />
                     <button
                       type="button"
                       className="btn-step"
-                      onClick={() => setOrderQty((q) => q + 1)}
+                      onClick={() => setOrderQty((q) => {
+                        const cur = typeof q === 'number' ? q : (parseInt(String(q), 10) || 0);
+                        return cur + 1;
+                      })}
                     >
                       +
                     </button>

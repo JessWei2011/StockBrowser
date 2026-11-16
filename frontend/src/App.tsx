@@ -12,6 +12,7 @@ import {
   refreshSystemQuotes,
   fetchAnnouncements,
   fetchStockIndicators,
+  setActiveGroup,
 } from './services/api';
 import { wsClient } from './services/websocket';
 import { Header } from './components/Header';
@@ -27,6 +28,7 @@ import { InvestmentCalendarModal } from './components/InvestmentCalendarModal';
 import { GlobalIndicesModal } from './components/GlobalIndicesModal';
 import { FinancialNewsModal } from './components/FinancialNewsModal';
 import { UsdTwdChartModal } from './components/UsdTwdChartModal';
+import { VaultDetailView } from './components/VaultDetailView';
 import { MobileNavBar, type MobileNavTab } from './components/MobileNavBar';
 import { fetchForexUsdTwd } from './services/api';
 import type { ForexRateResponse } from './types';
@@ -69,11 +71,17 @@ export const App: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     return params.get('chart') || params.get('stock') || null;
   });
+  // 支援獨立新分頁直接開啟證券庫存損益試算表 (?view=vault-detail 或 ?vault=detail)
+  const [isStandaloneVault, setIsStandaloneVault] = useState<boolean>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('view') === 'vault-detail' || params.get('vault') === 'detail';
+  });
 
   useEffect(() => {
     const handlePopState = () => {
       const params = new URLSearchParams(window.location.search);
       setStandaloneChartCode(params.get('chart') || params.get('stock') || null);
+      setIsStandaloneVault(params.get('view') === 'vault-detail' || params.get('vault') === 'detail');
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -244,6 +252,12 @@ export const App: React.FC = () => {
     inFlightBootstrapRef.current = promise;
     return promise;
   }, []);
+
+  useEffect(() => {
+    if (activeGroupId) {
+      setActiveGroup(activeGroupId);
+    }
+  }, [activeGroupId]);
 
   useEffect(() => {
     loadBootstrap();
@@ -699,6 +713,26 @@ export const App: React.FC = () => {
           currentPrice={currentPrice}
           changePercent={changePercent}
           initialTab={initialTab}
+        />
+      </div>
+    );
+  }
+
+  // 獨立新分頁全螢幕證券庫存損益試算表渲染 (對齊 1.png)
+  if (isStandaloneVault) {
+    return (
+      <div className="standalone-vault-app" data-theme={theme}>
+        <VaultDetailView
+          positions={positions}
+          quotes={quotes}
+          wealthSummary={wealthSummary}
+          dirtyCodes={dirtyCodes}
+          theme={theme}
+          onToggleTheme={handleToggleTheme}
+          onRefresh={loadBootstrap}
+          onOpenChart={(code) => {
+            window.open(`?chart=${code}`, '_blank');
+          }}
         />
       </div>
     );

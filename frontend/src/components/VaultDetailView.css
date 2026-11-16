@@ -1,0 +1,393 @@
+/* 證券庫存損益試算表全螢幕獨立分頁樣式 (對齊 1.png) */
+
+.vault-detail-page {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--bg-primary, #111827);
+  color: var(--text-primary, #f3f4f6);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  user-select: none;
+}
+
+/* 頂部導覽列 */
+.vault-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 12px 24px;
+  background-color: var(--bg-secondary, #1f2937);
+  border-bottom: 1px solid var(--border-color, #374151);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
+.vault-header-left {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.vault-header-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.vault-header-icon {
+  font-size: 24px;
+}
+
+.vault-header-title-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.vault-header-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary, #f9fafb);
+  letter-spacing: 0.5px;
+}
+
+.vault-header-subtitle {
+  font-size: 11px;
+  color: var(--text-muted, #9ca3af);
+}
+
+/* 總結算膠囊區 */
+.vault-summary-capsules {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.summary-capsule {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color, #374151);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.capsule-label {
+  color: var(--text-muted, #9ca3af);
+  font-size: 12px;
+}
+
+.capsule-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 右側操作區 */
+.vault-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.vault-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-icon {
+  position: absolute;
+  left: 10px;
+  font-size: 13px;
+  color: var(--text-muted, #9ca3af);
+  pointer-events: none;
+}
+
+.vault-search-input {
+  padding: 6px 30px 6px 32px;
+  background-color: var(--bg-input, #111827);
+  border: 1px solid var(--border-color, #4b5563);
+  border-radius: 6px;
+  color: var(--text-primary, #f3f4f6);
+  font-size: 13px;
+  width: 170px;
+  outline: none;
+  transition: width 0.2s, border-color 0.2s;
+}
+
+.vault-search-input:focus {
+  width: 220px;
+  border-color: #3b82f6;
+}
+
+.btn-search-clear {
+  position: absolute;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--text-muted, #9ca3af);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px;
+}
+
+.btn-vault-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background-color: var(--bg-button, #374151);
+  color: var(--text-primary, #f3f4f6);
+  border: 1px solid var(--border-color, #4b5563);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-vault-action:hover {
+  background-color: var(--bg-button-hover, #4b5563);
+  border-color: #6b7280;
+}
+
+.btn-vault-action.refreshing .action-icon {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.btn-icon-only {
+  padding: 6px 10px;
+  font-size: 15px;
+}
+
+.btn-close-tab {
+  background-color: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
+.btn-close-tab:hover {
+  background-color: rgba(239, 68, 68, 0.3);
+  border-color: #ef4444;
+  color: #ffffff;
+}
+
+/* 表格主體區域 */
+.vault-detail-content {
+  flex: 1;
+  overflow: hidden;
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.vault-table-container {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid var(--border-color, #374151);
+  border-radius: 8px;
+  background-color: var(--bg-secondary, #1f2937);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.vault-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+/* 表頭 */
+.vault-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background-color: #1a2230;
+}
+
+[data-theme='light'] .vault-table thead {
+  background-color: #f3f4f6;
+}
+
+.vault-table th {
+  padding: 14px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted, #9ca3af);
+  border-bottom: 1px solid var(--border-color, #374151);
+  user-select: none;
+}
+
+.vault-table th.sortable {
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.vault-table th.sortable:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary, #f9fafb);
+}
+
+.th-content {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.th-right {
+  justify-content: flex-end;
+}
+
+.sort-icon-neutral {
+  font-size: 11px;
+  opacity: 0.35;
+}
+
+.sort-icon-active {
+  font-size: 11px;
+  color: #3b82f6;
+}
+
+/* 表格資料行 */
+.vault-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-variant-numeric: tabular-nums;
+  transition: background-color 0.2s;
+}
+
+.vault-row {
+  cursor: pointer;
+}
+
+.vault-row:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.vault-row.row-flash {
+  background-color: rgba(59, 130, 246, 0.18) !important;
+}
+
+/* 欄位對齊與樣式 */
+.col-product {
+  text-align: left;
+}
+
+.product-cell-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.product-code {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary, #f9fafb);
+  letter-spacing: 0.5px;
+}
+
+.product-name {
+  font-size: 14px;
+  color: var(--text-primary, #e5e7eb);
+}
+
+.otc-badge {
+  font-size: 11px;
+  padding: 1px 4px;
+  background-color: #8b5cf6;
+  color: #ffffff;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.col-num {
+  text-align: right;
+}
+
+.col-last-price .price-value {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.col-balance {
+  color: var(--text-primary, #e5e7eb);
+}
+
+.col-cost-price {
+  color: var(--text-muted, #9ca3af);
+}
+
+.col-cost {
+  color: var(--text-primary, #f3f4f6);
+}
+
+.col-pnl .pnl-value,
+.col-roi .roi-value {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* 表尾合計列 */
+.vault-table tfoot {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  background-color: #1a2230;
+  border-top: 2px solid var(--border-color, #4b5563);
+}
+
+[data-theme='light'] .vault-table tfoot {
+  background-color: #f3f4f6;
+  border-top: 2px solid #d1d5db;
+}
+
+.vault-total-row td {
+  padding: 14px 16px;
+  font-size: 14px;
+  border-top: 1px solid var(--border-color, #4b5563);
+}
+
+.total-title {
+  font-weight: 700;
+  color: var(--text-primary, #f9fafb);
+}
+
+.total-pnl-val,
+.total-roi-val {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.vault-empty-cell {
+  text-align: center;
+  padding: 60px 16px;
+  color: var(--text-muted, #9ca3af);
+  font-size: 15px;
+}
+
+/* 台股強對比色彩：紅漲綠跌 (獲利紅色、虧損綠色) */
+.text-up {
+  color: #ef4444 !important;
+}
+
+.text-down {
+  color: #10b981 !important;
+}
+
+.text-neutral {
+  color: #9ca3af !important;
+}

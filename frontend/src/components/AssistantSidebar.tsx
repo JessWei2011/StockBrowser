@@ -151,7 +151,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   const [orderType, setOrderType] = useState<'limit' | 'market'>('limit');
   const [stockCode, setStockCode] = useState(initialOrderCode || (positions[0]?.code || '2330'));
   const [orderPrice, setOrderPrice] = useState<string>('');
-  const [orderQty, setOrderQty] = useState<number>(1);
+  const [orderQty, setOrderQty] = useState<number | ''>(1);
   const [orderNotice, setOrderNotice] = useState<string | null>(null);
   const [orderNoticeType, setOrderNoticeType] = useState<'success' | 'error' | 'info'>('info');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -172,7 +172,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
   // 改量彈窗狀態
   const [editingQtyOrder, setEditingQtyOrder] = useState<OrderItem | null>(null);
-  const [newQtyInput, setNewQtyInput] = useState<number>(1);
+  const [newQtyInput, setNewQtyInput] = useState<number | ''>(1);
   const [isUpdatingQty, setIsUpdatingQty] = useState(false);
 
   // 撤單確認狀態
@@ -415,7 +415,8 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
   // 試算金額 (含手續費 0.1425% 與賣出證交稅 0.3%/0.1%)
   const numPrice = parseFloat(effectivePrice) || (lastPrice && lastPrice > 0 ? lastPrice : 0);
-  const totalShares = effectiveUnit === 'lot' ? orderQty * 1000 : orderQty;
+  const numericQty = typeof orderQty === 'number' ? orderQty : (parseInt(String(orderQty), 10) || 0);
+  const totalShares = effectiveUnit === 'lot' ? numericQty * 1000 : numericQty;
   const estimatedAmount = Math.round(numPrice * totalShares);
   const estimatedFee = Math.max(20, Math.round(estimatedAmount * 0.001425));
   const isEtf = stockCode.startsWith('00');
@@ -445,9 +446,9 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
         : '限價委託請輸入大於 0 的價格');
       return;
     }
-    if (orderQty <= 0) {
+    if (numericQty <= 0) {
       setOrderNoticeType('error');
-      setOrderNotice('委託數量必須大於 0');
+      setOrderNotice('下單數量不合理（數量不可為 0），禁止下單！請輸入大於 0 的有效委託數量。');
       return;
     }
 
@@ -462,6 +463,11 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     if (isHighValueBuy && !isPinCorrect) {
       return;
     }
+    if (numericQty <= 0) {
+      setOrderNoticeType('error');
+      setOrderNotice('下單數量不合理（數量不可為 0），禁止下單！');
+      return;
+    }
     setIsConfirmModalOpen(false);
     const targetPrice = effectivePriceType === 'market' ? 0 : (parseFloat(effectivePrice) || 0);
 
@@ -470,13 +476,13 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     const lotLabel = orderSession === 'after_hours'
       ? (afterHoursLot === 'Fixing' ? '盤後定價' : '盤後零股')
       : (orderUnit === 'lot' ? '整股' : '零股');
-    setOrderNotice(`正在送出【${orderAction === 'buy' ? '買進' : '賣出'}】${lotLabel}委託至永豐金證券 (${stockCode} ${orderQty}${effectiveUnit === 'lot' ? '張' : '股'})...`);
+    setOrderNotice(`正在送出【${orderAction === 'buy' ? '買進' : '賣出'}】${lotLabel}委託至永豐金證券 (${stockCode} ${numericQty}${effectiveUnit === 'lot' ? '張' : '股'})...`);
 
     try {
       const res = await submitOrder({
         code: stockCode.trim(),
         action: orderAction,
-        quantity: orderQty,
+        quantity: numericQty,
         unit: effectiveUnit,
         price_type: effectivePriceType,
         price: targetPrice,
@@ -569,7 +575,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
   const handleConfirmUpdateQty = async () => {
     if (!editingQtyOrder) return;
-    const q = newQtyInput;
+    const q = typeof newQtyInput === 'number' ? newQtyInput : (parseInt(String(newQtyInput), 10) || 0);
     if (isNaN(q) || q <= 0 || q >= editingQtyOrder.qty) {
       alert(`新數量必須大於 0 且小於目前剩餘數量 ${editingQtyOrder.qty}`);
       return;
@@ -756,6 +762,14 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                       )}
                     </span>
                     <div className="vault-sort-btn-group">
+                      <button
+                        type="button"
+                        className="vault-sort-pill vault-detail-open-btn"
+                        onClick={() => window.open('?view=vault-detail', '_blank')}
+                        title="以獨立新分頁開啟完整證券庫存損益試算表 (對齊永豐明細)"
+                      >
+                        📋 損益試算 ↗
+                      </button>
                       <button
                         type="button"
                         className={`vault-sort-pill ${vaultSortMode === 'custom' ? 'active' : ''}`}
@@ -1293,7 +1307,13 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                       className="btn-fill-holding"
                       onClick={() => {
                         if (effectiveUnit === 'lot') {
-                          setOrderQty(Math.max(1, Math.floor(currentPosition.quantity / 1000)));
+                          const lots = Math.floor(currentPosition.quantity / 1000);
+                          if (lots > 0) {
+                            setOrderQty(lots);
+                          } else {
+                            setOrderUnit('share');
+                            setOrderQty(Math.round(currentPosition.quantity));
+                          }
                         } else {
                           const oddPart = currentPosition.quantity % 1000;
                           setOrderQty(oddPart > 0 ? oddPart : Math.round(currentPosition.quantity));
@@ -1309,21 +1329,36 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                   <button
                     type="button"
                     className="btn-step"
-                    onClick={() => setOrderQty((q) => Math.max(1, q - 1))}
+                    onClick={() => setOrderQty((q) => {
+                      const cur = typeof q === 'number' ? q : (parseInt(String(q), 10) || 0);
+                      return Math.max(0, cur - 1);
+                    })}
                   >
                     -
                   </button>
                   <input
                     type="number"
-                    min="1"
+                    min="0"
                     className="form-input qty-input"
                     value={orderQty}
-                    onChange={(e) => setOrderQty(Math.max(1, parseInt(e.target.value) || 1))}
+                    placeholder="0"
+                    onChange={(e) => {
+                      const val = e.target.value.trim();
+                      if (val === '') {
+                        setOrderQty('');
+                      } else {
+                        const parsed = parseInt(val, 10);
+                        setOrderQty(isNaN(parsed) ? '' : Math.max(0, parsed));
+                      }
+                    }}
                   />
                   <button
                     type="button"
                     className="btn-step"
-                    onClick={() => setOrderQty((q) => q + 1)}
+                    onClick={() => setOrderQty((q) => {
+                      const cur = typeof q === 'number' ? q : (parseInt(String(q), 10) || 0);
+                      return cur + 1;
+                    })}
                   >
                     +
                   </button>
@@ -1352,7 +1387,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                 </div>
                 {orderAction === 'sell' && (
                   <div className="calc-row">
-                    <span>預估證交稅 ({isEtf ? '0.1%' : '0.3%'})</span>
+                    <span>預估證券交易稅 ({isEtf ? '0.1%' : '0.3%'})</span>
                     <span>{estimatedTax.toLocaleString()} 元</span>
                   </div>
                 )}
@@ -1367,11 +1402,13 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
               {/* 7. 送出委託按鈕 */}
               <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || numericQty <= 0}
                 className={`btn-order-submit ${orderAction === 'buy' ? 'submit-buy' : 'submit-sell'} ${isSubmitting ? 'submitting' : ''}`}
               >
                 {isSubmitting ? (
                   <span>⏳ 正在送出委託至券商...</span>
+                ) : numericQty <= 0 ? (
+                  <span>⚠️ 下單數量不可為 0 (請輸入有效數量)</span>
                 ) : (
                   orderAction === 'buy'
                     ? `🔴 確認${orderSession === 'after_hours' ? '【盤後買進】' : '買進'}【${stockCode || '---'}】(扣款 NT$ ${estimatedTotal.toLocaleString()})`
@@ -1841,27 +1878,39 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                                 <button
                                   type="button"
                                   className="btn-step"
-                                  onClick={() => setNewQtyInput((q) => Math.max(1, q - 1))}
-                                  disabled={newQtyInput <= 1}
+                                  onClick={() => setNewQtyInput((q) => {
+                                    const cur = typeof q === 'number' ? q : (parseInt(String(q), 10) || 0);
+                                    return Math.max(0, cur - 1);
+                                  })}
+                                  disabled={(typeof newQtyInput === 'number' ? newQtyInput : (parseInt(String(newQtyInput), 10) || 0)) <= 0}
                                 >
                                   -
                                 </button>
                                 <input
                                   type="number"
-                                  min="1"
+                                  min="0"
                                   max={maxAllowedQty}
                                   className="form-input qty-input"
                                   value={newQtyInput}
+                                  placeholder="0"
                                   onChange={(e) => {
-                                    const val = parseInt(e.target.value) || 1;
-                                    setNewQtyInput(Math.max(1, Math.min(maxAllowedQty, val)));
+                                    const val = e.target.value.trim();
+                                    if (val === '') {
+                                      setNewQtyInput('');
+                                    } else {
+                                      const parsed = parseInt(val, 10);
+                                      setNewQtyInput(isNaN(parsed) ? '' : Math.max(0, Math.min(maxAllowedQty, parsed)));
+                                    }
                                   }}
                                 />
                                 <button
                                   type="button"
                                   className="btn-step"
-                                  onClick={() => setNewQtyInput((q) => Math.min(maxAllowedQty, q + 1))}
-                                  disabled={newQtyInput >= maxAllowedQty}
+                                  onClick={() => setNewQtyInput((q) => {
+                                    const cur = typeof q === 'number' ? q : (parseInt(String(q), 10) || 0);
+                                    return Math.min(maxAllowedQty, cur + 1);
+                                  })}
+                                  disabled={(typeof newQtyInput === 'number' ? newQtyInput : (parseInt(String(newQtyInput), 10) || 0)) >= maxAllowedQty}
                                 >
                                   +
                                 </button>
@@ -1903,7 +1952,12 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                               </div>
 
                               <div className="reduction-preview">
-                                本次將自市場減少委託：<strong>{(editingQtyOrder.qty - newQtyInput).toLocaleString()}</strong> {unitStr}（變更後剩餘 {newQtyInput.toLocaleString()} {unitStr}）
+                                {(() => {
+                                  const curQ = typeof newQtyInput === 'number' ? newQtyInput : (parseInt(String(newQtyInput), 10) || 0);
+                                  return (
+                                    <>本次將自市場減少委託：<strong>{(editingQtyOrder.qty - curQ).toLocaleString()}</strong> {unitStr}（變更後剩餘 {curQ.toLocaleString()} {unitStr}）</>
+                                  );
+                                })()}
                               </div>
                             </div>
                           )}
@@ -1921,7 +1975,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                             <button
                               type="button"
                               className="btn-modal-confirm confirm-warning"
-                              disabled={isUpdatingQty || newQtyInput >= editingQtyOrder.qty || newQtyInput <= 0}
+                              disabled={isUpdatingQty || (typeof newQtyInput === 'number' ? newQtyInput : (parseInt(String(newQtyInput), 10) || 0)) >= editingQtyOrder.qty || (typeof newQtyInput === 'number' ? newQtyInput : (parseInt(String(newQtyInput), 10) || 0)) <= 0}
                               onClick={handleConfirmUpdateQty}
                             >
                               {isUpdatingQty ? '減量處理中...' : '確認減少數量'}
@@ -2007,7 +2061,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                       <div className="confirm-detail-row">
                         <span className="detail-label">委託數量</span>
                         <span className="detail-value qty-highlight">
-                          <strong>{orderQty.toLocaleString()}</strong> {effectiveUnit === 'lot' ? '張 (1,000股)' : '股'}
+                          <strong>{numericQty.toLocaleString()}</strong> {effectiveUnit === 'lot' ? '張 (1,000股)' : '股'}
                         </span>
                       </div>
                       <div className={`confirm-detail-row total-row ${isHighValueBuy ? 'total-row-high-value' : ''}`}>

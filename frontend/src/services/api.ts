@@ -91,6 +91,12 @@ export async function reorderGroups(groupIds: string[]): Promise<void> {
   if (!res.ok) throw new Error('Failed to reorder groups');
 }
 
+export async function setActiveGroup(groupId: string): Promise<void> {
+  await fetchWithTimeout(`${API_BASE}/api/v1/active-group/${encodeURIComponent(groupId)}`, {
+    method: 'POST',
+  }, 3000).catch(() => {});
+}
+
 export async function deleteGroup(groupId: string): Promise<void> {
   const res = await fetchWithTimeout(`${API_BASE}/api/v1/groups/${groupId}`, {
     method: 'DELETE',
@@ -360,3 +366,39 @@ export async function refreshFinancialNews(): Promise<import('../types').Financi
   if (!res.ok) throw new Error('重新整理財經新聞失敗');
   return res.json();
 }
+
+export async function fetchAllStockAiNotes(): Promise<Record<string, import('../types').StockAiNote>> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/stocks/ai-notes`);
+  if (!res.ok) throw new Error('無法取得個股 AI 筆記清單');
+  return res.json();
+}
+
+export async function fetchStockAiNote(code: string, name?: string): Promise<import('../types').StockAiNote> {
+  const query = name ? `?name=${encodeURIComponent(name)}` : '';
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/stocks/${encodeURIComponent(code)}/ai-note${query}`);
+  if (!res.ok) throw new Error(`無法取得 ${code} AI 筆記`);
+  return res.json();
+}
+
+export async function regenerateStockAiNote(code: string, name?: string): Promise<import('../types').StockAiNote> {
+  const query = name ? `?name=${encodeURIComponent(name)}` : '';
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/stocks/${encodeURIComponent(code)}/ai-note/generate${query}`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(`重新生成 ${code} AI 筆記失敗`);
+  return res.json();
+}
+
+export async function updateStockAiNote(
+  code: string,
+  data: { business: string; customers: string; ai_relation: string; name?: string }
+): Promise<import('../types').StockAiNote> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/stocks/${encodeURIComponent(code)}/ai-note`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`更新 ${code} AI 筆記失敗`);
+  return res.json();
+}
+
