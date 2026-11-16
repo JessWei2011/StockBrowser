@@ -184,6 +184,11 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
       setIsLoadingOrders(true);
       const data = await fetchOrders();
       setOrders(data);
+      // 自動向後端確保所有進行中掛單的股票都有最高優先即時整股與零股推播
+      const activeCodes = data.filter((o) => o.canCancel).map((o) => o.code);
+      for (const c of activeCodes) {
+        setActiveOrderStock(c);
+      }
     } catch (err: any) {
       console.error('Failed to fetch orders:', err);
     } finally {
@@ -1610,6 +1615,49 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                       const unitStr = isOdd ? '股' : '張';
                       const hasModifiedPrice = !!(order.modifiedPrice && order.modifiedPrice !== order.price);
 
+                      // 掛單即時行情動態資訊計算 (現價、零股價、漲跌幅)
+                      const orderQuote = quotes[order.code];
+                      const qPrevClose = orderQuote?.previousClose;
+                      const hasQLast = typeof orderQuote?.last === 'number' && orderQuote.last > 0;
+                      const hasQOdd = typeof orderQuote?.oddLotLast === 'number' && orderQuote.oddLotLast > 0;
+
+                      const qLastStr = hasQLast ? orderQuote!.last!.toFixed(2) : '--';
+                      const qOddStr = hasQOdd ? orderQuote!.oddLotLast!.toFixed(2) : '--';
+
+                      let qLastClass = 'price-flat';
+                      if (hasQLast && qPrevClose && qPrevClose > 0) {
+                        if (orderQuote!.last! > qPrevClose) qLastClass = 'price-up';
+                        else if (orderQuote!.last! < qPrevClose) qLastClass = 'price-down';
+                      }
+
+                      let qOddClass = 'price-flat';
+                      if (hasQOdd && qPrevClose && qPrevClose > 0) {
+                        if (orderQuote!.oddLotLast! > qPrevClose) qOddClass = 'price-up';
+                        else if (orderQuote!.oddLotLast! < qPrevClose) qOddClass = 'price-down';
+                      } else if (hasQOdd && hasQLast) {
+                        if (orderQuote!.oddLotLast! > orderQuote!.last!) qOddClass = 'price-up';
+                        else if (orderQuote!.oddLotLast! < orderQuote!.last!) qOddClass = 'price-down';
+                      }
+
+                      let qChangeClass = 'price-flat';
+                      let qChangeStr = '--';
+                      const qRawChange = orderQuote?.change ?? (hasQLast && qPrevClose && qPrevClose > 0 ? orderQuote!.last! - qPrevClose : null);
+                      const qRawPct = orderQuote?.changePercent ?? (qRawChange !== null && qPrevClose && qPrevClose > 0 ? (qRawChange / qPrevClose) * 100 : null);
+
+                      if (qRawChange !== null && qRawChange !== undefined) {
+                        const pctStr = qRawPct !== null && qRawPct !== undefined ? `${Math.abs(qRawPct).toFixed(2)}%` : '';
+                        if (qRawChange > 0) {
+                          qChangeClass = 'price-up';
+                          qChangeStr = `▲+${qRawChange.toFixed(2)}${pctStr ? ` (+${pctStr})` : ''}`;
+                        } else if (qRawChange < 0) {
+                          qChangeClass = 'price-down';
+                          qChangeStr = `▼-${Math.abs(qRawChange).toFixed(2)}${pctStr ? ` (-${pctStr})` : ''}`;
+                        } else {
+                          qChangeClass = 'price-flat';
+                          qChangeStr = `0.00${pctStr ? ` (0.00%)` : ''}`;
+                        }
+                      }
+
                       return (
                         <div
                           key={order.id}
@@ -1631,6 +1679,23 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                                   ? '盤中零股'
                                   : '現股整張'}
                               </span>
+
+                              {/* 如果還在掛單中，在文字框後方顯示即時股價資訊 (現價、零股價、漲跌幅) */}
+                              {order.canCancel && (
+                                <div className="order-live-quote-chips" title={`【${order.code} ${order.name}】市場即時行情`}>
+                                  <span className={`order-quote-chip ${qLastClass}`}>
+                                    <span className="q-label">現價</span>
+                                    <span className="q-val">{qLastStr}</span>
+                                  </span>
+                                  <span className={`order-quote-chip ${qOddClass}`}>
+                                    <span className="q-label">零股</span>
+                                    <span className="q-val">{qOddStr}</span>
+                                  </span>
+                                  <span className={`order-quote-chip ${qChangeClass}`}>
+                                    <span className="q-val">{qChangeStr}</span>
+                                  </span>
+                                </div>
+                              )}
                             </div>
                             <div className="order-status-badge">
                               <span className={`status-pill pill-${order.status.toLowerCase()}`}>

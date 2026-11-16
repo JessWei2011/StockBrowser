@@ -4860,7 +4860,82 @@ button, input, select, textarea {
 .order-card-stock {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
+}
+
+/* 委託單頂部掛單即時行情晶片列 (現價、零股價、漲跌幅) */
+.order-live-quote-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: middle;
+}
+
+.order-quote-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-size: 11px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bg-hover, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+[data-theme='light'] .order-quote-chip {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+[data-theme='dark'] .order-quote-chip {
+  background: #151d28;
+  border-color: #243042;
+}
+
+.order-quote-chip .q-label {
+  font-size: 10px;
+  color: var(--text-muted, #94a3b8);
+  font-weight: 400;
+}
+
+[data-theme='light'] .order-quote-chip .q-label {
+  color: #475569;
+}
+
+.order-quote-chip .q-val {
+  font-size: 11px;
+  font-weight: 500;
+  font-feature-settings: 'tnum';
+  letter-spacing: -0.2px;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang TC", "蘋方-繁", "Heiti TC", "Microsoft JhengHei", "微軟正黑體", sans-serif;
+}
+
+/* 台股紅漲綠跌高對比 */
+.order-quote-chip.price-up .q-val {
+  color: var(--color-up, #ef4444);
+}
+
+.order-quote-chip.price-down .q-val {
+  color: var(--color-down, #22c55e);
+}
+
+.order-quote-chip.price-flat .q-val {
+  color: var(--text-main, #f8fafc);
+}
+
+[data-theme='light'] .order-quote-chip.price-up .q-val {
+  color: #dc2626;
+}
+
+[data-theme='light'] .order-quote-chip.price-down .q-val {
+  color: #16a34a;
+}
+
+[data-theme='light'] .order-quote-chip.price-flat .q-val {
+  color: #0a0f1d;
 }
 
 .order-action-pill {
