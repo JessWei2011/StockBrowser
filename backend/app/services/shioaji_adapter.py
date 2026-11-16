@@ -1232,6 +1232,26 @@ class ShioajiAdapter:
             if not code:
                 return
 
+            dt = getattr(quote, "datetime", None)
+            if isinstance(dt, datetime):
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
+                source_ts = dt.isoformat()
+                now_t = dt.time()
+            else:
+                now_dt = datetime.now(timezone(timedelta(hours=8)))
+                source_ts = now_dt.isoformat()
+                now_t = now_dt.time()
+            self.last_quote_time = source_ts
+
+            simtrade = safe_int(getattr(quote, "simtrade", 0)) or 0
+            # 13:25 後收盤試撮判斷：
+            # 13:25 ~ 13:30 全市場為收盤試撮時段；13:30 後若 simtrade == 1 亦為暫緩收盤試撮。
+            # 此時段跳過試撮價格更新，維持 13:25 前之真實成交價，直到收盤正式成交 (simtrade == 0) 再更新
+            is_closing_trial = (simtrade == 1 and now_t >= dtime(13, 25)) or (dtime(13, 25) <= now_t < dtime(13, 30))
+            if is_closing_trial:
+                return
+
             last_price = safe_float(getattr(quote, "close", None))
             if last_price is not None and last_price <= 0:
                 last_price = None
@@ -1255,18 +1275,8 @@ class ShioajiAdapter:
             bid = safe_float(bids[0]) if bids and len(bids) > 0 else None
             ask = safe_float(asks[0]) if asks and len(asks) > 0 else None
 
-            # 試撮判定：僅在開盤前試撮 (08:30~09:00) 或收盤前試撮 (13:25~13:30) 標記試撮
-            # 盤中一般交易時段 (09:00~13:25) 成交價一律維持真實成交價，避免分盤處置委託試撮洗成星號長亮
+            # 試撮判定：僅在開盤前試撮 (08:30~09:00) 標記試撮
             is_sim = is_taiwan_trial_matching()
-
-            dt = getattr(quote, "datetime", None)
-            if isinstance(dt, datetime):
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
-                source_ts = dt.isoformat()
-            else:
-                source_ts = datetime.now(timezone(timedelta(hours=8))).isoformat()
-            self.last_quote_time = source_ts
 
             # 取得即時漲跌與計算昨收參考價 (重要：動態自我校正過期昨收)
             chg_price = safe_float(getattr(quote, "price_chg", None))
@@ -1304,21 +1314,33 @@ class ShioajiAdapter:
             if not code:
                 return
 
+            dt = getattr(tick, "datetime", None)
+            if isinstance(dt, datetime):
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
+                source_ts = dt.isoformat()
+                now_t = dt.time()
+            else:
+                now_dt = datetime.now(timezone(timedelta(hours=8)))
+                source_ts = now_dt.isoformat()
+                now_t = now_dt.time()
+            self.last_quote_time = source_ts
+
+            simtrade = safe_int(getattr(tick, "simtrade", 0)) or 0
+            # 13:25 後收盤試撮判斷：
+            # 13:25 ~ 13:30 全市場為收盤試撮；13:30 後若 simtrade == 1 亦為暫緩收盤試撮。
+            # 此時段跳過試撮價格更新，維持 13:25 前之真實成交價，直到收盤正式成交 (simtrade == 0) 再更新
+            is_closing_trial = (simtrade == 1 and now_t >= dtime(13, 25)) or (dtime(13, 25) <= now_t < dtime(13, 30))
+            if is_closing_trial:
+                return
+
             close_p = safe_float(getattr(tick, "close", None))
             if close_p is not None and close_p > 0:
-                dt = getattr(tick, "datetime", None)
-                if isinstance(dt, datetime):
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
-                    source_ts = dt.isoformat()
-                else:
-                    source_ts = datetime.now(timezone(timedelta(hours=8))).isoformat()
                 quote_store.update_quote(
                     code=code,
                     odd_lot_last=close_p,
                     odd_lot_source_ts=source_ts
                 )
-                self.last_quote_time = source_ts
                 logger.info(f"Odd lot tick: {code} -> {close_p} (sourceTs: {source_ts})")
         except Exception as e:
             logger.error(f"Error parsing odd lot tick callback: {e}", exc_info=True)
