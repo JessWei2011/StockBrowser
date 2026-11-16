@@ -268,6 +268,7 @@ class ShioajiAdapter:
         self.subscribed_codes: set[str] = set()
         self.subscribed_odd_codes: set[str] = set()
         self.active_group_codes: set[str] = set()
+        self.active_order_code: Optional[str] = None
         self.contracts_cache: dict[str, dict] = {}
         self.disposition_dates_cache: dict[str, dict[str, Any]] = {}
         self.market_indices: dict[str, dict[str, Any]] = {
@@ -1378,6 +1379,11 @@ class ShioajiAdapter:
         pos_codes = {p["code"] for p in self.stock_positions_detail}
         priority_codes: list[str] = []
 
+        # 0. 財神筆目標下單代號（最高優先級，確保填寫時整股與零股即時推播）
+        if getattr(self, "active_order_code", None) and self.active_order_code:
+            if self.active_order_code in self.subscribed_codes and self.active_order_code not in priority_codes:
+                priority_codes.append(self.active_order_code)
+
         # 1. 持股庫存最優先
         for c in pos_codes:
             if c in self.subscribed_codes and c not in priority_codes:
@@ -1418,6 +1424,23 @@ class ShioajiAdapter:
     async def async_set_active_group_codes(self, codes: set[str]):
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(self._broker_executor, self.set_active_group_codes, codes)
+
+    def set_active_order_code(self, code: str):
+        """更新財神筆當前關注目標代號，保證整股行情與盤中零股優先推播"""
+        clean_code = str(code).strip().upper()
+        if not clean_code or getattr(self, "active_order_code", None) == clean_code:
+            return
+        self.active_order_code = clean_code
+        logger.info(f"Active order target code set to: {clean_code}")
+        # 若該股票尚未被訂閱，則自動加入訂閱並補拉快照
+        if clean_code not in self.subscribed_codes:
+            self.subscribe_codes({clean_code})
+            self._fetch_snapshots([clean_code])
+        self._rebalance_odd_lot_subscriptions()
+
+    async def async_set_active_order_code(self, code: str):
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(self._broker_executor, self.set_active_order_code, code)
 
     def subscribe_codes(self, codes: set[str]):
         """增量訂閱新加入的股票（嚴格控管 Solace 主題總量不超過 195）"""

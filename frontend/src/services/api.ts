@@ -97,6 +97,13 @@ export async function setActiveGroup(groupId: string): Promise<void> {
   }, 3000).catch(() => {});
 }
 
+export async function setActiveOrderStock(code: string): Promise<void> {
+  if (!code || !code.trim()) return;
+  await fetchWithTimeout(`${API_BASE}/api/v1/active-order-stock/${encodeURIComponent(code.trim().toUpperCase())}`, {
+    method: 'POST',
+  }, 3000).catch(() => {});
+}
+
 export async function deleteGroup(groupId: string): Promise<void> {
   const res = await fetchWithTimeout(`${API_BASE}/api/v1/groups/${groupId}`, {
     method: 'DELETE',

@@ -105,6 +105,11 @@ async def set_active_group(group_id: str):
     await watchlist_service.set_active_group(group_id)
     return {"status": "ok", "groupId": group_id}
 
+@router.post("/active-order-stock/{code}")
+async def set_active_order_stock(code: str):
+    await shioaji_adapter.async_set_active_order_code(code)
+    return {"status": "ok", "code": code.strip().upper()}
+
 @router.post("/groups/{group_id}/items")
 async def add_item(group_id: str, body: AddItemRequest):
     if group_id in ("g-vault", "g-wealth"):

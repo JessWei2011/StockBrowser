@@ -4125,6 +4125,117 @@ button, input, select, textarea {
   color: var(--text-main);
 }
 
+/* 財神筆標的即時監控動態看板 (現價、零股價、漲跌幅同一行呈現，字體放大清晰易讀) */
+.order-stock-ticker-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  background: var(--bg-surface, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  border-radius: 6px;
+  box-sizing: border-box;
+  user-select: none;
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.order-stock-ticker-bar::-webkit-scrollbar {
+  display: none;
+}
+
+[data-theme='light'] .order-stock-ticker-bar {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+[data-theme='dark'] .order-stock-ticker-bar {
+  background: #151d28;
+  border-color: #243042;
+}
+
+.ticker-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ticker-chip.clickable {
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+.ticker-chip.clickable:hover {
+  background: rgba(59, 130, 246, 0.18);
+  transform: translateY(-1px);
+}
+
+.ticker-chip.clickable:active {
+  transform: translateY(0);
+}
+
+.ticker-chip .ticker-label {
+  font-size: 12.5px;
+  color: var(--text-muted, #94a3b8);
+  font-weight: 400;
+  letter-spacing: 0.1px;
+}
+
+[data-theme='light'] .ticker-chip .ticker-label {
+  color: #475569;
+}
+
+.ticker-chip .ticker-val {
+  font-size: 15px;
+  font-weight: 500;
+  font-feature-settings: 'tnum';
+  letter-spacing: -0.3px;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang TC", "蘋方-繁", "Heiti TC", "Microsoft JhengHei", "微軟正黑體", sans-serif;
+}
+
+/* 台股紅漲綠跌高對比色彩 */
+.ticker-chip.price-up .ticker-val {
+  color: var(--color-up, #ef4444);
+}
+
+.ticker-chip.price-down .ticker-val {
+  color: var(--color-down, #22c55e);
+}
+
+.ticker-chip.price-flat .ticker-val {
+  color: var(--text-main, #f8fafc);
+}
+
+[data-theme='light'] .ticker-chip.price-up .ticker-val {
+  color: #dc2626;
+}
+
+[data-theme='light'] .ticker-chip.price-down .ticker-val {
+  color: #16a34a;
+}
+
+[data-theme='light'] .ticker-chip.price-flat .ticker-val {
+  color: #0a0f1d;
+}
+
+.order-stock-name-badge {
+  font-size: 13px;
+  font-weight: 700;
+  color: #3b82f6;
+  margin-left: 6px;
+}
+
+[data-theme='light'] .order-stock-name-badge {
+  color: #1d4ed8;
+}
+
 /* 3. 委託規格區 (紫色調) */
 .order-card-section.section-specs {
   border: 1px solid rgba(168, 85, 247, 0.35);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { StockPosition, QuoteState, WealthSummary, OrderItem } from '../types';
-import { submitOrder, fetchOrders, cancelOrder, updateOrder, clearOrders } from '../services/api';
+import { submitOrder, fetchOrders, cancelOrder, updateOrder, clearOrders, setActiveOrderStock } from '../services/api';
 import { getStoredVaultPassword } from './VaultPasswordModal';
 import { BalanceTab } from './BalanceTab';
 import { SmartOrderTab } from './SmartOrderTab';
@@ -237,6 +237,55 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   // 當選定個股時，若尚未輸入價格則帶入現價或昨收；若為盤後定價則鎖定為收盤價
   const currentQuote = quotes[stockCode];
   const closingPriceVal = currentQuote?.last || currentQuote?.previousClose || 0;
+
+  // 確保目標個股獲得後端最高優先即時整股與零股推播
+  useEffect(() => {
+    if (stockCode && stockCode.trim()) {
+      setActiveOrderStock(stockCode.trim());
+    }
+  }, [stockCode]);
+
+  // 標的專屬即時動態資訊計算 (現價、零股價、漲跌幅)
+  const tickerPrevClose = currentQuote?.previousClose;
+  const hasTickerLast = typeof currentQuote?.last === 'number' && currentQuote.last > 0;
+  const hasTickerOdd = typeof currentQuote?.oddLotLast === 'number' && currentQuote.oddLotLast > 0;
+
+  const formattedTickerLast = hasTickerLast ? currentQuote!.last!.toFixed(2) : '--';
+  const formattedTickerOdd = hasTickerOdd ? currentQuote!.oddLotLast!.toFixed(2) : '--';
+
+  let tickerLastPriceClass = 'price-flat';
+  if (hasTickerLast && tickerPrevClose && tickerPrevClose > 0) {
+    if (currentQuote!.last! > tickerPrevClose) tickerLastPriceClass = 'price-up';
+    else if (currentQuote!.last! < tickerPrevClose) tickerLastPriceClass = 'price-down';
+  }
+
+  let tickerOddPriceClass = 'price-flat';
+  if (hasTickerOdd && tickerPrevClose && tickerPrevClose > 0) {
+    if (currentQuote!.oddLotLast! > tickerPrevClose) tickerOddPriceClass = 'price-up';
+    else if (currentQuote!.oddLotLast! < tickerPrevClose) tickerOddPriceClass = 'price-down';
+  } else if (hasTickerOdd && hasTickerLast) {
+    if (currentQuote!.oddLotLast! > currentQuote!.last!) tickerOddPriceClass = 'price-up';
+    else if (currentQuote!.oddLotLast! < currentQuote!.last!) tickerOddPriceClass = 'price-down';
+  }
+
+  let tickerChangeClass = 'price-flat';
+  let tickerChangeText = '--';
+  const tickerRawChange = currentQuote?.change ?? (hasTickerLast && tickerPrevClose && tickerPrevClose > 0 ? currentQuote!.last! - tickerPrevClose : null);
+  const tickerRawPct = currentQuote?.changePercent ?? (tickerRawChange !== null && tickerPrevClose && tickerPrevClose > 0 ? (tickerRawChange / tickerPrevClose) * 100 : null);
+
+  if (tickerRawChange !== null && tickerRawChange !== undefined) {
+    const pctStr = tickerRawPct !== null && tickerRawPct !== undefined ? `${Math.abs(tickerRawPct).toFixed(2)}%` : '';
+    if (tickerRawChange > 0) {
+      tickerChangeClass = 'price-up';
+      tickerChangeText = `▲ +${tickerRawChange.toFixed(2)}${pctStr ? ` (+${pctStr})` : ''}`;
+    } else if (tickerRawChange < 0) {
+      tickerChangeClass = 'price-down';
+      tickerChangeText = `▼ -${Math.abs(tickerRawChange).toFixed(2)}${pctStr ? ` (-${pctStr})` : ''}`;
+    } else {
+      tickerChangeClass = 'price-flat';
+      tickerChangeText = `0.00${pctStr ? ` (0.00%)` : ''}`;
+    }
+  }
 
   useEffect(() => {
     if (orderSession === 'after_hours' && afterHoursLot === 'Fixing' && closingPriceVal > 0) {
@@ -1055,6 +1104,9 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                   <div className="section-title-wrap">
                     <span className="section-badge badge-stock">標的</span>
                     <span className="section-title">委託商品</span>
+                    {currentQuote?.name && (
+                      <span className="order-stock-name-badge">{currentQuote.name}</span>
+                    )}
                   </div>
                   {currentPosition && (
                     <span className="holding-pill">
@@ -1068,16 +1120,49 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     className="form-input"
                     placeholder="輸入股號 (例: 2330)"
                     value={stockCode}
-                    onChange={(e) => setStockCode(e.target.value.toUpperCase())}
+                    onChange={(e) => {
+                      const val = e.target.value.toUpperCase();
+                      setStockCode(val);
+                      onOrderTargetCodeChange?.(val);
+                    }}
                   />
-                  {currentQuote && (
-                    <div className="stock-quick-info">
-                      <span className="quick-name">{currentQuote.name || stockCode}</span>
-                      {currentQuote.last && currentQuote.last > 0 && (
-                        <span className="quick-last">現價 {currentQuote.last.toFixed(2)}</span>
-                      )}
+
+                  {/* 標的專屬即時動態資訊列：現價、零股價、漲跌幅同一行呈現，符合台股紅綠色彩 */}
+                  <div className="order-stock-ticker-bar">
+                    {/* 1. 現價 (可點擊帶入委託價) */}
+                    <div
+                      className={`ticker-chip ${tickerLastPriceClass} ${hasTickerLast ? 'clickable' : ''}`}
+                      onClick={() => {
+                        if (hasTickerLast) {
+                          setOrderPrice(currentQuote!.last!.toFixed(2));
+                        }
+                      }}
+                      title={hasTickerLast ? `點擊將整股現價 ${currentQuote!.last!.toFixed(2)} 帶入委託價` : undefined}
+                    >
+                      <span className="ticker-label">現價</span>
+                      <span className="ticker-val">{formattedTickerLast}</span>
                     </div>
-                  )}
+
+                    {/* 2. 零股價 (可點擊帶入委託價) */}
+                    <div
+                      className={`ticker-chip ${tickerOddPriceClass} ${hasTickerOdd ? 'clickable' : ''}`}
+                      onClick={() => {
+                        if (hasTickerOdd) {
+                          setOrderPrice(currentQuote!.oddLotLast!.toFixed(2));
+                        }
+                      }}
+                      title={hasTickerOdd ? `點擊將零股價 ${currentQuote!.oddLotLast!.toFixed(2)} 帶入委託價` : undefined}
+                    >
+                      <span className="ticker-label">零股</span>
+                      <span className="ticker-val">{formattedTickerOdd}</span>
+                    </div>
+
+                    {/* 3. 漲跌幅 */}
+                    <div className={`ticker-chip ${tickerChangeClass}`}>
+                      <span className="ticker-label">漲跌</span>
+                      <span className="ticker-val">{tickerChangeText}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
