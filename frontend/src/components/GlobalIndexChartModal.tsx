@@ -678,14 +678,20 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
     chart.setOption(option, true);
 
     const dom = mainChartRef.current;
-    const refreshBadges = () => {
-      updateRightPriceBadges(chart, dom, kline, propPrice, showMA, showBoll);
+    let badgeRafId: number | null = null;
+    const scheduleRefreshBadges = () => {
+      if (badgeRafId !== null) return;
+      badgeRafId = requestAnimationFrame(() => {
+        badgeRafId = null;
+        if (mainInstanceRef.current && !mainInstanceRef.current.isDisposed()) {
+          updateRightPriceBadges(mainInstanceRef.current, dom, kline, propPrice, showMA, showBoll);
+        }
+      });
     };
-    refreshBadges();
-    requestAnimationFrame(refreshBadges);
-    const badgeTimer = setTimeout(refreshBadges, 80);
+    scheduleRefreshBadges();
+    const badgeTimer = setTimeout(scheduleRefreshBadges, 80);
 
-    // 監聽使用者的縮放/平移操作，將當前視角記錄在 ref 中並即時更新右側膠囊位置
+    // 監聽使用者的縮放/平移操作，將當前視角記錄在 ref 中並節流更新右側膠囊位置
     const handleDataZoom = (e: any) => {
       let start: number | undefined;
       let end: number | undefined;
@@ -699,18 +705,21 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
       if (start !== undefined && end !== undefined) {
         zoomRangeRef.current = { start, end };
       }
-      refreshBadges();
+      scheduleRefreshBadges();
     };
     chart.on('datazoom', handleDataZoom);
 
     const handleResize = () => {
       chart.resize();
-      refreshBadges();
+      scheduleRefreshBadges();
     };
     window.addEventListener('resize', handleResize);
 
     return () => {
       clearTimeout(badgeTimer);
+      if (badgeRafId !== null) {
+        cancelAnimationFrame(badgeRafId);
+      }
       window.removeEventListener('resize', handleResize);
       chart.off('datazoom', handleDataZoom);
       if (chart && !chart.isDisposed()) {
@@ -768,9 +777,11 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
                   {statusLabel || '大盤指數'}
                 </span>
                 {data?.isAppendedToday && (
-                  <span className="chart-live-badge" title="已將今日開盤即時行情動態拼接至 K 線末端">
-                    ● 即時連動中
-                  </span>
+                  <span
+                    className="chart-live-badge-dot"
+                    title="即時連動中 (已將今日開盤即時行情動態拼接至 K 線末端)"
+                    aria-label="即時連動中"
+                  />
                 )}
               </div>
               {displayPrice !== null && typeof displayPrice === 'number' && (

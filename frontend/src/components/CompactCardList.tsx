@@ -185,39 +185,59 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
 
               <div className="flat-primary-right">
                 <div className="flat-price-display">
-                  <div className="flat-price-main-col">
-                    {badgeClass ? (
-                      <span className={`flat-price-pill ${badgeClass}`}>
-                        {formatPrice(last, isSimulated)}
+                  {/* 左欄：左上現價、左下零股價 */}
+                  <div className="flat-col-prices">
+                    {/* 左上：現價 */}
+                    <div className="flat-cell-price">
+                      {badgeClass ? (
+                        <span className={`flat-price-pill ${badgeClass}`}>
+                          {formatPrice(last, isSimulated)}
+                        </span>
+                      ) : (
+                        <span className={`flat-price-val ${getPriceClass(last, prev)}`}>
+                          {formatPrice(last, isSimulated)}
+                        </span>
+                      )}
+                    </div>
+                    {/* 左下：零股價 */}
+                    <div className="flat-cell-odd" title="盤中零股最新撮合成交價">
+                      <span className="flat-odd-prefix">零</span>
+                      <span className={`flat-odd-val ${getPriceClass(q?.oddLotLast, prev)}`}>
+                        {formatPrice(q?.oddLotLast)}
                       </span>
-                    ) : (
-                      <span className={`flat-price-val ${getPriceClass(last, prev)}`}>
-                        {formatPrice(last, isSimulated)}
-                      </span>
-                    )}
-                    <span className={`flat-chg-sub ${changeClass}`}>
-                      {effectiveChg === null || isNaN(effectiveChg)
-                        ? '— 0.00'
-                        : effectiveChg > 0
-                        ? `▲ ${effectiveChg.toFixed(2)}`
-                        : effectiveChg < 0
-                        ? `▼ ${Math.abs(effectiveChg).toFixed(2)}`
-                        : '— 0.00'}
-                    </span>
+                    </div>
                   </div>
 
-                  <div className={`flat-pct-badge ${changeClass}`}>
-                    {effectivePct === null || isNaN(effectivePct)
-                      ? '0.00%'
-                      : effectivePct > 0
-                      ? `+${effectivePct.toFixed(2)}%`
-                      : `${effectivePct.toFixed(2)}%`}
+                  {/* 右欄：右上漲跌幅、右下損益價 */}
+                  <div className="flat-col-changes">
+                    {/* 右上：漲跌幅 (無框純文字) */}
+                    <div className="flat-cell-pct">
+                      <span className={`flat-pct-badge ${changeClass}`}>
+                        {effectivePct === null || isNaN(effectivePct)
+                          ? '0.00%'
+                          : effectivePct > 0
+                          ? `+${effectivePct.toFixed(2)}%`
+                          : `${effectivePct.toFixed(2)}%`}
+                      </span>
+                    </div>
+                    {/* 右下：損益價 (漲跌額) */}
+                    <div className="flat-cell-chg">
+                      <span className={`flat-chg-sub ${changeClass}`}>
+                        {effectiveChg === null || isNaN(effectiveChg)
+                          ? '— 0.00'
+                          : effectiveChg > 0
+                          ? `▲ ${effectiveChg.toFixed(2)}`
+                          : effectiveChg < 0
+                          ? `▼ ${Math.abs(effectiveChg).toFixed(2)}`
+                          : '— 0.00'}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* 第二行：精煉指標（量能、高低區間、均線/零股）+ 快速下單快捷鍵 */}
+            {/* 第二行：精煉指標（量能、高低區間、均線/筆記）+ 快速下單快捷鍵 */}
             <div className="flat-row-metrics-modern">
               <div className="flat-metric-item flat-metric-vol">
                 <span className="flat-metric-lbl">量</span>
@@ -235,7 +255,7 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
                 </span>
               </div>
 
-              {/* 均線燈號（若為個股）或零股現價（若為 ETF/BOND） */}
+              {/* 均線燈號與 AI 筆記按鈕（若為個股） */}
               <div className="flat-metric-item flat-metric-extra">
                 {!isEtfOrBond ? (() => {
                   const ind = indicators[item.code];
@@ -272,12 +292,7 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
                       </button>
                     </div>
                   );
-                })() : (
-                  <span className="flat-oddlot-price" title="零股成交價">
-                    <span className="flat-oddlot-prefix">零</span>
-                    <span className={getPriceClass(q?.oddLotLast, prev)}>{formatPrice(q?.oddLotLast)}</span>
-                  </span>
-                )}
+                })() : null}
               </div>
 
               {/* 快速下單按鈕 (融入第二行右側，絕不搶佔第一行股票名稱空間) */}

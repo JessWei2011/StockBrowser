@@ -10,6 +10,8 @@ interface StockChartDrawerProps {
   theme: 'dark' | 'light';
   currentPrice?: number | null;
   changePercent?: number | null;
+  oddLotPrice?: number | null;
+  previousClose?: number | null;
   isStandalone?: boolean;
   initialTab?: TabKey;
   onToggleTheme?: () => void;
@@ -200,6 +202,8 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
   theme,
   currentPrice,
   changePercent,
+  oddLotPrice,
+  previousClose,
   isStandalone = false,
   initialTab = 'chips',
   onToggleTheme,
@@ -228,7 +232,6 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
   const mainInstanceRef = useRef<echarts.ECharts | null>(null);
   const subInstanceRef = useRef<echarts.ECharts | null>(null);
   const zoomRangeRef = useRef<{ start: number; end: number } | null>(null);
-  const isSyncingZoomRef = useRef<boolean>(false);
 
   // 當 code 變更時重設縮放記憶，確保新開啟的股票以預設視角呈現
   useEffect(() => {
@@ -238,6 +241,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
   // 當抽屜關閉或 code 變更時，徹底銷毀 ECharts instance 以釋放記憶體與 DOM 關聯
   useEffect(() => {
     if (!isOpen) {
+      echarts.disconnect('stock_chart_sync_group');
       if (mainInstanceRef.current && !mainInstanceRef.current.isDisposed()) {
         mainInstanceRef.current.dispose();
       }
@@ -521,16 +525,22 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
 
     const dom = mainChartRef.current;
 
-    // 初始與延遲更新 TradingView / StockCenter 右側價格徽章
-    const refreshBadges = () => {
-      updateRightPriceBadges(chart, dom, kline, currentPrice);
+    // 透過 requestAnimationFrame 節流更新右側價格徽章，避免高頻滾輪引發連續 Forced Reflow 與 DOM 渲染卡死
+    let badgeRafId: number | null = null;
+    const scheduleRefreshBadges = () => {
+      if (badgeRafId !== null) return;
+      badgeRafId = requestAnimationFrame(() => {
+        badgeRafId = null;
+        if (mainInstanceRef.current && !mainInstanceRef.current.isDisposed()) {
+          updateRightPriceBadges(mainInstanceRef.current, dom, kline, currentPrice);
+        }
+      });
     };
 
-    refreshBadges();
-    requestAnimationFrame(refreshBadges);
-    const badgeTimer = setTimeout(refreshBadges, 80);
+    scheduleRefreshBadges();
+    const badgeTimer = setTimeout(scheduleRefreshBadges, 80);
 
-    // 監聽縮放與平移操作，將當前視角記錄在 ref 中、更新右側徽章，並在 KD / RSI 模式同步次圖
+    // 監聽縮放與平移操作，將當前視角記錄在 ref 中、節流更新右側徽章（跨圖同步由 ECharts connect 原生處理）
     const handleDataZoom = (e?: any) => {
       let start: number | undefined;
       let end: number | undefined;
@@ -540,42 +550,25 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
       } else if (e?.start !== undefined && e?.end !== undefined) {
         start = e.start;
         end = e.end;
-      } else {
-        const opt: any = chart.getOption();
-        const dz = opt?.dataZoom?.[0];
-        if (dz && dz.start != null && dz.end != null) {
-          start = dz.start;
-          end = dz.end;
-        }
       }
 
       if (start !== undefined && end !== undefined) {
         zoomRangeRef.current = { start, end };
-
-        // 若次圖為 KD 或 RSI，即時同步相同的縮放範圍
-        if (subInstanceRef.current && !subInstanceRef.current.isDisposed()) {
-          if (!isSyncingZoomRef.current) {
-            isSyncingZoomRef.current = true;
-            subInstanceRef.current.dispatchAction({
-              type: 'dataZoom',
-              start,
-              end,
-            });
-            isSyncingZoomRef.current = false;
-          }
-        }
       }
-      refreshBadges();
+      scheduleRefreshBadges();
     };
     chart.on('datazoom', handleDataZoom);
 
     const handleResize = () => {
       chart.resize();
-      refreshBadges();
+      scheduleRefreshBadges();
     };
     window.addEventListener('resize', handleResize);
     return () => {
       clearTimeout(badgeTimer);
+      if (badgeRafId !== null) {
+        cancelAnimationFrame(badgeRafId);
+      }
       chart.off('datazoom', handleDataZoom);
       window.removeEventListener('resize', handleResize);
     };
@@ -967,6 +960,9 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
             end: curEnd,
             zoomOnMouseWheel: true,
             moveOnMouseMove: true,
+            moveOnMouseWheel: false,
+            minSpan: ((MIN_VISIBLE_BARS) / (kline.length + BUFFER_DAYS)) * 100,
+            maxSpan: 100,
           },
         ],
         series: [
@@ -1060,6 +1056,9 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
             end: curEnd,
             zoomOnMouseWheel: true,
             moveOnMouseMove: true,
+            moveOnMouseWheel: false,
+            minSpan: ((MIN_VISIBLE_BARS) / (kline.length + BUFFER_DAYS)) * 100,
+            maxSpan: 100,
           },
         ],
         series: [
@@ -1108,17 +1107,6 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
       }
       if (start !== undefined && end !== undefined) {
         zoomRangeRef.current = { start, end };
-        if (mainInstanceRef.current && !mainInstanceRef.current.isDisposed()) {
-          if (!isSyncingZoomRef.current) {
-            isSyncingZoomRef.current = true;
-            mainInstanceRef.current.dispatchAction({
-              type: 'dataZoom',
-              start,
-              end,
-            });
-            isSyncingZoomRef.current = false;
-          }
-        }
       }
     };
     chart.on('datazoom', handleSubDataZoom);
@@ -1143,12 +1131,31 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  // 同步兩張圖表的十字游標 (Connect)
+  // 僅在 KD / RSI 模式（次圖與主圖時間軸與數據長度一致）時同步十字游標與 dataZoom
+  // 其餘 Tab（三大法人籌碼、融資融券、大戶持股比例）日期尺度不同且無 dataZoom，必須斷開連線以防事件衝突
   useEffect(() => {
-    if (mainInstanceRef.current && subInstanceRef.current) {
-      echarts.connect([mainInstanceRef.current, subInstanceRef.current]);
+    const SYNC_GROUP = 'stock_chart_sync_group';
+    const mainChart = mainInstanceRef.current;
+    const subChart = subInstanceRef.current;
+
+    if (!mainChart || mainChart.isDisposed()) return;
+
+    if (subChart && !subChart.isDisposed() && (activeTab === 'kd' || activeTab === 'rsi')) {
+      mainChart.group = SYNC_GROUP;
+      subChart.group = SYNC_GROUP;
+      echarts.connect(SYNC_GROUP);
+    } else {
+      mainChart.group = '';
+      if (subChart && !subChart.isDisposed()) {
+        subChart.group = '';
+      }
+      echarts.disconnect(SYNC_GROUP);
     }
-  }, [data, activeTab, marginSubMode]);
+
+    return () => {
+      echarts.disconnect(SYNC_GROUP);
+    };
+  }, [data, activeTab]);
 
   if (!isOpen) return null;
 
@@ -1193,10 +1200,28 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
                 {changePercent?.toFixed(2)}%)
               </span>
             )}
+            <span
+              className={`chart-live-price chart-odd-price ${
+                oddLotPrice && previousClose && oddLotPrice > previousClose
+                  ? 'color-up'
+                  : oddLotPrice && previousClose && oddLotPrice < previousClose
+                  ? 'color-down'
+                  : (changePercent ?? 0) > 0
+                  ? 'color-up'
+                  : (changePercent ?? 0) < 0
+                  ? 'color-down'
+                  : ''
+              }`}
+              title="盤中零股最新成交價"
+            >
+              零股: {oddLotPrice !== null && oddLotPrice !== undefined && oddLotPrice > 0 ? oddLotPrice : '—'}
+            </span>
             {data?.isAppendedToday && (
-              <span className="chart-live-badge" title="已將今日最新報價無縫拼接至 K 線末端">
-                ● 盤中動態同步中
-              </span>
+              <span
+                className="chart-live-badge-dot"
+                title="盤中動態同步中 (已將今日最新報價無縫拼接至 K 線末端)"
+                aria-label="盤中動態同步中"
+              />
             )}
           </div>
           <div className="chart-drawer-actions">

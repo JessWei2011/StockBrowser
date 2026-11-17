@@ -675,6 +675,8 @@ export const App: React.FC = () => {
     const quote = quotes[standaloneChartCode];
     const currentPrice = quote?.last ?? null;
     const changePercent = quote?.changePercent ?? null;
+    const oddLotPrice = quote?.oddLotLast ?? null;
+    const previousClose = quote?.previousClose ?? null;
 
     return (
       <div className="standalone-chart-app" data-theme={theme}>
@@ -712,6 +714,8 @@ export const App: React.FC = () => {
           onToggleTheme={handleToggleTheme}
           currentPrice={currentPrice}
           changePercent={changePercent}
+          oddLotPrice={oddLotPrice}
+          previousClose={previousClose}
           initialTab={initialTab}
         />
       </div>
@@ -1162,6 +1166,8 @@ export const App: React.FC = () => {
         theme={theme}
         currentPrice={selectedChartCode && quotes[selectedChartCode]?.last ? quotes[selectedChartCode].last : null}
         changePercent={selectedChartCode && quotes[selectedChartCode]?.changePercent ? quotes[selectedChartCode].changePercent : null}
+        oddLotPrice={selectedChartCode && quotes[selectedChartCode]?.oddLotLast ? quotes[selectedChartCode].oddLotLast : null}
+        previousClose={selectedChartCode && quotes[selectedChartCode]?.previousClose ? quotes[selectedChartCode].previousClose : null}
       />
 
       <InvestmentCalendarModal
