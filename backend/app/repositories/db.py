@@ -254,7 +254,7 @@ async def get_all_groups() -> list[WatchlistGroup]:
                     position=i["position"]
                 ) for i in item_rows
             ]
-            is_sys = bool(g_row["id"] in ("g-vault", "g-wealth") or g_row["name"] in ("財神庫", "財神金庫", "財神簿"))
+            is_sys = bool(g_row["id"] in ("g-vault", "g-wealth", "g-candidate") or g_row["name"] in ("財神庫", "財神金庫", "財神簿", "選手區"))
             result.append(
                 WatchlistGroup(
                     id=g_row["id"],
@@ -272,7 +272,8 @@ async def ensure_system_wealth_groups() -> tuple[str, str]:
     """
     確保「財神金庫」固定為第 1 個系統群組 (position 0)
     確保「財神簿」固定為第 2 個系統群組 (position 1)
-    其餘自選群組從 position 2 開始
+    確保「選手區」固定為第 3 個系統群組 (position 2)
+    其餘自選群組從 position 3 開始 (如「大雜燴」等)
     """
     async with get_db_connection() as db:
         ts = now_iso()
@@ -286,6 +287,11 @@ async def ensure_system_wealth_groups() -> tuple[str, str]:
         cur_w = await db.execute("SELECT id FROM watchlist_groups WHERE id = 'g-wealth' OR name = '財神簿'")
         row_w = await cur_w.fetchone()
         w_id = row_w[0] if row_w else "g-wealth"
+
+        # 3. 處理 選手區 (g-candidate)
+        cur_c = await db.execute("SELECT id FROM watchlist_groups WHERE id = 'g-candidate' OR name = '選手區'")
+        row_c = await cur_c.fetchone()
+        c_id = row_c[0] if row_c else "g-candidate"
 
         if row_v:
             await db.execute("UPDATE watchlist_groups SET name = '財神金庫', position = 0, updated_at = ? WHERE id = ?", (ts, v_id))
@@ -303,13 +309,21 @@ async def ensure_system_wealth_groups() -> tuple[str, str]:
                 (w_id, ts, ts)
             )
 
-        # 重整其餘群組的連續 position (從 2 開始)
+        if row_c:
+            await db.execute("UPDATE watchlist_groups SET name = '選手區', position = 2, updated_at = ? WHERE id = ?", (ts, c_id))
+        else:
+            await db.execute(
+                "INSERT INTO watchlist_groups (id, name, position, created_at, updated_at) VALUES (?, '選手區', 2, ?, ?)",
+                (c_id, ts, ts)
+            )
+
+        # 重整其餘群組的連續 position (從 3 開始，大雜燴緊接在選手區右方)
         other_cur = await db.execute(
-            "SELECT id FROM watchlist_groups WHERE id NOT IN (?, ?) ORDER BY position ASC, created_at ASC",
-            (v_id, w_id)
+            "SELECT id FROM watchlist_groups WHERE id NOT IN (?, ?, ?) ORDER BY position ASC, created_at ASC",
+            (v_id, w_id, c_id)
         )
         other_rows = await other_cur.fetchall()
-        for idx, o_row in enumerate(other_rows, start=2):
+        for idx, o_row in enumerate(other_rows, start=3):
             await db.execute("UPDATE watchlist_groups SET position = ? WHERE id = ?", (idx, o_row["id"]))
 
         await db.commit()
@@ -467,7 +481,7 @@ async def reorder_groups(group_ids: list[str]):
             ts = now_iso()
             # 1. 取得所有非系統自選群組 ID
             cur = await db.execute(
-                "SELECT id FROM watchlist_groups WHERE id NOT IN ('g-vault', 'g-wealth') AND name NOT IN ('財神庫', '財神金庫', '財神簿')"
+                "SELECT id FROM watchlist_groups WHERE id NOT IN ('g-vault', 'g-wealth', 'g-candidate') AND name NOT IN ('財神庫', '財神金庫', '財神簿', '選手區')"
             )
             all_custom_rows = await cur.fetchall()
             all_custom_ids = {r[0] for r in all_custom_rows}
@@ -477,9 +491,9 @@ async def reorder_groups(group_ids: list[str]):
             remaining_ids = [gid for gid in all_custom_ids if gid not in ordered_ids]
             final_ids = ordered_ids + remaining_ids
 
-            # 系統固定群組: g-vault (財神金庫)=0, g-wealth (財神簿)=1
-            # 其餘自選群組依傳入順序從 position 2 開始編號
-            pos = 2
+            # 系統固定群組: g-vault (財神金庫)=0, g-wealth (財神簿)=1, g-candidate (選手區)=2
+            # 其餘自選群組依傳入順序從 position 3 開始編號
+            pos = 3
             for gid in final_ids:
                 await db.execute("UPDATE watchlist_groups SET position = ?, updated_at = ? WHERE id = ?", (pos, ts, gid))
                 pos += 1

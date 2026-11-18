@@ -11,6 +11,8 @@ interface CompactCardListProps {
   announcements?: Record<string, StockAnnouncement[]>;
   indicators?: Record<string, StockMaSummary>;
   dirtyCodes: Set<string>;
+  candidateCodes?: Set<string>;
+  onToggleCandidate?: (code: string) => void;
   onRemoveItem: (code: string) => Promise<void>;
   onMoveItem: (index: number, direction: 'up' | 'down') => Promise<void>;
   onSelectStock?: (code: string) => void;
@@ -24,6 +26,8 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
   quotes,
   announcements = {},
   indicators = {},
+  candidateCodes,
+  onToggleCandidate,
   onRemoveItem,
   onMoveItem,
   onSelectStock,
@@ -152,6 +156,7 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
 
         const isOtc = ((item.exchange || q?.exchange || '').toUpperCase() === 'OTC');
         const isEtfOrBond = item.code.startsWith('00') || ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase());
+        const isStarred = Boolean(candidateCodes?.has(item.code));
 
         return (
           <div
@@ -163,6 +168,28 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
             <div className="flat-row-primary">
               <div className="flat-stock-id">
                 <div className="flat-id-row">
+                  <button
+                    type="button"
+                    className={`btn-star ${isStarred ? 'starred' : ''}`}
+                    title={isStarred ? '從選手區移除' : '加入選手區'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleCandidate?.(item.code);
+                    }}
+                  >
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill={isStarred ? "#f59e0b" : "none"}
+                      stroke={isStarred ? "#f59e0b" : "currentColor"}
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                  </button>
                   <span className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`} title={isOtc ? '上櫃股票' : '上市股票'}>
                     {isOtc ? '櫃' : '市'}
                   </span>

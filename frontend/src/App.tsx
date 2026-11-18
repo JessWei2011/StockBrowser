@@ -388,9 +388,9 @@ export const App: React.FC = () => {
     if (!activeGroup) return;
     const cleanCode = code.trim().toUpperCase();
 
-    // 1. 本地防呆檢查：系統群組保護
-    if (activeGroup.id === 'g-wealth' || activeGroup.id === 'g-vault' || activeGroup.name === '財神簿' || activeGroup.name === '財神庫' || activeGroup.name === '財神金庫' || activeGroup.isSystemGroup) {
-      throw new Error('『財神簿』由永豐證券庫存自動同步，請切換至自選組合以新增個股');
+    // 1. 本地防呆檢查：系統群組保護（財神金庫與財神簿為券商自動同步持股，不可手動新增；選手區則開放手動與星號新增）
+    if (activeGroup.id === 'g-wealth' || activeGroup.id === 'g-vault' || activeGroup.name === '財神簿' || activeGroup.name === '財神庫' || activeGroup.name === '財神金庫') {
+      throw new Error('『財神簿』由永豐證券庫存自動同步，請切換至自選組合或選手區以新增個股');
     }
 
     // 2. 本地重複檢查
@@ -506,6 +506,101 @@ export const App: React.FC = () => {
     }
   };
 
+  // 選手區快速觀察名單快取與切換
+  const candidateGroup = groups.find((g) => g.id === 'g-candidate' || g.name === '選手區');
+  const candidateCodes = useMemo(
+    () => new Set(candidateGroup?.items.map((it) => it.code) || []),
+    [candidateGroup]
+  );
+
+  const handleToggleCandidate = async (code: string) => {
+    const cleanCode = code.trim().toUpperCase();
+    const candGroup = groups.find((g) => g.id === 'g-candidate' || g.name === '選手區');
+    if (!candGroup) return;
+
+    const isStarred = candidateCodes.has(cleanCode);
+    if (isStarred) {
+      // 1. 取消星號：從選手區移除（原群組不受影響）
+      setGroups((prev) =>
+        prev.map((g) => {
+          if (g.id === candGroup.id) {
+            return {
+              ...g,
+              items: g.items.filter((it) => it.code !== cleanCode),
+            };
+          }
+          return g;
+        })
+      );
+
+      try {
+        await removeItem(candGroup.id, cleanCode);
+      } catch (err: any) {
+        console.error('Failed to remove from candidate group:', err);
+        await loadBootstrap();
+      }
+    } else {
+      // 2. 按下星號：將該股純複製到選手區內（原群組保留，單純複製不增加重複訂閱）
+      const q = quotes[cleanCode];
+      let name = q?.name || cleanCode;
+      let exchange = q?.exchange || 'TSE';
+      let securityType = q?.securityType || 'STOCK';
+      for (const g of groups) {
+        const found = g.items.find((it) => it.code === cleanCode);
+        if (found) {
+          name = found.name || name;
+          exchange = found.exchange || exchange;
+          securityType = found.securityType || securityType;
+          break;
+        }
+      }
+
+      const tempId = `temp-${Date.now()}-${cleanCode}`;
+      const optimisticItem: WatchlistItem = {
+        id: tempId,
+        groupId: candGroup.id,
+        code: cleanCode,
+        name,
+        exchange,
+        securityType,
+        position: candGroup.items.length,
+      };
+
+      setGroups((prev) =>
+        prev.map((g) => {
+          if (g.id === candGroup.id) {
+            return {
+              ...g,
+              items: [...g.items, optimisticItem],
+            };
+          }
+          return g;
+        })
+      );
+
+      try {
+        const realItem = await addItem(candGroup.id, cleanCode);
+        setGroups((prev) =>
+          prev.map((g) => {
+            if (g.id === candGroup.id) {
+              return {
+                ...g,
+                items: g.items.map((it) => (it.id === tempId ? realItem : it)),
+              };
+            }
+            return g;
+          })
+        );
+      } catch (err: any) {
+        console.error('Failed to add to candidate group:', err);
+        if (!err.message?.includes('已存在')) {
+          alert(err.message || '加入選手區失敗');
+        }
+        await loadBootstrap();
+      }
+    }
+  };
+
   // 移動排序
   const handleMoveStock = async (index: number, direction: 'up' | 'down') => {
     if (!activeGroup) return;
@@ -594,7 +689,7 @@ export const App: React.FC = () => {
     // 樂觀更新
     setGroups((prev) => {
       const groupMap = new Map(prev.map((g) => [g.id, g]));
-      const systemGroups = prev.filter((g) => g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神金庫' || g.name === '財神簿' || g.isSystemGroup);
+      const systemGroups = prev.filter((g) => g.id === 'g-vault' || g.id === 'g-wealth' || g.id === 'g-candidate' || g.name === '財神庫' || g.name === '財神金庫' || g.name === '財神簿' || g.name === '選手區' || g.isSystemGroup);
       const customReordered = nextGroupIds.map((id) => groupMap.get(id)).filter(Boolean) as typeof prev;
       const remaining = prev.filter((g) => !systemGroups.some((sg) => sg.id === g.id) && !nextGroupIds.includes(g.id));
       return [...systemGroups, ...customReordered, ...remaining];
@@ -666,7 +761,9 @@ export const App: React.FC = () => {
 
   const isVaultGroup = activeGroup?.id === 'g-vault' || activeGroup?.name === '財神庫' || activeGroup?.name === '財神金庫';
   const isWealthGroup = activeGroup?.id === 'g-wealth' || activeGroup?.name === '財神簿';
-  const isSystemGroup = isVaultGroup || isWealthGroup || Boolean(activeGroup?.isSystemGroup);
+  const isCandidateGroup = activeGroup?.id === 'g-candidate' || activeGroup?.name === '選手區';
+  const isHoldingGroup = isVaultGroup || isWealthGroup;
+  const isSystemGroup = isHoldingGroup || isCandidateGroup || Boolean(activeGroup?.isSystemGroup);
 
   // 獨立新分頁全螢幕個股技術分析圖渲染
   if (standaloneChartCode) {
@@ -1075,11 +1172,13 @@ export const App: React.FC = () => {
             {viewMode === 'table' ? (
               <QuoteTable
                 items={activeGroup?.items || []}
-                isWealthGroup={isSystemGroup}
+                isWealthGroup={isHoldingGroup}
                 quotes={quotes}
                 announcements={announcements}
                 indicators={indicators}
                 dirtyCodes={dirtyCodes}
+                candidateCodes={candidateCodes}
+                onToggleCandidate={handleToggleCandidate}
                 onRemoveItem={handleRemoveStock}
                 onMoveItem={handleMoveStock}
                 onReorderItems={handleReorderItems}
@@ -1089,11 +1188,13 @@ export const App: React.FC = () => {
             ) : (
               <CompactCardList
                 items={activeGroup?.items || []}
-                isWealthGroup={isSystemGroup}
+                isWealthGroup={isHoldingGroup}
                 quotes={quotes}
                 announcements={announcements}
                 indicators={indicators}
                 dirtyCodes={dirtyCodes}
+                candidateCodes={candidateCodes}
+                onToggleCandidate={handleToggleCandidate}
                 onRemoveItem={handleRemoveStock}
                 onMoveItem={handleMoveStock}
                 onSelectStock={(code) => setSelectedChartCode(code)}

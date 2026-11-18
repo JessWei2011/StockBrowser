@@ -537,6 +537,16 @@ button, input, select, textarea {
   vertical-align: middle;
 }
 
+.tab-candidate {
+  letter-spacing: 0.2px;
+}
+
+.candidate-icon {
+  margin-right: 4px;
+  font-size: 13px;
+  vertical-align: middle;
+}
+
 .view-mode-bar {
   background-color: var(--bg-main);
   border-bottom: 1px solid var(--border-color);
@@ -1157,8 +1167,9 @@ button, input, select, textarea {
 /* 拖曳與排序欄位樣式 */
 .th-reorder, .td-reorder {
   text-align: center;
-  width: 76px;
-  min-width: 76px;
+  width: 36px;
+  min-width: 36px;
+  padding: 0 4px;
 }
 
 .reorder-controls {
@@ -1225,12 +1236,14 @@ button, input, select, textarea {
   /* 移除亮黃色跳動，維持整潔視覺 */
 }
 
-/* Sticky 商品欄 */
+/* Sticky 商品欄（整合滑鼠拖曳與星號，節省畫面空間並消除多餘留白） */
 .th-sticky-stock, .td-sticky-stock {
   position: sticky;
   left: 0;
   z-index: 10;
   text-align: left;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 .th-sticky-stock {
@@ -1244,6 +1257,72 @@ button, input, select, textarea {
 
 .quote-row:hover .td-sticky-stock {
   background-color: var(--bg-hover);
+}
+
+.stock-cell-wrap {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  gap: 1px;
+}
+
+.drag-handle {
+  cursor: grab;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 1px 2px;
+  margin-right: 1px;
+  border-radius: 3px;
+  user-select: none;
+  transition: all 0.15s;
+  opacity: 0.45;
+  flex-shrink: 0;
+}
+
+.drag-handle:hover {
+  color: var(--color-orange);
+  background-color: var(--bg-hover);
+  opacity: 1;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.btn-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 1px 2px;
+  margin-right: 2px;
+  color: var(--text-muted);
+  opacity: 0.38;
+  transition: all 0.15s ease;
+  line-height: 1;
+  vertical-align: middle;
+  border-radius: 3px;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.btn-star:hover {
+  opacity: 1;
+  color: #f59e0b;
+  transform: scale(1.18);
+}
+
+.btn-star.starred {
+  opacity: 1;
+  color: #f59e0b;
+}
+
+.btn-star.starred:hover {
+  transform: scale(1.18);
+  filter: drop-shadow(0 0 3px rgba(245, 158, 11, 0.5));
 }
 
 .stock-clickable {
@@ -2149,7 +2228,48 @@ button, input, select, textarea {
 }
 
 .flat-id-row .stock-plain,
-.flat-id-row .stock-clickable {
+.flat-id-row .stock-cell-wrap {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+
+.btn-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 1px 3px 1px 0;
+  margin-right: 2px;
+  color: var(--text-muted);
+  opacity: 0.38;
+  transition: all 0.15s ease;
+  line-height: 1;
+  vertical-align: middle;
+  border-radius: 3px;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.btn-star:hover {
+  opacity: 1;
+  color: #f59e0b;
+  transform: scale(1.18);
+}
+
+.btn-star.starred {
+  opacity: 1;
+  color: #f59e0b;
+}
+
+.btn-star.starred:hover {
+  transform: scale(1.18);
+  filter: drop-shadow(0 0 3px rgba(245, 158, 11, 0.5));
+}
+
+.stock-clickable {
   display: inline-flex;
   align-items: baseline;
   gap: 5px;

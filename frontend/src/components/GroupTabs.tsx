@@ -39,13 +39,15 @@ export const GroupTabs: React.FC<GroupTabsProps> = ({
           {watchlistGroups.map((group) => {
             const isActive = group.id === activeGroupId;
             const isWealth = group.id === 'g-wealth' || group.name === '財神簿';
+            const isCandidate = group.id === 'g-candidate' || group.name === '選手區';
             return (
               <button
                 key={group.id}
-                className={`tab-item ${isActive ? 'active' : ''} ${isWealth ? 'tab-wealth' : ''}`}
+                className={`tab-item ${isActive ? 'active' : ''} ${isWealth ? 'tab-wealth' : ''} ${isCandidate ? 'tab-candidate' : ''}`}
                 onClick={() => onSelectGroup(group.id)}
               >
                 {isWealth && <span className="wealth-icon">💰</span>}
+                {isCandidate && <span className="candidate-icon">⭐</span>}
                 {group.name}
               </button>
             );

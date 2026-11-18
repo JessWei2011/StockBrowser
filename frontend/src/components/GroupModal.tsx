@@ -77,11 +77,19 @@ export const GroupModal: React.FC<GroupModalProps> = ({
     }
   };
 
+  const isSysGroup = (g: WatchlistGroup) =>
+    g.id === 'g-vault' ||
+    g.id === 'g-wealth' ||
+    g.id === 'g-candidate' ||
+    g.name === '財神庫' ||
+    g.name === '財神金庫' ||
+    g.name === '財神簿' ||
+    g.name === '選手區' ||
+    Boolean(g.isSystemGroup);
+
   const handleMove = (id: string, direction: 'up' | 'down') => {
     if (!onReorderGroups) return;
-    const customList = localGroups.filter(
-      (g) => !(g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神金庫' || g.name === '財神簿' || g.isSystemGroup)
-    );
+    const customList = localGroups.filter((g) => !isSysGroup(g));
     const currentIndex = customList.findIndex((g) => g.id === id);
     if (currentIndex === -1) return;
 
@@ -94,9 +102,7 @@ export const GroupModal: React.FC<GroupModalProps> = ({
     nextCustomList.splice(targetIndex, 0, moved);
 
     // 重組 localGroups 並立刻反映在 UI 上（無延遲、不鎖定按鈕）
-    const systemList = localGroups.filter(
-      (g) => g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神金庫' || g.name === '財神簿' || g.isSystemGroup
-    );
+    const systemList = localGroups.filter((g) => isSysGroup(g));
     const updatedAll = [...systemList, ...nextCustomList];
     setLocalGroups(updatedAll);
 
@@ -138,9 +144,7 @@ export const GroupModal: React.FC<GroupModalProps> = ({
       return;
     }
 
-    const customList = localGroups.filter(
-      (g) => !(g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神金庫' || g.name === '財神簿' || g.isSystemGroup)
-    );
+    const customList = localGroups.filter((g) => !isSysGroup(g));
     const fromIndex = customList.findIndex((g) => g.id === draggedId);
     const toIndex = customList.findIndex((g) => g.id === targetId);
 
@@ -153,9 +157,7 @@ export const GroupModal: React.FC<GroupModalProps> = ({
     const [moved] = nextCustomList.splice(fromIndex, 1);
     nextCustomList.splice(toIndex, 0, moved);
 
-    const systemList = localGroups.filter(
-      (g) => g.id === 'g-vault' || g.id === 'g-wealth' || g.name === '財神庫' || g.name === '財神金庫' || g.name === '財神簿' || g.isSystemGroup
-    );
+    const systemList = localGroups.filter((g) => isSysGroup(g));
     const updatedAll = [...systemList, ...nextCustomList];
     setLocalGroups(updatedAll);
 
@@ -169,9 +171,7 @@ export const GroupModal: React.FC<GroupModalProps> = ({
 
   // 排除純背景資料庫用的 g-vault (財神金庫)，展示與主畫面頁籤完全一致的組合列表
   const displayGroups = localGroups.filter((g) => g.id !== 'g-vault' && g.name !== '財神庫' && g.name !== '財神金庫');
-  const customGroups = displayGroups.filter(
-    (g) => !(g.id === 'g-wealth' || g.name === '財神簿' || g.isSystemGroup)
-  );
+  const customGroups = displayGroups.filter((g) => !isSysGroup(g));
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -214,13 +214,13 @@ export const GroupModal: React.FC<GroupModalProps> = ({
           ) : (
             <div className="group-list-edit">
               <div className="group-edit-hint">
-                💡 說明：可按住「<strong>⠿</strong>」以滑鼠直接<strong>拖曳整列排序</strong>，或點選 <strong>↑ / ↓</strong> 微調順序；點選「儲存」更名。「財神簿」為固定首頁。
+                💡 說明：可按住「<strong>⠿</strong>」以滑鼠直接<strong>拖曳整列排序</strong>，或點選 <strong>↑ / ↓</strong> 微調順序；點選「儲存」更名。「財神簿」與「選手區」為系統固定分頁。
               </div>
 
               {displayGroups.map((g) => {
                 const currentName = editingNames[g.id] ?? g.name;
                 const isModified = editingNames[g.id] !== undefined && editingNames[g.id] !== g.name;
-                const isSystem = Boolean(g.id === 'g-wealth' || g.name === '財神簿' || g.isSystemGroup);
+                const isSystem = isSysGroup(g);
                 const customIdx = customGroups.findIndex((cg) => cg.id === g.id);
                 const isFirst = customIdx === 0;
                 const isLast = customIdx === customGroups.length - 1;
@@ -241,7 +241,7 @@ export const GroupModal: React.FC<GroupModalProps> = ({
                   >
                     <div className="group-order-controls">
                       {isSystem ? (
-                        <span className="group-lock-badge" title="系統固定分頁，位置固定於第一位">
+                        <span className="group-lock-badge" title={g.id === 'g-candidate' || g.name === '選手區' ? '系統固定分頁，位置固定於第二位 (選手區)' : '系統固定分頁，位置固定於第一位 (財神簿)'}>
                           🔒
                         </span>
                       ) : (

@@ -88,15 +88,15 @@ async def reorder_groups(body: ReorderGroupsRequest):
 
 @router.patch("/groups/{group_id}")
 async def update_group(group_id: str, body: UpdateGroupRequest):
-    if group_id in ("g-vault", "g-wealth"):
-        raise HTTPException(status_code=400, detail="『財神金庫』與『財神簿』為系統持股固定分頁，無法更名或移動位置")
+    if group_id in ("g-vault", "g-wealth", "g-candidate"):
+        raise HTTPException(status_code=400, detail="『財神金庫』、『財神簿』與『選手區』為系統固定分頁，無法更名或移動位置")
     await watchlist_service.update_group(group_id, body.name, body.position)
     return {"status": "ok"}
 
 @router.delete("/groups/{group_id}")
 async def delete_group(group_id: str):
-    if group_id in ("g-vault", "g-wealth"):
-        raise HTTPException(status_code=400, detail="『財神金庫』與『財神簿』為系統持股固定分頁，無法刪除")
+    if group_id in ("g-vault", "g-wealth", "g-candidate"):
+        raise HTTPException(status_code=400, detail="『財神金庫』、『財神簿』與『選手區』為系統固定分頁，無法刪除")
     await watchlist_service.delete_group(group_id)
     return {"status": "ok"}
 

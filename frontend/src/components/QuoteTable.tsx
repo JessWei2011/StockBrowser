@@ -11,8 +11,10 @@ interface QuoteTableProps {
   announcements?: Record<string, StockAnnouncement[]>;
   indicators?: Record<string, StockMaSummary>;
   dirtyCodes: Set<string>;
+  candidateCodes?: Set<string>;
+  onToggleCandidate?: (code: string) => void;
   onRemoveItem: (code: string) => Promise<void>;
-  onMoveItem: (index: number, direction: 'up' | 'down') => Promise<void>;
+  onMoveItem?: (index: number, direction: 'up' | 'down') => Promise<void>;
   onReorderItems: (fromIndex: number, toIndex: number) => Promise<void>;
   onSelectStock?: (code: string) => void;
   onOpenOrder?: (code: string) => void;
@@ -24,8 +26,9 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
   quotes,
   announcements = {},
   indicators = {},
+  candidateCodes,
+  onToggleCandidate,
   onRemoveItem,
-  onMoveItem,
   onReorderItems,
   onSelectStock,
   onOpenOrder,
@@ -109,7 +112,6 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
       <table className="quote-table">
         <thead>
           <tr>
-            <th className="th-reorder">排序</th>
             <th className="th-sticky-stock">商品</th>
             <th>成交價</th>
             <th>零股價</th>
@@ -126,7 +128,7 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
         <tbody>
           {items.length === 0 ? (
             <tr>
-              <td colSpan={12} className="empty-message">
+              <td colSpan={11} className="empty-message">
                 目前群組沒有商品，請由上方搜尋並新增個股。
               </td>
             </tr>
@@ -192,55 +194,52 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                   onDragEnd={handleDragEnd}
                   onDrop={(e) => handleDrop(e, idx)}
                 >
-                  {/* 拖曳握把與上下移動按鈕 */}
-                  <td className="td-reorder" title="可拖曳整列，或點擊上下箭頭改變排序">
-                    <div className="reorder-controls">
-                      <span className="drag-handle" title="拖曳排序">⠿</span>
-                      <button
-                        className="btn-order-arrow"
-                        title="上移"
-                        disabled={idx === 0}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onMoveItem(idx, 'up');
-                        }}
-                      >
-                        ↑
-                      </button>
-                      <button
-                        className="btn-order-arrow"
-                        title="下移"
-                        disabled={idx === items.length - 1}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onMoveItem(idx, 'down');
-                        }}
-                      >
-                        ↓
-                      </button>
-                    </div>
-                  </td>
-
-                  {/* Sticky 商品代號與名稱 */}
+                  {/* Sticky 商品代號與名稱（整合滑鼠拖曳圖標與選手星號） */}
                   <td className="td-sticky-stock">
                     {(() => {
                       const isOtc = ((item.exchange || q?.exchange || '').toUpperCase() === 'OTC');
                       const isEtfOrBond = item.code.startsWith('00') || ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase());
+                      const isStarred = Boolean(candidateCodes?.has(item.code));
                       return (
-                        <span
-                          className={isEtfOrBond ? 'stock-plain' : 'stock-clickable'}
-                          onClick={!isEtfOrBond && onSelectStock ? () => onSelectStock(item.code) : undefined}
-                          title={!isEtfOrBond ? '點擊開啟個股動態技術走勢圖 (K線/均線/布林/籌碼/大戶)' : undefined}
-                        >
-                          <span
-                            className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
-                            title={isOtc ? '上櫃股票' : '上市股票'}
+                        <div className="stock-cell-wrap">
+                          <span className="drag-handle" title="按住滑鼠拖曳整列以調整順序">⠿</span>
+                          <button
+                            type="button"
+                            className={`btn-star ${isStarred ? 'starred' : ''}`}
+                            title={isStarred ? '從選手區移除' : '加入選手區'}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onToggleCandidate?.(item.code);
+                            }}
                           >
-                            {isOtc ? '櫃' : '市'}
+                            <svg
+                              width="13"
+                              height="13"
+                              viewBox="0 0 24 24"
+                              fill={isStarred ? "#f59e0b" : "none"}
+                              stroke={isStarred ? "#f59e0b" : "currentColor"}
+                              strokeWidth="2.2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                            </svg>
+                          </button>
+                          <span
+                            className={isEtfOrBond ? 'stock-plain' : 'stock-clickable'}
+                            onClick={!isEtfOrBond && onSelectStock ? () => onSelectStock(item.code) : undefined}
+                            title={!isEtfOrBond ? '點擊開啟個股動態技術走勢圖 (K線/均線/布林/籌碼/大戶)' : undefined}
+                          >
+                            <span
+                              className={`exchange-badge ${isOtc ? 'badge-otc' : 'badge-tse'}`}
+                              title={isOtc ? '上櫃股票' : '上市股票'}
+                            >
+                              {isOtc ? '櫃' : '市'}
+                            </span>
+                            <span className={`stock-code ${isOtc ? 'code-otc' : 'code-tse'}`}>{item.code}</span>
+                            <span className="stock-name">{item.name || q?.name || ''}</span>
                           </span>
-                          <span className={`stock-code ${isOtc ? 'code-otc' : 'code-tse'}`}>{item.code}</span>
-                          <span className="stock-name">{item.name || q?.name || ''}</span>
-                        </span>
+                        </div>
                       );
                     })()}
                     {(() => {
