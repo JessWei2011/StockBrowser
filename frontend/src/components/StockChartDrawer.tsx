@@ -439,6 +439,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
     setLoading(true);
     setError(null);
 
+    // 首次載入顯示 Loading
     fetchStockChart(code)
       .then((res: StockChartData) => {
         if (!isMounted) return;
@@ -451,8 +452,19 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
         setLoading(false);
       });
 
+    // 開啟狀態下每 15 秒靜默輪詢最新盤中 K 棒與指標重算數據
+    const timer = setInterval(() => {
+      fetchStockChart(code)
+        .then((res: StockChartData) => {
+          if (!isMounted) return;
+          setData(res);
+        })
+        .catch(() => {});
+    }, 15000);
+
     return () => {
       isMounted = false;
+      clearInterval(timer);
     };
   }, [code, isOpen]);
 
