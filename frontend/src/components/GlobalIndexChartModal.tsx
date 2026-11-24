@@ -850,7 +850,46 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
         }
       );
     } else if (subIndicator === 'rsi') {
+      const rsi6Over80 = rsi6Vals.map((v) => (v != null ? (v > 80 ? v : 80) : null));
+      const rsi6Under20 = rsi6Vals.map((v) => (v != null ? (v < 20 ? v : 20) : null));
+
       seriesList.push(
+        // 超買區 (>80) 塗紅填充
+        {
+          name: 'RSI-Over80',
+          type: 'line',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: rsi6Over80,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { opacity: 0 },
+          areaStyle: {
+            origin: 80,
+            color: 'rgba(239, 68, 68, 0.4)',
+          },
+          silent: true,
+          tooltip: { show: false },
+          z: 1,
+        },
+        // 超賣區 (<20) 塗綠填充
+        {
+          name: 'RSI-Under20',
+          type: 'line',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: rsi6Under20,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { opacity: 0 },
+          areaStyle: {
+            origin: 20,
+            color: 'rgba(16, 185, 129, 0.4)',
+          },
+          silent: true,
+          tooltip: { show: false },
+          z: 1,
+        },
         {
           name: 'RSI(6)',
           type: 'line',
@@ -864,8 +903,9 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
             symbol: 'none',
             silent: true,
             data: [
-              { yAxis: 80, lineStyle: { color: '#ef4444', type: 'dashed', width: 0.8 }, label: { formatter: '80', position: 'insideStartTop', fontSize: 9, color: '#ef4444' } },
-              { yAxis: 20, lineStyle: { color: '#10b981', type: 'dashed', width: 0.8 }, label: { formatter: '20', position: 'insideStartBottom', fontSize: 9, color: '#10b981' } },
+              { yAxis: 80, lineStyle: { color: '#ef4444', type: 'dashed', width: 0.8 }, label: { formatter: '超買 80', position: 'insideStartTop', fontSize: 9, color: '#ef4444' } },
+              { yAxis: 50, lineStyle: { color: '#64748b', type: 'dotted', width: 0.8 }, label: { formatter: '50', position: 'insideStartTop', fontSize: 9, color: '#64748b' } },
+              { yAxis: 20, lineStyle: { color: '#10b981', type: 'dashed', width: 0.8 }, label: { formatter: '超賣 20', position: 'insideStartBottom', fontSize: 9, color: '#10b981' } },
             ],
           },
           z: 2,
@@ -1366,7 +1406,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
                 type="button"
                 className={`chart-indicator-toggle ${subIndicator === 'rsi' ? 'active' : ''}`}
                 onClick={() => setSubIndicator('rsi')}
-                title="副圖顯示 RSI(6) 與 RSI(12) 相對強弱指標"
+                title="副圖顯示 RSI(6) 與 RSI(12) 相對強弱指標（含 >80 超買塗紅、<20 超賣塗綠）"
               >
                 RSI 指標
               </button>
@@ -1430,6 +1470,8 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
             <span className="legend-item legend-sub-rsi" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '10px', borderLeft: '1px solid rgba(148, 163, 184, 0.3)', paddingLeft: '10px' }}>
               <span style={{ color: '#0ea5e9', fontWeight: 700 }}>◆ RSI(6)</span>
               <span style={{ color: '#f97316', fontWeight: 700, marginLeft: '6px' }}>◆ RSI(12)</span>
+              <span style={{ color: '#ef4444', fontSize: '11px', marginLeft: '6px' }}>■ &gt;80超買</span>
+              <span style={{ color: '#10b981', fontSize: '11px', marginLeft: '3px' }}>■ &lt;20超賣</span>
             </span>
           )}
           {subIndicator === 'dmi' && (

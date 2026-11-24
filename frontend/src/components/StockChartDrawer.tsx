@@ -140,6 +140,59 @@ function getCalculatedDMI(kline: KlineBar[], period = 14) {
   return { pdiVals, ndiVals, adxVals };
 }
 
+/** 確保 RSI(6) 與 RSI(12) 數據齊全 */
+function getCalculatedRSI(kline: KlineBar[]) {
+  const count = kline.length;
+  const rsi6Vals: (number | null)[] = new Array(count).fill(null);
+  const rsi12Vals: (number | null)[] = new Array(count).fill(null);
+
+  const validBackendRsi = kline.filter((b) => b.rsi6 != null && !isNaN(b.rsi6));
+  if (validBackendRsi.length > count * 0.7) {
+    for (let i = 0; i < count; i++) {
+      rsi6Vals[i] = kline[i].rsi6 ?? null;
+      rsi12Vals[i] = kline[i].rsi12 ?? null;
+    }
+    return { rsi6Vals, rsi12Vals };
+  }
+
+  if (count >= 2) {
+    const calcWilder = (period: number) => {
+      const res: (number | null)[] = new Array(count).fill(null);
+      if (count < period + 1) return res;
+
+      let sumGain = 0;
+      let sumLoss = 0;
+      for (let i = 1; i <= period; i++) {
+        const diff = kline[i].close - kline[i - 1].close;
+        if (diff > 0) sumGain += diff;
+        else sumLoss -= diff;
+      }
+      let avgGain = sumGain / period;
+      let avgLoss = sumLoss / period;
+      res[period] = avgLoss === 0 ? 100 : Math.round((100 - (100 / (1 + avgGain / avgLoss))) * 10) / 10;
+
+      for (let i = period + 1; i < count; i++) {
+        const diff = kline[i].close - kline[i - 1].close;
+        const gain = diff > 0 ? diff : 0;
+        const loss = diff < 0 ? -diff : 0;
+        avgGain = (avgGain * (period - 1) + gain) / period;
+        avgLoss = (avgLoss * (period - 1) + loss) / period;
+        res[i] = avgLoss === 0 ? 100 : Math.round((100 - (100 / (1 + avgGain / avgLoss))) * 10) / 10;
+      }
+      return res;
+    };
+
+    const r6 = calcWilder(6);
+    const r12 = calcWilder(12);
+    for (let i = 0; i < count; i++) {
+      rsi6Vals[i] = r6[i];
+      rsi12Vals[i] = r12[i];
+    }
+  }
+
+  return { rsi6Vals, rsi12Vals };
+}
+
 
 const BUFFER_DAYS = 20;
 const MIN_VISIBLE_BARS = 4; // 允許放大至僅 4 根 K 棒，細看型態與巨大 K 棒細節
@@ -1078,7 +1131,12 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
           },
         },
         legend: {
-          data: ['K(9)', 'D(9)'],
+          data: [
+            'K(9)',
+            'D(9)',
+            { name: '>80 超買', icon: 'rect', itemStyle: { color: 'rgba(239, 68, 68, 0.7)' } },
+            { name: '<20 超賣', icon: 'rect', itemStyle: { color: 'rgba(16, 185, 129, 0.7)' } },
+          ],
           textStyle: { color: textColor, fontSize: 11 },
           top: 0,
         },
@@ -1115,7 +1173,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
         series: [
           // 超買區 (>80) 塗紅填充 (如看盤軟體)
           {
-            name: 'KD-Over80',
+            name: '>80 超買',
             type: 'line',
             data: kOver80,
             smooth: true,
@@ -1131,7 +1189,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
           },
           // 超賣區 (<20) 塗綠填充 (如看盤軟體)
           {
-            name: 'KD-Under20',
+            name: '<20 超賣',
             type: 'line',
             data: kUnder20,
             smooth: true,
@@ -1179,8 +1237,10 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
         (k) => k.volume > 0 || k.open !== k.close || k.high !== k.low
       );
       const expandedDates = kline.map((k) => k.date).concat(new Array(BUFFER_DAYS).fill(''));
-      const rsi6Vals = kline.map((k) => k.rsi6 ?? null);
-      const rsi12Vals = kline.map((k) => k.rsi12 ?? null);
+      const { rsi6Vals, rsi12Vals } = getCalculatedRSI(kline);
+      // 超買 (>80) 與超賣 (<20) 填色輔助數據 (依據短週期 RSI 6)
+      const rsi6Over80 = rsi6Vals.map((v) => (v != null ? (v > 80 ? v : 80) : null));
+      const rsi6Under20 = rsi6Vals.map((v) => (v != null ? (v < 20 ? v : 20) : null));
 
       // 取得主圖目前的 dataZoom 狀態
       const curStart = zoomRangeRef.current?.start ?? 0;
@@ -1208,7 +1268,12 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
           },
         },
         legend: {
-          data: ['RSI(6)', 'RSI(12)'],
+          data: [
+            'RSI(6)',
+            'RSI(12)',
+            { name: '>80 超買', icon: 'rect', itemStyle: { color: 'rgba(239, 68, 68, 0.7)' } },
+            { name: '<20 超賣', icon: 'rect', itemStyle: { color: 'rgba(16, 185, 129, 0.7)' } },
+          ],
           textStyle: { color: textColor, fontSize: 11 },
           top: 0,
         },
@@ -1243,6 +1308,38 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
           },
         ],
         series: [
+          // 超買區 (>80) 塗紅填充 (如看盤軟體)
+          {
+            name: '>80 超買',
+            type: 'line',
+            data: rsi6Over80,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { opacity: 0 },
+            areaStyle: {
+              origin: 80,
+              color: 'rgba(239, 68, 68, 0.4)',
+            },
+            silent: true,
+            tooltip: { show: false },
+            z: 1,
+          },
+          // 超賣區 (<20) 塗綠填充 (如看盤軟體)
+          {
+            name: '<20 超賣',
+            type: 'line',
+            data: rsi6Under20,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { opacity: 0 },
+            areaStyle: {
+              origin: 20,
+              color: 'rgba(16, 185, 129, 0.4)',
+            },
+            silent: true,
+            tooltip: { show: false },
+            z: 1,
+          },
           {
             name: 'RSI(6)',
             type: 'line',
@@ -1259,6 +1356,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
                 { yAxis: 20, lineStyle: { color: '#10b981', type: 'dashed', width: 0.8 }, label: { formatter: '超賣 20', position: 'insideStartBottom', fontSize: 9, color: '#10b981' } },
               ],
             },
+            z: 2,
           },
           {
             name: 'RSI(12)',
@@ -1267,6 +1365,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
             smooth: true,
             showSymbol: false,
             lineStyle: { color: '#f97316', width: 1.8 },
+            z: 2,
           },
         ],
       };
@@ -1709,27 +1808,30 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
                 <button
                   className={`sub-tab-btn ${activeTab === 'chips' ? 'active' : ''}`}
                   onClick={() => setActiveTab('chips')}
+                  title={`三大法人籌碼變動 (${data.institutional.length}日)`}
                 >
-                  🏛️ 三大法人籌碼 ({data.institutional.length}日)
+                  🏛️ 三大法人
                 </button>
                 <button
                   className={`sub-tab-btn ${activeTab === 'margin' ? 'active' : ''}`}
                   onClick={() => setActiveTab('margin')}
+                  title={`資券主力變動 (${data.margin.length}日)`}
                 >
-                  ⚡ 資券主力變動 ({data.margin.length}日)
+                  ⚡ 資券主力
                 </button>
                 <button
                   className={`sub-tab-btn ${activeTab === 'holders' ? 'active' : ''}`}
                   onClick={() => setActiveTab('holders')}
+                  title={`大戶散戶比例 (${data.holders.length}週)`}
                 >
-                  👑 大戶散戶比例 ({data.holders.length}週)
+                  👑 大戶散戶
                 </button>
                 <button
                   className={`sub-tab-btn ${activeTab === 'kd' ? 'active' : ''}`}
                   onClick={() => setActiveTab('kd')}
-                  title="9日 KD 隨機指標 (超買超賣與黃金交叉)"
+                  title="9日 KD 隨機指標 (含 >80 超買塗紅、<20 超賣塗綠)"
                 >
-                  📈 KD 指標
+                  📈 KD
                 </button>
                 <button
                   className={`sub-tab-btn ${activeTab === 'macd' ? 'active' : ''}`}
@@ -1741,16 +1843,16 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
                 <button
                   className={`sub-tab-btn ${activeTab === 'rsi' ? 'active' : ''}`}
                   onClick={() => setActiveTab('rsi')}
-                  title="相對強弱指標 RSI (多空強弱)"
+                  title="相對強弱指標 RSI (含 >80 超買塗紅、<20 超賣塗綠)"
                 >
-                  📉 RSI 指標
+                  📉 RSI
                 </button>
                 <button
                   className={`sub-tab-btn ${activeTab === 'dmi' ? 'active' : ''}`}
                   onClick={() => setActiveTab('dmi')}
                   title="DMI 趨向指標 (+DI 多方、-DI 空方與 ADX 趨勢強度)"
                 >
-                  🧭 DMI 趨向
+                  🧭 DMI
                 </button>
               </div>
 
