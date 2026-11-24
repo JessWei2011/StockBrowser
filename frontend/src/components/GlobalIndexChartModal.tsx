@@ -293,6 +293,127 @@ function getCalculatedRSI(kline: KlineBar[]) {
   return { rsi6Vals, rsi12Vals };
 }
 
+/** 計算標準 MACD(12, 26, 9) 指標 (快線 DIF, 慢線 DEM, 柱狀 OSC) */
+function getCalculatedMACD(kline: KlineBar[]) {
+  const n = kline.length;
+  const difVals: (number | null)[] = new Array(n).fill(null);
+  const demVals: (number | null)[] = new Array(n).fill(null);
+  const oscVals: (number | null)[] = new Array(n).fill(null);
+
+  const hasBackend = kline.filter((k) => k.macd_dif != null).length > n * 0.7;
+  if (hasBackend) {
+    kline.forEach((k, i) => {
+      difVals[i] = k.macd_dif ?? null;
+      demVals[i] = k.macd_dem ?? null;
+      oscVals[i] = k.macd_hist ?? null;
+    });
+    return { difVals, demVals, oscVals };
+  }
+
+  if (n < 2) return { difVals, demVals, oscVals };
+  let ema12 = kline[0].close;
+  let ema26 = kline[0].close;
+  const a12 = 2.0 / 13.0;
+  const a26 = 2.0 / 27.0;
+  const a9 = 2.0 / 10.0;
+  const tempDif: number[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const c = kline[i].close;
+    ema12 = c * a12 + ema12 * (1.0 - a12);
+    ema26 = c * a26 + ema26 * (1.0 - a26);
+    tempDif.push(ema12 - ema26);
+  }
+
+  let dem = tempDif[0];
+  for (let i = 0; i < n; i++) {
+    const d = tempDif[i];
+    dem = d * a9 + dem * (1.0 - a9);
+    difVals[i] = Math.round(d * 100) / 100;
+    demVals[i] = Math.round(dem * 100) / 100;
+    oscVals[i] = Math.round((d - dem) * 100) / 100;
+  }
+  return { difVals, demVals, oscVals };
+}
+
+/** 計算標準 DMI(14) 趨向指標 (+DI, -DI, ADX) */
+function getCalculatedDMI(kline: KlineBar[], period = 14) {
+  const n = kline.length;
+  const pdiVals: (number | null)[] = new Array(n).fill(null);
+  const ndiVals: (number | null)[] = new Array(n).fill(null);
+  const adxVals: (number | null)[] = new Array(n).fill(null);
+
+  const hasBackend = kline.filter((k) => k.dmi_pdi != null).length > n * 0.7;
+  if (hasBackend) {
+    kline.forEach((k, i) => {
+      pdiVals[i] = k.dmi_pdi ?? null;
+      ndiVals[i] = k.dmi_ndi ?? null;
+      adxVals[i] = k.dmi_adx ?? null;
+    });
+    return { pdiVals, ndiVals, adxVals };
+  }
+
+  if (n < period + 1) return { pdiVals, ndiVals, adxVals };
+  const trList = [0];
+  const pdmList = [0];
+  const ndmList = [0];
+
+  for (let i = 1; i < n; i++) {
+    const h = kline[i].high;
+    const l = kline[i].low;
+    const prevH = kline[i - 1].high;
+    const prevL = kline[i - 1].low;
+    const prevC = kline[i - 1].close;
+
+    const tr = Math.max(h - l, Math.abs(h - prevC), Math.abs(l - prevC));
+    const up = h - prevH;
+    const down = prevL - l;
+
+    trList.push(tr);
+    pdmList.push(up > down && up > 0 ? up : 0);
+    ndmList.push(down > up && down > 0 ? down : 0);
+  }
+
+  let tr14 = trList.slice(1, period + 1).reduce((a, b) => a + b, 0);
+  let pdm14 = pdmList.slice(1, period + 1).reduce((a, b) => a + b, 0);
+  let ndm14 = ndmList.slice(1, period + 1).reduce((a, b) => a + b, 0);
+
+  const dx: (number | null)[] = new Array(n).fill(null);
+
+  pdiVals[period] = tr14 > 0 ? Math.round((pdm14 / tr14) * 10000) / 100 : 0;
+  ndiVals[period] = tr14 > 0 ? Math.round((ndm14 / tr14) * 10000) / 100 : 0;
+  const s0 = (pdiVals[period] || 0) + (ndiVals[period] || 0);
+  dx[period] = s0 > 0 ? Math.round((Math.abs((pdiVals[period] || 0) - (ndiVals[period] || 0)) / s0) * 10000) / 100 : 0;
+
+  for (let i = period + 1; i < n; i++) {
+    tr14 = tr14 - tr14 / period + trList[i];
+    pdm14 = pdm14 - pdm14 / period + pdmList[i];
+    ndm14 = ndm14 - ndm14 / period + ndmList[i];
+
+    const p = tr14 > 0 ? Math.round((pdm14 / tr14) * 10000) / 100 : 0;
+    const nd = tr14 > 0 ? Math.round((ndm14 / tr14) * 10000) / 100 : 0;
+    pdiVals[i] = p;
+    ndiVals[i] = nd;
+    const s = p + nd;
+    dx[i] = s > 0 ? Math.round((Math.abs(p - nd) / s) * 10000) / 100 : 0;
+  }
+
+  const firstAdxIdx = period * 2 - 1;
+  if (n > firstAdxIdx) {
+    const validDx = dx.slice(period, firstAdxIdx + 1).filter((x): x is number => x != null);
+    if (validDx.length === period) {
+      let currAdx = validDx.reduce((a, b) => a + b, 0) / period;
+      adxVals[firstAdxIdx] = Math.round(currAdx * 100) / 100;
+      for (let i = firstAdxIdx + 1; i < n; i++) {
+        currAdx = (currAdx * (period - 1) + (dx[i] ?? 0)) / period;
+        adxVals[i] = Math.round(currAdx * 100) / 100;
+      }
+    }
+  }
+
+  return { pdiVals, ndiVals, adxVals };
+}
+
 interface GlobalIndexChartModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -326,7 +447,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
   const [showMA, setShowMA] = useState(true);
   const [showBoll, setShowBoll] = useState(false);
   const [activeRange, setActiveRange] = useState<'1Y' | '2Y' | '6M' | '3M'>('3M');
-  const [subIndicator, setSubIndicator] = useState<'vol' | 'kd' | 'rsi'>('vol');
+  const [subIndicator, setSubIndicator] = useState<'vol' | 'kd' | 'macd' | 'rsi' | 'dmi'>('vol');
 
   const mainChartRef = useRef<HTMLDivElement | null>(null);
   const mainInstanceRef = useRef<echarts.ECharts | null>(null);
@@ -457,8 +578,8 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
 
     // 檢查是否有歷史成交量/額資料
     const hasVolumeData = kline.some((k: KlineBar) => (k.volume ?? 0) > 0);
-    // 是否顯示副圖 (成交量/額、KD 或 RSI)
-    const hasSubChart = (subIndicator === 'vol' && hasVolumeData) || subIndicator === 'kd' || subIndicator === 'rsi';
+    // 是否顯示副圖 (成交量/額、KD、MACD、RSI 或 DMI)
+    const hasSubChart = (subIndicator === 'vol' && hasVolumeData) || ['kd', 'macd', 'rsi', 'dmi'].includes(subIndicator);
     // 是否為台股市場（加權或櫃買），單位為億元；其他市場若有量則以量為單位
     const isTwMarket = code === 'IX0001' || code === 'IX0043' || code === 'TSE' || code === 'OTC' || code === '^TWII' || code === 'MKT01' || code === 'MKT02';
     const volumeUnitLabel = isTwMarket ? '億元' : '量';
@@ -599,9 +720,11 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
       );
     }
 
-    // 取得/計算副圖 KD 與 RSI 指標數值 (確保大盤指數與任何缺漏 K 棒均有完整數值)
+    // 取得/計算副圖 KD、RSI、MACD 與 DMI 指標數值 (確保大盤指數與任何缺漏 K 棒均有完整數值)
     const { kVals, dVals } = getCalculatedKD(kline);
     const { rsi6Vals, rsi12Vals } = getCalculatedRSI(kline);
+    const { difVals, demVals, oscVals } = getCalculatedMACD(kline);
+    const { pdiVals, ndiVals, adxVals } = getCalculatedDMI(kline);
 
     // 副圖系列
     if (subIndicator === 'vol' && hasVolumeData) {
@@ -685,6 +808,47 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           z: 2,
         }
       );
+    } else if (subIndicator === 'macd') {
+      seriesList.push(
+        {
+          name: 'OSC (柱狀)',
+          type: 'bar',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: oscVals.map((v) => (v != null ? {
+            value: v,
+            itemStyle: { color: v >= 0 ? '#ef4444' : '#10b981' },
+          } : null)),
+          barMaxWidth: 6,
+          markLine: {
+            symbol: 'none',
+            silent: true,
+            data: [
+              { yAxis: 0, lineStyle: { color: isDark ? '#475569' : '#cbd5e1', type: 'dashed', width: 0.8 }, label: { formatter: '0軸', position: 'insideStartTop', fontSize: 9, color: textColor } },
+            ],
+          },
+        },
+        {
+          name: 'DIF (快線)',
+          type: 'line',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: difVals,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { color: '#2962FF', width: 1.8 },
+        },
+        {
+          name: 'MACD (慢線)',
+          type: 'line',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: demVals,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { color: '#FF6D00', width: 1.8 },
+        }
+      );
     } else if (subIndicator === 'rsi') {
       seriesList.push(
         {
@@ -716,6 +880,47 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           showSymbol: false,
           lineStyle: { color: '#f97316', width: 1.8 },
           z: 2,
+        }
+      );
+    } else if (subIndicator === 'dmi') {
+      seriesList.push(
+        {
+          name: '+DI (多方)',
+          type: 'line',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: pdiVals,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { color: '#2962FF', width: 1.8 },
+          markLine: {
+            symbol: 'none',
+            silent: true,
+            data: [
+              { yAxis: 20, lineStyle: { color: isDark ? '#475569' : '#cbd5e1', type: 'dashed', width: 0.8 }, label: { formatter: '20', position: 'insideStartTop', fontSize: 9, color: textColor } },
+              { yAxis: 40, lineStyle: { color: isDark ? '#475569' : '#cbd5e1', type: 'dashed', width: 0.8 }, label: { formatter: '40', position: 'insideStartTop', fontSize: 9, color: textColor } },
+            ],
+          },
+        },
+        {
+          name: '-DI (空方)',
+          type: 'line',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: ndiVals,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { color: '#FF6D00', width: 1.8 },
+        },
+        {
+          name: 'ADX (趨勢強度)',
+          type: 'line',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: adxVals,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { color: '#E040FB', width: 1.8 },
         }
       );
     }
@@ -754,12 +959,29 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
             const kStr = kVal != null ? kVal.toFixed(1) : '-';
             const dStr = dVal != null ? dVal.toFixed(1) : '-';
             html += `<div style="margin-top:3px;font-weight:600;"><span style="color:#0ea5e9;">◆ K(9): ${kStr}</span> ｜ <span style="color:#f97316;">◆ D(9): ${dStr}</span></div>`;
+          } else if (subIndicator === 'macd') {
+            const dif = difVals[idx];
+            const dem = demVals[idx];
+            const osc = oscVals[idx];
+            const difStr = dif != null ? dif.toFixed(2) : '-';
+            const demStr = dem != null ? dem.toFixed(2) : '-';
+            const oscStr = osc != null ? (osc >= 0 ? `+${osc.toFixed(2)}` : osc.toFixed(2)) : '-';
+            const oscColor = (osc ?? 0) >= 0 ? '#ef4444' : '#10b981';
+            html += `<div style="margin-top:3px;font-weight:600;"><span style="color:#2962FF;">◆ DIF (快線): ${difStr}</span> ｜ <span style="color:#FF6D00;">◆ MACD (慢線): ${demStr}</span> ｜ <span style="color:${oscColor};">◆ OSC (柱狀): ${oscStr}</span></div>`;
           } else if (subIndicator === 'rsi') {
             const r6Val = rsi6Vals[idx] ?? k.rsi6;
             const r12Val = rsi12Vals[idx] ?? k.rsi12;
             const r6Str = r6Val != null ? r6Val.toFixed(1) : '-';
             const r12Str = r12Val != null ? r12Val.toFixed(1) : '-';
             html += `<div style="margin-top:3px;font-weight:600;"><span style="color:#0ea5e9;">◆ RSI(6): ${r6Str}</span> ｜ <span style="color:#f97316;">◆ RSI(12): ${r12Str}</span></div>`;
+          } else if (subIndicator === 'dmi') {
+            const pdi = pdiVals[idx];
+            const ndi = ndiVals[idx];
+            const adx = adxVals[idx];
+            const pdiStr = pdi != null ? pdi.toFixed(2) : '-';
+            const ndiStr = ndi != null ? ndi.toFixed(2) : '-';
+            const adxStr = adx != null ? adx.toFixed(2) : '-';
+            html += `<div style="margin-top:3px;font-weight:600;"><span style="color:#2962FF;">◆ +DI: ${pdiStr}</span> ｜ <span style="color:#FF6D00;">◆ -DI: ${ndiStr}</span> ｜ <span style="color:#E040FB;">◆ ADX: ${adxStr}</span></div>`;
           }
           return html;
         },
@@ -854,6 +1076,20 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
                     color: textColor,
                     fontSize: 10,
                     formatter: (v: number) => (isTwMarket ? `${Math.round(v)}億` : `${v}`),
+                  },
+                }
+              : subIndicator === 'macd'
+              ? {
+                  type: 'value',
+                  scale: true,
+                  gridIndex: 1,
+                  position: 'right',
+                  splitNumber: 3,
+                  axisLine: { show: true, lineStyle: { color: gridBorder } },
+                  splitLine: { lineStyle: { color: gridSplitLine } },
+                  axisLabel: {
+                    color: textColor,
+                    fontSize: 10,
                   },
                 }
               : {
@@ -1100,7 +1336,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
               </button>
             </div>
 
-            {/* 副圖指標切換 (成交額/量、KD、RSI) */}
+            {/* 副圖指標切換 (成交額/量、KD、MACD、RSI、DMI) */}
             <div className="chart-toggle-group">
               <button
                 type="button"
@@ -1120,11 +1356,27 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
               </button>
               <button
                 type="button"
+                className={`chart-indicator-toggle ${subIndicator === 'macd' ? 'active' : ''}`}
+                onClick={() => setSubIndicator('macd')}
+                title="副圖顯示 MACD(12, 26, 9) 指標 (DIF 藍、MACD 橘、OSC 柱狀)"
+              >
+                MACD 指標
+              </button>
+              <button
+                type="button"
                 className={`chart-indicator-toggle ${subIndicator === 'rsi' ? 'active' : ''}`}
                 onClick={() => setSubIndicator('rsi')}
                 title="副圖顯示 RSI(6) 與 RSI(12) 相對強弱指標"
               >
                 RSI 指標
+              </button>
+              <button
+                type="button"
+                className={`chart-indicator-toggle ${subIndicator === 'dmi' ? 'active' : ''}`}
+                onClick={() => setSubIndicator('dmi')}
+                title="副圖顯示 DMI(14) 趨向指標 (+DI 藍、-DI 橘、ADX 紫)"
+              >
+                DMI 趨向
               </button>
             </div>
 
@@ -1167,10 +1419,24 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
               <span style={{ color: '#10b981', fontSize: '11px', marginLeft: '3px' }}>■ &lt;20超賣</span>
             </span>
           )}
+          {subIndicator === 'macd' && (
+            <span className="legend-item legend-sub-macd" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '10px', borderLeft: '1px solid rgba(148, 163, 184, 0.3)', paddingLeft: '10px' }}>
+              <span style={{ color: '#2962FF', fontWeight: 700 }}>◆ DIF (快線)</span>
+              <span style={{ color: '#FF6D00', fontWeight: 700, marginLeft: '6px' }}>◆ MACD (慢線)</span>
+              <span style={{ color: '#ef4444', fontSize: '11px', marginLeft: '6px' }}>■ OSC柱狀</span>
+            </span>
+          )}
           {subIndicator === 'rsi' && (
             <span className="legend-item legend-sub-rsi" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '10px', borderLeft: '1px solid rgba(148, 163, 184, 0.3)', paddingLeft: '10px' }}>
               <span style={{ color: '#0ea5e9', fontWeight: 700 }}>◆ RSI(6)</span>
               <span style={{ color: '#f97316', fontWeight: 700, marginLeft: '6px' }}>◆ RSI(12)</span>
+            </span>
+          )}
+          {subIndicator === 'dmi' && (
+            <span className="legend-item legend-sub-dmi" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '10px', borderLeft: '1px solid rgba(148, 163, 184, 0.3)', paddingLeft: '10px' }}>
+              <span style={{ color: '#2962FF', fontWeight: 700 }}>◆ +DI (多方)</span>
+              <span style={{ color: '#FF6D00', fontWeight: 700, marginLeft: '6px' }}>◆ -DI (空方)</span>
+              <span style={{ color: '#E040FB', fontWeight: 700, marginLeft: '6px' }}>◆ ADX (強度)</span>
             </span>
           )}
           <span className="legend-hint">

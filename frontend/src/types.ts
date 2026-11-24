@@ -322,9 +322,14 @@ export interface KlineBar {
   rsi?: number | null;
   rsi6?: number | null;
   rsi12?: number | null;
+  macd_dif?: number | null;
+  macd_dem?: number | null;
   macd_hist?: number | null;
   k?: number | null;
   d?: number | null;
+  dmi_pdi?: number | null;
+  dmi_ndi?: number | null;
+  dmi_adx?: number | null;
 }
 
 export interface InstitutionalFlowItem {

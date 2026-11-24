@@ -155,9 +155,15 @@ class KlineBar(BaseModel):
     rsi: Optional[float] = None
     rsi6: Optional[float] = None
     rsi12: Optional[float] = None
+    macd_dif: Optional[float] = None
+    macd_dem: Optional[float] = None
     macd_hist: Optional[float] = None
     k: Optional[float] = None
     d: Optional[float] = None
+    dmi_pdi: Optional[float] = None
+    dmi_ndi: Optional[float] = None
+    dmi_adx: Optional[float] = None
+
 
 class InstitutionalFlowItem(BaseModel):
     date: str
@@ -341,6 +347,95 @@ def recalculate_indicators(kline_bars: list[KlineBar]):
                     curr_b.k = round(k_val, 2)
                 if curr_b.d is None:
                     curr_b.d = round(d_val, 2)
+
+    # 計算標準 MACD(12, 26, 9) 指標 (EMA12, EMA26, DIF, DEM, OSC)
+    if len(kline_bars) >= 2:
+        ema12 = kline_bars[0].close
+        ema26 = kline_bars[0].close
+        a12 = 2.0 / 13.0
+        a26 = 2.0 / 27.0
+        a9 = 2.0 / 10.0
+        dif_vals = []
+        for b in kline_bars:
+            ema12 = b.close * a12 + ema12 * (1.0 - a12)
+            ema26 = b.close * a26 + ema26 * (1.0 - a26)
+            dif_vals.append(ema12 - ema26)
+
+        dem = dif_vals[0]
+        for idx, b in enumerate(kline_bars):
+            dif_val = dif_vals[idx]
+            dem = dif_val * a9 + dem * (1.0 - a9)
+            osc = dif_val - dem
+            b.macd_dif = round(dif_val, 2)
+            b.macd_dem = round(dem, 2)
+            b.macd_hist = round(osc, 2)
+
+    # 計算標準 DMI(14) 趨向指標 (+DI, -DI, ADX)
+    n_bars = len(kline_bars)
+    period = 14
+    if n_bars >= period + 1:
+        tr_list = [0.0]
+        pdm_list = [0.0]
+        ndm_list = [0.0]
+        for i in range(1, n_bars):
+            h = kline_bars[i].high
+            l = kline_bars[i].low
+            prev_h = kline_bars[i-1].high
+            prev_l = kline_bars[i-1].low
+            prev_c = kline_bars[i-1].close
+
+            tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
+            up = h - prev_h
+            down = prev_l - l
+
+            pdm = up if (up > down and up > 0) else 0.0
+            ndm = down if (down > up and down > 0) else 0.0
+
+            tr_list.append(tr)
+            pdm_list.append(pdm)
+            ndm_list.append(ndm)
+
+        tr14 = sum(tr_list[1:period+1])
+        pdm14 = sum(pdm_list[1:period+1])
+        ndm14 = sum(ndm_list[1:period+1])
+
+        pdi = [None] * n_bars
+        ndi = [None] * n_bars
+        dx = [None] * n_bars
+        adx = [None] * n_bars
+
+        pdi[period] = round((pdm14 / tr14) * 100.0, 2) if tr14 > 0 else 0.0
+        ndi[period] = round((ndm14 / tr14) * 100.0, 2) if tr14 > 0 else 0.0
+        di_sum = (pdi[period] or 0.0) + (ndi[period] or 0.0)
+        dx[period] = round((abs((pdi[period] or 0.0) - (ndi[period] or 0.0)) / di_sum) * 100.0, 2) if di_sum > 0 else 0.0
+
+        for i in range(period + 1, n_bars):
+            tr14 = tr14 - (tr14 / period) + tr_list[i]
+            pdm14 = pdm14 - (pdm14 / period) + pdm_list[i]
+            ndm14 = ndm14 - (ndm14 / period) + ndm_list[i]
+
+            p_val = round((pdm14 / tr14) * 100.0, 2) if tr14 > 0 else 0.0
+            n_val = round((ndm14 / tr14) * 100.0, 2) if tr14 > 0 else 0.0
+            pdi[i] = p_val
+            ndi[i] = n_val
+            s = p_val + n_val
+            dx[i] = round((abs(p_val - n_val) / s) * 100.0, 2) if s > 0 else 0.0
+
+        first_adx_idx = period * 2 - 1
+        if n_bars > first_adx_idx:
+            valid_dx = [x for x in dx[period:first_adx_idx+1] if x is not None]
+            if len(valid_dx) == period:
+                curr_adx = sum(valid_dx) / float(period)
+                adx[first_adx_idx] = round(curr_adx, 2)
+                for i in range(first_adx_idx + 1, n_bars):
+                    curr_adx = (curr_adx * (period - 1) + (dx[i] or 0.0)) / float(period)
+                    adx[i] = round(curr_adx, 2)
+
+        for idx, b in enumerate(kline_bars):
+            b.dmi_pdi = pdi[idx]
+            b.dmi_ndi = ndi[idx]
+            b.dmi_adx = adx[idx]
+
 
 def backfill_missing_kline_bars(code: str, kline_bars: list[KlineBar]) -> list[KlineBar]:
     """

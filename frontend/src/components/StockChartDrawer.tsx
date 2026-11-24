@@ -17,7 +17,129 @@ interface StockChartDrawerProps {
   onToggleTheme?: () => void;
 }
 
-type TabKey = 'chips' | 'margin' | 'holders' | 'kd' | 'rsi';
+type TabKey = 'chips' | 'margin' | 'holders' | 'kd' | 'macd' | 'rsi' | 'dmi';
+
+/** 計算標準 MACD(12, 26, 9) 指標 (快線 DIF, 慢線 DEM, 柱狀 OSC) */
+function getCalculatedMACD(kline: KlineBar[]) {
+  const n = kline.length;
+  const difVals: (number | null)[] = new Array(n).fill(null);
+  const demVals: (number | null)[] = new Array(n).fill(null);
+  const oscVals: (number | null)[] = new Array(n).fill(null);
+
+  const hasBackend = kline.filter((k) => k.macd_dif != null).length > n * 0.7;
+  if (hasBackend) {
+    kline.forEach((k, i) => {
+      difVals[i] = k.macd_dif ?? null;
+      demVals[i] = k.macd_dem ?? null;
+      oscVals[i] = k.macd_hist ?? null;
+    });
+    return { difVals, demVals, oscVals };
+  }
+
+  if (n < 2) return { difVals, demVals, oscVals };
+  let ema12 = kline[0].close;
+  let ema26 = kline[0].close;
+  const a12 = 2.0 / 13.0;
+  const a26 = 2.0 / 27.0;
+  const a9 = 2.0 / 10.0;
+  const tempDif: number[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const c = kline[i].close;
+    ema12 = c * a12 + ema12 * (1.0 - a12);
+    ema26 = c * a26 + ema26 * (1.0 - a26);
+    tempDif.push(ema12 - ema26);
+  }
+
+  let dem = tempDif[0];
+  for (let i = 0; i < n; i++) {
+    const d = tempDif[i];
+    dem = d * a9 + dem * (1.0 - a9);
+    difVals[i] = Math.round(d * 100) / 100;
+    demVals[i] = Math.round(dem * 100) / 100;
+    oscVals[i] = Math.round((d - dem) * 100) / 100;
+  }
+  return { difVals, demVals, oscVals };
+}
+
+/** 計算標準 DMI(14) 趨向指標 (+DI, -DI, ADX) */
+function getCalculatedDMI(kline: KlineBar[], period = 14) {
+  const n = kline.length;
+  const pdiVals: (number | null)[] = new Array(n).fill(null);
+  const ndiVals: (number | null)[] = new Array(n).fill(null);
+  const adxVals: (number | null)[] = new Array(n).fill(null);
+
+  const hasBackend = kline.filter((k) => k.dmi_pdi != null).length > n * 0.7;
+  if (hasBackend) {
+    kline.forEach((k, i) => {
+      pdiVals[i] = k.dmi_pdi ?? null;
+      ndiVals[i] = k.dmi_ndi ?? null;
+      adxVals[i] = k.dmi_adx ?? null;
+    });
+    return { pdiVals, ndiVals, adxVals };
+  }
+
+  if (n < period + 1) return { pdiVals, ndiVals, adxVals };
+  const trList = [0];
+  const pdmList = [0];
+  const ndmList = [0];
+
+  for (let i = 1; i < n; i++) {
+    const h = kline[i].high;
+    const l = kline[i].low;
+    const prevH = kline[i - 1].high;
+    const prevL = kline[i - 1].low;
+    const prevC = kline[i - 1].close;
+
+    const tr = Math.max(h - l, Math.abs(h - prevC), Math.abs(l - prevC));
+    const up = h - prevH;
+    const down = prevL - l;
+
+    trList.push(tr);
+    pdmList.push(up > down && up > 0 ? up : 0);
+    ndmList.push(down > up && down > 0 ? down : 0);
+  }
+
+  let tr14 = trList.slice(1, period + 1).reduce((a, b) => a + b, 0);
+  let pdm14 = pdmList.slice(1, period + 1).reduce((a, b) => a + b, 0);
+  let ndm14 = ndmList.slice(1, period + 1).reduce((a, b) => a + b, 0);
+
+  const dx: (number | null)[] = new Array(n).fill(null);
+
+  pdiVals[period] = tr14 > 0 ? Math.round((pdm14 / tr14) * 10000) / 100 : 0;
+  ndiVals[period] = tr14 > 0 ? Math.round((ndm14 / tr14) * 10000) / 100 : 0;
+  const s0 = (pdiVals[period] || 0) + (ndiVals[period] || 0);
+  dx[period] = s0 > 0 ? Math.round((Math.abs((pdiVals[period] || 0) - (ndiVals[period] || 0)) / s0) * 10000) / 100 : 0;
+
+  for (let i = period + 1; i < n; i++) {
+    tr14 = tr14 - tr14 / period + trList[i];
+    pdm14 = pdm14 - pdm14 / period + pdmList[i];
+    ndm14 = ndm14 - ndm14 / period + ndmList[i];
+
+    const p = tr14 > 0 ? Math.round((pdm14 / tr14) * 10000) / 100 : 0;
+    const nd = tr14 > 0 ? Math.round((ndm14 / tr14) * 10000) / 100 : 0;
+    pdiVals[i] = p;
+    ndiVals[i] = nd;
+    const s = p + nd;
+    dx[i] = s > 0 ? Math.round((Math.abs(p - nd) / s) * 10000) / 100 : 0;
+  }
+
+  const firstAdxIdx = period * 2 - 1;
+  if (n > firstAdxIdx) {
+    const validDx = dx.slice(period, firstAdxIdx + 1).filter((x): x is number => x != null);
+    if (validDx.length === period) {
+      let currAdx = validDx.reduce((a, b) => a + b, 0) / period;
+      adxVals[firstAdxIdx] = Math.round(currAdx * 100) / 100;
+      for (let i = firstAdxIdx + 1; i < n; i++) {
+        currAdx = (currAdx * (period - 1) + (dx[i] ?? 0)) / period;
+        adxVals[i] = Math.round(currAdx * 100) / 100;
+      }
+    }
+  }
+
+  return { pdiVals, ndiVals, adxVals };
+}
+
 
 const BUFFER_DAYS = 20;
 const MIN_VISIBLE_BARS = 4; // 允許放大至僅 4 根 K 棒，細看型態與巨大 K 棒細節
@@ -1148,6 +1270,219 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
           },
         ],
       };
+    } else if (activeTab === 'macd') {
+      // 技術指標：MACD (12, 26, 9) 指標 (DIF 藍、DEM/MACD 橘、OSC 柱狀)
+      const kline = (data.kline || []).filter(
+        (k) => k.volume > 0 || k.open !== k.close || k.high !== k.low
+      );
+      const expandedDates = kline.map((k) => k.date).concat(new Array(BUFFER_DAYS).fill(''));
+      const { difVals, demVals, oscVals } = getCalculatedMACD(kline);
+
+      const curStart = zoomRangeRef.current?.start ?? 0;
+      const curEnd = zoomRangeRef.current?.end ?? 100;
+
+      subOption = {
+        animation: false,
+        tooltip: {
+          trigger: 'axis',
+          axisPointer: { type: 'cross' },
+          backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+          borderColor: isDark ? '#334155' : '#cbd5e1',
+          textStyle: { color: isDark ? '#f8fafc' : '#0f172a', fontSize: 12 },
+          formatter: (params: any) => {
+            if (!Array.isArray(params) || params.length === 0) return '';
+            const idx = params[0].dataIndex;
+            if (idx >= kline.length) return '';
+            const kItem = kline[idx];
+            if (!kItem) return '';
+            const dif = difVals[idx];
+            const dem = demVals[idx];
+            const osc = oscVals[idx];
+            const difStr = dif != null ? dif.toFixed(2) : '-';
+            const demStr = dem != null ? dem.toFixed(2) : '-';
+            const oscStr = osc != null ? (osc >= 0 ? `+${osc.toFixed(2)}` : osc.toFixed(2)) : '-';
+            const oscColor = (osc ?? 0) >= 0 ? '#ef4444' : '#10b981';
+            return `<div style="font-weight:700;margin-bottom:3px;">${kItem.date} MACD(12, 26, 9)</div>` +
+              `<div><span style="color:#2962FF;font-weight:700;">◆ DIF (快線):</span> ${difStr}</div>` +
+              `<div><span style="color:#FF6D00;font-weight:700;">◆ MACD (慢線):</span> ${demStr}</div>` +
+              `<div><span style="color:${oscColor};font-weight:700;">◆ OSC (柱狀):</span> <span style="color:${oscColor};font-weight:700;">${oscStr}</span></div>`;
+          },
+        },
+        legend: {
+          data: ['DIF (快線)', 'MACD (慢線)', 'OSC (柱狀)'],
+          textStyle: { color: textColor, fontSize: 11 },
+          top: 0,
+        },
+        grid: { left: '45px', right: '78px', top: '26px', bottom: '22px' },
+        xAxis: {
+          type: 'category',
+          data: expandedDates,
+          boundaryGap: false,
+          axisLine: { lineStyle: { color: gridBorder } },
+          axisLabel: { color: textColor, fontSize: 11 },
+          splitLine: { show: true, lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+        },
+        yAxis: {
+          type: 'value',
+          position: 'right',
+          splitNumber: 3,
+          axisLabel: { color: textColor, fontSize: 10 },
+          splitLine: { lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+        },
+        dataZoom: [
+          {
+            type: 'inside',
+            start: curStart,
+            end: curEnd,
+            zoomOnMouseWheel: true,
+            moveOnMouseMove: true,
+            moveOnMouseWheel: false,
+            minSpan: ((MIN_VISIBLE_BARS) / (kline.length + BUFFER_DAYS)) * 100,
+            maxSpan: 100,
+          },
+        ],
+        series: [
+          {
+            name: 'OSC (柱狀)',
+            type: 'bar',
+            data: oscVals.map((v) => (v != null ? {
+              value: v,
+              itemStyle: { color: v >= 0 ? '#ef4444' : '#10b981' },
+            } : null)),
+            barMaxWidth: 6,
+            markLine: {
+              symbol: 'none',
+              silent: true,
+              data: [
+                { yAxis: 0, lineStyle: { color: isDark ? '#475569' : '#cbd5e1', type: 'dashed', width: 0.8 }, label: { formatter: '0軸', position: 'insideStartTop', fontSize: 9, color: textColor } },
+              ],
+            },
+          },
+          {
+            name: 'DIF (快線)',
+            type: 'line',
+            data: difVals,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { color: '#2962FF', width: 1.8 },
+          },
+          {
+            name: 'MACD (慢線)',
+            type: 'line',
+            data: demVals,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { color: '#FF6D00', width: 1.8 },
+          },
+        ],
+      };
+    } else if (activeTab === 'dmi') {
+      // 技術指標：DMI (14) 趨向指標 (+DI 藍、-DI 橘、ADX 紫)
+      const kline = (data.kline || []).filter(
+        (k) => k.volume > 0 || k.open !== k.close || k.high !== k.low
+      );
+      const expandedDates = kline.map((k) => k.date).concat(new Array(BUFFER_DAYS).fill(''));
+      const { pdiVals, ndiVals, adxVals } = getCalculatedDMI(kline);
+
+      const curStart = zoomRangeRef.current?.start ?? 0;
+      const curEnd = zoomRangeRef.current?.end ?? 100;
+
+      subOption = {
+        animation: false,
+        tooltip: {
+          trigger: 'axis',
+          axisPointer: { type: 'cross' },
+          backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+          borderColor: isDark ? '#334155' : '#cbd5e1',
+          textStyle: { color: isDark ? '#f8fafc' : '#0f172a', fontSize: 12 },
+          formatter: (params: any) => {
+            if (!Array.isArray(params) || params.length === 0) return '';
+            const idx = params[0].dataIndex;
+            if (idx >= kline.length) return '';
+            const kItem = kline[idx];
+            if (!kItem) return '';
+            const pdi = pdiVals[idx];
+            const ndi = ndiVals[idx];
+            const adx = adxVals[idx];
+            const pdiStr = pdi != null ? pdi.toFixed(2) : '-';
+            const ndiStr = ndi != null ? ndi.toFixed(2) : '-';
+            const adxStr = adx != null ? adx.toFixed(2) : '-';
+            return `<div style="font-weight:700;margin-bottom:3px;">${kItem.date} DMI(14) 趨向指標</div>` +
+              `<div><span style="color:#2962FF;font-weight:700;">◆ +DI (多方強度):</span> ${pdiStr}</div>` +
+              `<div><span style="color:#FF6D00;font-weight:700;">◆ -DI (空方強度):</span> ${ndiStr}</div>` +
+              `<div><span style="color:#E040FB;font-weight:700;">◆ ADX (趨勢強度):</span> ${adxStr}</div>`;
+          },
+        },
+        legend: {
+          data: ['+DI (多方)', '-DI (空方)', 'ADX (趨勢強度)'],
+          textStyle: { color: textColor, fontSize: 11 },
+          top: 0,
+        },
+        grid: { left: '45px', right: '78px', top: '26px', bottom: '22px' },
+        xAxis: {
+          type: 'category',
+          data: expandedDates,
+          boundaryGap: false,
+          axisLine: { lineStyle: { color: gridBorder } },
+          axisLabel: { color: textColor, fontSize: 11 },
+          splitLine: { show: true, lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+        },
+        yAxis: {
+          type: 'value',
+          min: 0,
+          max: 100,
+          position: 'right',
+          splitNumber: 2,
+          axisLabel: { color: textColor, fontSize: 10 },
+          splitLine: { lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
+        },
+        dataZoom: [
+          {
+            type: 'inside',
+            start: curStart,
+            end: curEnd,
+            zoomOnMouseWheel: true,
+            moveOnMouseMove: true,
+            moveOnMouseWheel: false,
+            minSpan: ((MIN_VISIBLE_BARS) / (kline.length + BUFFER_DAYS)) * 100,
+            maxSpan: 100,
+          },
+        ],
+        series: [
+          {
+            name: '+DI (多方)',
+            type: 'line',
+            data: pdiVals,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { color: '#2962FF', width: 1.8 },
+            markLine: {
+              symbol: 'none',
+              silent: true,
+              data: [
+                { yAxis: 20, lineStyle: { color: '#64748b', type: 'dotted', width: 0.8 }, label: { formatter: '盤整 20', position: 'insideStartTop', fontSize: 9, color: '#64748b' } },
+                { yAxis: 40, lineStyle: { color: '#f59e0b', type: 'dashed', width: 0.8 }, label: { formatter: '強勢 40', position: 'insideStartTop', fontSize: 9, color: '#f59e0b' } },
+              ],
+            },
+          },
+          {
+            name: '-DI (空方)',
+            type: 'line',
+            data: ndiVals,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { color: '#FF6D00', width: 1.8 },
+          },
+          {
+            name: 'ADX (趨勢強度)',
+            type: 'line',
+            data: adxVals,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { color: '#E040FB', width: 2.0 },
+          },
+        ],
+      };
     }
 
     chart.setOption(subOption, true);
@@ -1159,9 +1494,10 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
       }
     });
 
-    // 若次圖為 KD 或 RSI，監聽次圖縮放平移並同步回主圖
+    // 若次圖為技術指標 (KD, MACD, RSI, DMI)，監聽次圖縮放平移並同步回主圖
+    const isTechIndicator = ['kd', 'macd', 'rsi', 'dmi'].includes(activeTab);
     const handleSubDataZoom = (e?: any) => {
-      if (activeTab !== 'kd' && activeTab !== 'rsi') return;
+      if (!isTechIndicator) return;
       let start: number | undefined;
       let end: number | undefined;
       if (e?.batch && e.batch.length > 0) {
@@ -1208,7 +1544,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  // 僅在 KD / RSI 模式（次圖與主圖時間軸與數據長度一致）時同步十字游標與 dataZoom
+  // 僅在技術指標模式（KD, MACD, RSI, DMI 次圖與主圖時間軸與數據長度一致）時同步十字游標與 dataZoom
   // 其餘 Tab（三大法人籌碼、融資融券、大戶持股比例）日期尺度不同且無 dataZoom，必須斷開連線以防事件衝突
   useEffect(() => {
     const SYNC_GROUP = 'stock_chart_sync_group';
@@ -1217,7 +1553,8 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
 
     if (!mainChart || mainChart.isDisposed()) return;
 
-    if (subChart && !subChart.isDisposed() && (activeTab === 'kd' || activeTab === 'rsi')) {
+    const isTechIndicatorTab = ['kd', 'macd', 'rsi', 'dmi'].includes(activeTab);
+    if (subChart && !subChart.isDisposed() && isTechIndicatorTab) {
       mainChart.group = SYNC_GROUP;
       subChart.group = SYNC_GROUP;
       echarts.connect(SYNC_GROUP);
@@ -1395,11 +1732,25 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
                   📈 KD 指標
                 </button>
                 <button
+                  className={`sub-tab-btn ${activeTab === 'macd' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('macd')}
+                  title="MACD 指標 (DIF 快線、MACD 慢線與 OSC 柱狀圖)"
+                >
+                  📊 MACD
+                </button>
+                <button
                   className={`sub-tab-btn ${activeTab === 'rsi' ? 'active' : ''}`}
                   onClick={() => setActiveTab('rsi')}
                   title="相對強弱指標 RSI (多空強弱)"
                 >
-                  📊 RSI 指標
+                  📉 RSI 指標
+                </button>
+                <button
+                  className={`sub-tab-btn ${activeTab === 'dmi' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('dmi')}
+                  title="DMI 趨向指標 (+DI 多方、-DI 空方與 ADX 趨勢強度)"
+                >
+                  🧭 DMI 趨向
                 </button>
               </div>
 
