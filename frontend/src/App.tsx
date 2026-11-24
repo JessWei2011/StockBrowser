@@ -28,6 +28,7 @@ import { InvestmentCalendarModal } from './components/InvestmentCalendarModal';
 import { GlobalIndicesModal } from './components/GlobalIndicesModal';
 import { FinancialNewsModal } from './components/FinancialNewsModal';
 import { UsdTwdChartModal } from './components/UsdTwdChartModal';
+import { StockTrendModal } from './components/StockTrendModal';
 import { VaultDetailView } from './components/VaultDetailView';
 import { MobileNavBar, type MobileNavTab } from './components/MobileNavBar';
 import { fetchForexUsdTwd } from './services/api';
@@ -54,6 +55,7 @@ export const App: React.FC = () => {
   const [isGlobalIndicesModalOpen, setIsGlobalIndicesModalOpen] = useState(false);
   const [marketModalTab, setMarketModalTab] = useState<'all' | 'tw' | 'us' | 'asia'>('all');
   const [isUsdTwdModalOpen, setIsUsdTwdModalOpen] = useState(false);
+  const [selectedTrendStock, setSelectedTrendStock] = useState<{ code: string; name?: string } | null>(null);
   const [forexData, setForexData] = useState<ForexRateResponse | null>(null);
   const [isForexLoading, setIsForexLoading] = useState(false);
   const [orderTargetCode, setOrderTargetCode] = useState<string | null>(null);
@@ -1183,6 +1185,7 @@ export const App: React.FC = () => {
                 onMoveItem={handleMoveStock}
                 onReorderItems={handleReorderItems}
                 onSelectStock={(code) => setSelectedChartCode(code)}
+                onOpenTrendModal={(code) => setSelectedTrendStock({ code, name: quotes[code]?.name || activeGroup?.items.find((it) => it.code === code)?.name })}
                 onOpenOrder={handleOpenOrder}
               />
             ) : (
@@ -1297,6 +1300,19 @@ export const App: React.FC = () => {
         data={forexData}
         isLoading={isForexLoading}
         onRefresh={() => loadForex(true)}
+      />
+
+      <StockTrendModal
+        isOpen={Boolean(selectedTrendStock)}
+        onClose={() => setSelectedTrendStock(null)}
+        code={selectedTrendStock?.code || ''}
+        name={selectedTrendStock?.name || (selectedTrendStock ? quotes[selectedTrendStock.code]?.name : '')}
+        quote={selectedTrendStock ? quotes[selectedTrendStock.code] : undefined}
+        onSelectStock={(code) => {
+          setSelectedTrendStock(null);
+          setSelectedChartCode(code);
+        }}
+        onOpenOrder={handleOpenOrder}
       />
 
       <MobileNavBar

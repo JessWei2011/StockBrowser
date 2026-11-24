@@ -86,3 +86,14 @@ async def test_orders_and_clear_orders():
         data = clear_res.json()
         assert data["success"] is True
         assert "今日委託單紀錄已清空" in data["message"]
+
+@pytest.mark.asyncio
+async def test_stock_intraday_endpoint():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.get("/api/v1/stocks/2330/intraday")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["code"] == "2330"
+        assert "points" in data
+        assert isinstance(data["points"], list)
+

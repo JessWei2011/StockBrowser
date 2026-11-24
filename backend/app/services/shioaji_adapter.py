@@ -690,6 +690,8 @@ class ShioajiAdapter:
                         "exchange": contract.exchange,
                         "securityType": sec_type,
                         "reference": float(contract.reference) if contract.reference else None,
+                        "limitUp": float(contract.limit_up) if getattr(contract, "limit_up", None) else None,
+                        "limitDown": float(contract.limit_down) if getattr(contract, "limit_down", None) else None,
                         "isAttention": is_att,
                         "dispositionLevel": disp_level,
                         "dispositionPeriod": disp_period,
@@ -698,11 +700,16 @@ class ShioajiAdapter:
                     count += 1
             logger.info(f"Contracts cache built with {count} symbols.")
 
-            # 若已有訂閱中的股票，同步校正其昨收基準價
+            # 若已有訂閱中的股票，同步校正其昨收基準價與漲跌停
             for code in self.subscribed_codes:
                 info = self.contracts_cache.get(code)
                 if info and info.get("reference"):
-                    quote_store.update_quote(code=code, previous_close=info["reference"])
+                    quote_store.update_quote(
+                        code=code,
+                        previous_close=info["reference"],
+                        limit_up=info.get("limitUp"),
+                        limit_down=info.get("limitDown")
+                    )
         except Exception as e:
             logger.error(f"Failed to build contracts cache: {e}", exc_info=True)
 
@@ -1491,7 +1498,12 @@ class ShioajiAdapter:
                 disposition_period=disp_period
             )
             if ref is not None:
-                quote_store.update_quote(code=code, previous_close=ref)
+                quote_store.update_quote(
+                    code=code,
+                    previous_close=ref,
+                    limit_up=info.get("limitUp") if info else None,
+                    limit_down=info.get("limitDown") if info else None,
+                )
 
         # 批次取得快照
         self._fetch_snapshots(list(to_add))
@@ -1640,6 +1652,7 @@ class ShioajiAdapter:
                     except Exception:
                         pass
 
+                info_item = self.contracts_cache.get(code)
                 quote_store.update_quote(
                     code=code,
                     last=last_price,
@@ -1650,6 +1663,8 @@ class ShioajiAdapter:
                     low=low_price,
                     total_volume=safe_int(s.total_volume),
                     previous_close=ref_close,
+                    limit_up=info_item.get("limitUp") if info_item else None,
+                    limit_down=info_item.get("limitDown") if info_item else None,
                     source_ts=ts_str,
                     data_status="live" if is_taiwan_market_open() else "closed"
                 )

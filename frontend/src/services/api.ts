@@ -409,3 +409,10 @@ export async function updateStockAiNote(
   return res.json();
 }
 
+export async function fetchStockIntraday(code: string): Promise<import('../types').StockIntradayResponse> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/stocks/${encodeURIComponent(code)}/intraday`, {}, 10000);
+  if (!res.ok) throw new Error(`無法取得 ${code} 當日分時走勢`);
+  return res.json();
+}
+
+

@@ -313,6 +313,35 @@ def recalculate_indicators(kline_bars: list[KlineBar]):
             if idx < len(rsi12_list):
                 b.rsi12 = rsi12_list[idx]
 
+    # 計算標準 KD(9, 3, 3) 隨機指標 (供指數及未計算 KD 之 K 棒完整補齊)
+    if len(kline_bars) >= 9:
+        k_val = 50.0
+        d_val = 50.0
+        for idx in range(len(kline_bars)):
+            curr_b = kline_bars[idx]
+            # 若為個股歷史且已有既定權威 K/D，且不是最後一根(最新動態拼接根)，優先沿用歷史基準
+            if curr_b.k is not None and curr_b.d is not None and idx < len(kline_bars) - 1:
+                k_val = curr_b.k
+                d_val = curr_b.d
+                continue
+
+            sub_high = max(kline_bars[i].high for i in range(max(0, idx - 8), idx + 1))
+            sub_low = min(kline_bars[i].low for i in range(max(0, idx - 8), idx + 1))
+            if sub_high == sub_low:
+                rsv = 50.0
+            else:
+                rsv = ((curr_b.close - sub_low) / (sub_high - sub_low)) * 100.0
+                rsv = max(0.0, min(100.0, rsv))
+
+            k_val = (2.0 / 3.0) * k_val + (1.0 / 3.0) * rsv
+            d_val = (2.0 / 3.0) * d_val + (1.0 / 3.0) * k_val
+
+            if idx >= 8:
+                if curr_b.k is None:
+                    curr_b.k = round(k_val, 2)
+                if curr_b.d is None:
+                    curr_b.d = round(d_val, 2)
+
 def backfill_missing_kline_bars(code: str, kline_bars: list[KlineBar]) -> list[KlineBar]:
     """
     若 HTML 報告歷史 K 線與今天之間存在缺漏交易日（例如 StockCenter 暫停或未及時爬取），
@@ -738,4 +767,76 @@ def get_multiple_stocks_ma_summary(codes: list[str]) -> dict[str, dict]:
             if s:
                 res[c] = s
     return res
+
+
+_intraday_cache: dict[str, tuple[float, dict]] = {}
+
+def get_stock_intraday_trend(code: str) -> dict:
+    """
+    獲取個股當日 1 分鐘級即時分時走勢數據 (09:00 ~ 13:30)。
+    優先從 yfinance 獲取當日 1m K 線，並整合 quote_store 即時現價與昨收基準價。
+    快取時間為 15 秒，以降低對外部請求頻率並維持即時性。
+    """
+    now_ts = time.time()
+    if code in _intraday_cache:
+        ts, cached_data = _intraday_cache[code]
+        if now_ts - ts < 15:
+            return cached_data
+
+    from backend.app.services.quote_store import quote_store
+    quote_obj = None
+    with quote_store._lock:
+        quote_obj = quote_store._quotes.get(code)
+
+    name = quote_obj.name if quote_obj and quote_obj.name else code
+    exchange = (quote_obj.exchange if quote_obj and quote_obj.exchange else "TSE").upper()
+    raw_prev = getattr(quote_obj, "previousClose", getattr(quote_obj, "previous_close", None))
+    prev_close = raw_prev if raw_prev and raw_prev > 0 else None
+    curr_price = (quote_obj.last if quote_obj and quote_obj.last and quote_obj.last > 0 else None)
+    tot_vol = getattr(quote_obj, "totalVolume", getattr(quote_obj, "total_volume", None))
+
+
+    points = []
+    suffixes = [".TWO", ".TW"] if exchange == "OTC" else [".TW", ".TWO"]
+    try:
+        import yfinance as yf
+        for s in suffixes:
+            try:
+                ticker = yf.Ticker(f"{code}{s}")
+                df = ticker.history(period="1d", interval="1m")
+                if df is not None and not df.empty:
+                    for ts_idx, row in df.iterrows():
+                        p = round(float(row["Close"]), 2)
+                        v = int(row["Volume"]) if "Volume" in row and row["Volume"] > 0 else 0
+                        t_str = ts_idx.strftime("%H:%M")
+                        points.append({
+                            "time": t_str,
+                            "price": p,
+                            "volume": v,
+                            "high": round(float(row["High"]), 2),
+                            "low": round(float(row["Low"]), 2),
+                            "open": round(float(row["Open"]), 2),
+                        })
+                    break
+            except Exception:
+                continue
+    except Exception as e:
+        logger.warning(f"Failed to fetch intraday points for {code}: {e}")
+
+    result = {
+        "code": code,
+        "name": name,
+        "exchange": exchange,
+        "prevClose": prev_close,
+        "currPrice": curr_price,
+        "open": quote_obj.open if quote_obj else None,
+        "high": quote_obj.high if quote_obj else None,
+        "low": quote_obj.low if quote_obj else None,
+        "totalVolume": tot_vol,
+        "points": points,
+        "updatedAt": datetime.now().isoformat(),
+    }
+    _intraday_cache[code] = (now_ts, result)
+    return result
+
 

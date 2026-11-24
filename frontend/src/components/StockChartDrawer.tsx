@@ -615,8 +615,24 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
         xAxis: {
           type: 'category',
           data: dates,
+          boundaryGap: true,
           axisLine: { lineStyle: { color: gridBorder } },
           axisLabel: { color: textColor, fontSize: 11 },
+          axisTick: {
+            show: true,
+            interval: 0,
+            alignWithLabel: false, // 刻度線位於每天交界處
+            lineStyle: { color: isDark ? 'rgba(148, 163, 184, 0.25)' : 'rgba(148, 163, 184, 0.4)' },
+          },
+          splitLine: {
+            show: true,
+            interval: 0, // 強制每一天都繪製分隔虛線，不受 axisLabel 隔天抽樣影響
+            lineStyle: {
+              color: isDark ? 'rgba(148, 163, 184, 0.25)' : 'rgba(148, 163, 184, 0.4)',
+              type: 'dashed',
+              width: 1,
+            },
+          },
         },
         yAxis: {
           type: 'value',
@@ -629,6 +645,8 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
             name: '外資',
             type: 'bar',
             data: foreign,
+            barGap: '8%',
+            barCategoryGap: '28%',
             itemStyle: { color: '#ef4444' },
           },
           {
@@ -716,7 +734,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
             textStyle: { color: textColor, fontSize: 11 },
             top: 0,
           },
-          grid: { left: '50px', right: '48px', top: '28px', bottom: '20px' },
+          grid: { left: '44px', right: '44px', top: '22px', bottom: '18px', containLabel: true },
           xAxis: {
             type: 'category',
             data: dates,
@@ -727,18 +745,22 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
             {
               type: 'value',
               name: '維持率',
+              nameTextStyle: { color: textColor, fontSize: 10, padding: [0, 0, 0, 2] },
               position: 'left',
               axisLabel: { formatter: '{value}%', color: textColor, fontSize: 10 },
               min: (value: any) => Math.max(100, Math.floor((value.min - 10) / 10) * 10),
+              splitNumber: 4,
               splitLine: { lineStyle: { color: isDark ? '#1e293b' : '#f1f5f9' } },
             },
             {
               type: 'value',
               name: '使用率',
+              nameTextStyle: { color: textColor, fontSize: 10, padding: [0, 2, 0, 0] },
               position: 'right',
               axisLabel: { formatter: '{value}%', color: textColor, fontSize: 10 },
               min: 0,
               max: (value: any) => Math.max(10, Math.min(100, Math.ceil((value.max + 5) / 5) * 5)),
+              splitNumber: 4,
               splitLine: { show: false },
             },
           ],
@@ -804,7 +826,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
             textStyle: { color: textColor, fontSize: 11 },
             top: 0,
           },
-          grid: { left: '45px', right: '20px', top: '28px', bottom: '20px' },
+          grid: { left: '44px', right: '44px', top: '22px', bottom: '18px', containLabel: true },
           xAxis: {
             type: 'category',
             data: dates,
@@ -904,6 +926,9 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
       const expandedDates = kline.map((k) => k.date).concat(new Array(BUFFER_DAYS).fill(''));
       const kVals = kline.map((k) => k.k ?? null);
       const dVals = kline.map((k) => k.d ?? null);
+      // 超買 (>80) 與超賣 (<20) 填色輔助數據
+      const kOver80 = kVals.map((v) => (v != null ? (v > 80 ? v : 80) : null));
+      const kUnder20 = kVals.map((v) => (v != null ? (v < 20 ? v : 20) : null));
 
       // 取得主圖目前的 dataZoom 狀態
       const curStart = zoomRangeRef.current?.start ?? 0;
@@ -966,6 +991,38 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
           },
         ],
         series: [
+          // 超買區 (>80) 塗紅填充 (如看盤軟體)
+          {
+            name: 'KD-Over80',
+            type: 'line',
+            data: kOver80,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { opacity: 0 },
+            areaStyle: {
+              origin: 80,
+              color: 'rgba(239, 68, 68, 0.4)',
+            },
+            silent: true,
+            tooltip: { show: false },
+            z: 1,
+          },
+          // 超賣區 (<20) 塗綠填充 (如看盤軟體)
+          {
+            name: 'KD-Under20',
+            type: 'line',
+            data: kUnder20,
+            smooth: true,
+            showSymbol: false,
+            lineStyle: { opacity: 0 },
+            areaStyle: {
+              origin: 20,
+              color: 'rgba(16, 185, 129, 0.4)',
+            },
+            silent: true,
+            tooltip: { show: false },
+            z: 1,
+          },
           {
             name: 'K(9)',
             type: 'line',
@@ -981,6 +1038,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
                 { yAxis: 20, lineStyle: { color: '#10b981', type: 'dashed', width: 0.8 }, label: { formatter: '超賣 20', position: 'insideStartBottom', fontSize: 9, color: '#10b981' } },
               ],
             },
+            z: 2,
           },
           {
             name: 'D(9)',
@@ -989,6 +1047,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
             smooth: true,
             showSymbol: false,
             lineStyle: { color: '#f97316', width: 1.8 },
+            z: 2,
           },
         ],
       };
@@ -1093,6 +1152,13 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
 
     chart.setOption(subOption, true);
 
+    // 確保次圖容器在 DOM 變化或分頁切換後即時重新計算畫布尺寸，絕不超出容器或截斷
+    requestAnimationFrame(() => {
+      if (chart && !chart.isDisposed()) {
+        chart.resize();
+      }
+    });
+
     // 若次圖為 KD 或 RSI，監聽次圖縮放平移並同步回主圖
     const handleSubDataZoom = (e?: any) => {
       if (activeTab !== 'kd' && activeTab !== 'rsi') return;
@@ -1113,9 +1179,20 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
 
     const handleResize = () => chart.resize();
     window.addEventListener('resize', handleResize);
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (chart && !chart.isDisposed()) {
+        chart.resize();
+      }
+    });
+    if (subChartRef.current) {
+      resizeObserver.observe(subChartRef.current);
+    }
+
     return () => {
       chart.off('datazoom', handleSubDataZoom);
       window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
     };
   }, [data, activeTab, theme, isOpen, marginSubMode]);
 

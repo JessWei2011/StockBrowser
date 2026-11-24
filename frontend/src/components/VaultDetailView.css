@@ -373,7 +373,7 @@
 }
 
 .vault-row.row-flash {
-  background-color: rgba(59, 130, 246, 0.16) !important;
+  /* 移除藍色背景高頻閃爍，保持平順無跳動更新，保護眼睛 */
 }
 
 /* 欄位對齊與樣式 */
@@ -431,6 +431,11 @@
 .col-cost {
   color: var(--v-text-primary);
   font-weight: 600;
+}
+
+.col-market-val {
+  color: var(--v-text-primary);
+  font-weight: 700;
 }
 
 .col-pnl .pnl-value,

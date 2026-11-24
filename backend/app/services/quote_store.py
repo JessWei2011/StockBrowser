@@ -1,6 +1,7 @@
 import concurrent.futures
 import json
 import logging
+import math
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +10,48 @@ from backend.app.domain.models import QuoteState, DataStatus
 from backend.app.settings import BASE_DIR
 
 logger = logging.getLogger("quote_store")
+
+def get_twse_tick_size(price: float) -> float:
+    if price < 10:
+        return 0.01
+    elif price < 50:
+        return 0.05
+    elif price < 100:
+        return 0.10
+    elif price < 500:
+        return 0.50
+    elif price < 1000:
+        return 1.00
+    else:
+        return 5.00
+
+def calculate_twse_limits(ref_price: float, security_type: str = "STOCK") -> tuple[Optional[float], Optional[float]]:
+    if not ref_price or ref_price <= 0:
+        return None, None
+    if security_type and security_type.upper() in ("BOND",):
+        return None, None
+    
+    # 漲停價：參考價 * 1.10，未滿升降單位無條件捨去，且不得超過 10%
+    raw_up = round(ref_price * 1.10, 6)
+    tick_up = get_twse_tick_size(raw_up)
+    steps_up = int((raw_up + 1e-7) / tick_up)
+    limit_up = round(steps_up * tick_up, 2)
+    max_rise = round(ref_price * 0.10, 2)
+    if round(limit_up - ref_price, 2) > max_rise + 1e-4:
+        limit_up = round((steps_up - 1) * tick_up, 2)
+
+    # 跌停價：參考價 * 0.90，未滿升降單位無條件進位，且跌幅不得超過 10%
+    raw_down = round(ref_price * 0.90, 6)
+    tick_down = get_twse_tick_size(raw_down)
+    steps_down = math.ceil((raw_down - 1e-7) / tick_down)
+    limit_down = round(steps_down * tick_down, 2)
+    if limit_down < 0.01:
+        limit_down = 0.01
+    max_drop = round(ref_price * 0.10, 2)
+    if round(ref_price - limit_down, 2) > max_drop + 1e-4:
+        limit_down = round((steps_down + 1) * tick_down, 2)
+
+    return limit_up, limit_down
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -139,6 +182,8 @@ class QuoteStore:
         low: Optional[float] = None,
         total_volume: Optional[int] = None,
         previous_close: Optional[float] = None,
+        limit_up: Optional[float] = None,
+        limit_down: Optional[float] = None,
         source_ts: Optional[str] = None,
         odd_lot_source_ts: Optional[str] = None,
         data_status: Optional[DataStatus] = None,
@@ -189,6 +234,25 @@ class QuoteStore:
                 if previous_close is not None and previous_close > 0 and previous_close != current.previousClose:
                     current.previousClose = previous_close
                     changed = True
+
+                if limit_up is not None and limit_up > 0 and limit_up != current.limitUp:
+                    current.limitUp = limit_up
+                    changed = True
+
+                if limit_down is not None and limit_down > 0 and limit_down != current.limitDown:
+                    current.limitDown = limit_down
+                    changed = True
+
+                # 若尚未設定漲跌停價且昨收有效，自動計算台股漲跌停價
+                if current.previousClose and current.previousClose > 0:
+                    if current.limitUp is None or current.limitDown is None:
+                        calc_up, calc_down = calculate_twse_limits(current.previousClose, current.securityType)
+                        if current.limitUp is None and calc_up is not None:
+                            current.limitUp = calc_up
+                            changed = True
+                        if current.limitDown is None and calc_down is not None:
+                            current.limitDown = calc_down
+                            changed = True
 
                 if last is not None and last > 0 and last != current.last:
                     current.last = last

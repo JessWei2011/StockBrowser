@@ -942,6 +942,65 @@ button, input, select, textarea {
   overflow: visible;
 }
 
+/* ── 個股分時走勢微型縮圖 (StockTrendSparkline) ── */
+.th-trend,
+.td-trend {
+  width: 66px;
+  min-width: 66px;
+  max-width: 66px;
+  text-align: center;
+  padding: 4px 6px !important;
+  vertical-align: middle;
+}
+
+.th-trend {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.stock-sparkline-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 3px;
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.stock-sparkline-wrap.clickable {
+  cursor: pointer;
+}
+
+.stock-sparkline-wrap.clickable:hover {
+  background: rgba(15, 23, 42, 0.65);
+  border-color: rgba(56, 189, 248, 0.45);
+  transform: scale(1.04);
+}
+
+[data-theme='light'] .stock-sparkline-wrap {
+  background: rgba(241, 245, 249, 0.7);
+  border-color: rgba(203, 213, 225, 0.6);
+}
+
+[data-theme='light'] .stock-sparkline-wrap.clickable:hover {
+  background: #ffffff;
+  border-color: #94a3b8;
+}
+
+.stock-sparkline-svg {
+  display: block;
+  overflow: visible;
+}
+
+.stock-sparkline-placeholder {
+  color: var(--text-muted);
+  opacity: 0.5;
+  font-size: 12px;
+}
+
 .index-trend-widget {
   display: inline-flex;
   align-items: center;
@@ -5760,7 +5819,8 @@ button, input, select, textarea {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   position: relative;
   background-color: var(--bg-main);
 }
@@ -5797,8 +5857,8 @@ button, input, select, textarea {
 .chart-container-main {
   position: relative;
   width: 100%;
-  height: 58%;
-  min-height: 280px;
+  height: 52%;
+  min-height: 240px;
 }
 
 /* TradingView 風格右側 Y 軸彩色防重疊數值膠囊標籤 */
@@ -5890,7 +5950,9 @@ button, input, select, textarea {
 .chart-container-sub {
   width: 100%;
   flex: 1;
-  min-height: 160px;
+  min-height: 140px;
+  position: relative;
+  overflow: hidden;
 }
 
 /* ==================== 抽屜：資券主力變動（融資維持率與使用率） ==================== */
@@ -5899,39 +5961,42 @@ button, input, select, textarea {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 10px;
-  padding: 6px 14px;
+  gap: 8px;
+  padding: 4px 14px;
   background-color: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
+  min-height: 34px;
 }
 
 .margin-summary-metrics {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   flex-wrap: wrap;
 }
 
 .margin-metric-card {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
 }
 
 .margin-metric-label {
   font-size: 11px;
   color: var(--text-muted);
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .margin-metric-value-wrap {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .margin-metric-val {
-  font-size: 15px;
+  font-size: 13.5px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--text-main);
@@ -5941,6 +6006,7 @@ button, input, select, textarea {
   font-size: 10px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .margin-badge {

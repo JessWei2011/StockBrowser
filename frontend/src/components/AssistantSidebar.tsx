@@ -5,6 +5,7 @@ import { submitOrder, fetchOrders, cancelOrder, updateOrder, clearOrders, setAct
 import { getStoredVaultPassword } from './VaultPasswordModal';
 import { BalanceTab } from './BalanceTab';
 import { SmartOrderTab } from './SmartOrderTab';
+import { calculateLimitUp, calculateLimitDown } from '../utils/limitPriceUtils';
 
 interface AssistantSidebarProps {
   isOpen: boolean;
@@ -446,8 +447,12 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
   // 價格快速晶片 (跌停/平盤/現價/漲停)
   const prevClose = currentQuote?.previousClose;
   const lastPrice = currentQuote?.last;
-  const limitUp = prevClose && prevClose > 0 ? (prevClose * 1.1).toFixed(2) : null;
-  const limitDown = prevClose && prevClose > 0 ? (prevClose * 0.9).toFixed(2) : null;
+  const limitUp = currentQuote?.limitUp && currentQuote.limitUp > 0
+    ? currentQuote.limitUp.toFixed(2)
+    : (prevClose && prevClose > 0 ? calculateLimitUp(prevClose).toFixed(2) : null);
+  const limitDown = currentQuote?.limitDown && currentQuote.limitDown > 0
+    ? currentQuote.limitDown.toFixed(2)
+    : (prevClose && prevClose > 0 ? calculateLimitDown(prevClose).toFixed(2) : null);
 
   // 查詢當前輸入代號之庫存資訊
   const currentPosition = positions.find((p) => p.code === stockCode);

@@ -91,3 +91,18 @@ def test_quote_store_odd_lot_independent_anti_rollback(tmp_path):
     )
     assert updated_stale is False
     assert store.get_all_quotes()[1]["2330"].oddLotLast == 999.0
+
+def test_quote_store_limit_up_down():
+    store = QuoteStore()
+    store.init_or_get_quote("2330", name="台積電", exchange="TSE")
+    store.update_quote("2330", previous_close=100.0)
+    _, quotes = store.get_all_quotes()
+    q = quotes["2330"]
+    assert q.limitUp == 110.0
+    assert q.limitDown == 90.0
+
+    # 測試手動帶入或合約帶入漲跌停價覆蓋
+    store.update_quote("2330", limit_up=112.0, limit_down=88.0)
+    _, quotes = store.get_all_quotes()
+    assert quotes["2330"].limitUp == 112.0
+    assert quotes["2330"].limitDown == 88.0

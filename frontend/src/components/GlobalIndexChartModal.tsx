@@ -192,6 +192,107 @@ function updateRightPriceBadges(
   container.innerHTML = html;
 }
 
+/**
+ * 確保 KD(9, 3, 3) 數據齊全
+ * 若後端已提供則優先採用；若無（例如大盤指數或後端舊快取），即時由開高低收進行標準平滑計算
+ */
+function getCalculatedKD(kline: KlineBar[]) {
+  const count = kline.length;
+  const kVals: (number | null)[] = new Array(count).fill(null);
+  const dVals: (number | null)[] = new Array(count).fill(null);
+
+  const validBackendK = kline.filter((b) => b.k != null && !isNaN(b.k));
+  if (validBackendK.length > count * 0.7) {
+    for (let i = 0; i < count; i++) {
+      kVals[i] = kline[i].k ?? null;
+      dVals[i] = kline[i].d ?? null;
+    }
+    return { kVals, dVals };
+  }
+
+  let k = 50.0;
+  let d = 50.0;
+  for (let i = 0; i < count; i++) {
+    const start = Math.max(0, i - 8);
+    let subHigh = kline[start].high;
+    let subLow = kline[start].low;
+    for (let j = start + 1; j <= i; j++) {
+      if (kline[j].high > subHigh) subHigh = kline[j].high;
+      if (kline[j].low < subLow) subLow = kline[j].low;
+    }
+    const close = kline[i].close;
+    let rsv = 50.0;
+    if (subHigh > subLow) {
+      rsv = ((close - subLow) / (subHigh - subLow)) * 100.0;
+      rsv = Math.max(0, Math.min(100, rsv));
+    }
+    k = (2 / 3) * k + (1 / 3) * rsv;
+    d = (2 / 3) * d + (1 / 3) * k;
+
+    if (i >= 8) {
+      kVals[i] = Math.round(k * 10) / 10;
+      dVals[i] = Math.round(d * 10) / 10;
+    }
+  }
+
+  return { kVals, dVals };
+}
+
+/**
+ * 確保 RSI(6) 與 RSI(12) 數據齊全
+ */
+function getCalculatedRSI(kline: KlineBar[]) {
+  const count = kline.length;
+  const rsi6Vals: (number | null)[] = new Array(count).fill(null);
+  const rsi12Vals: (number | null)[] = new Array(count).fill(null);
+
+  const validBackendRsi = kline.filter((b) => b.rsi6 != null && !isNaN(b.rsi6));
+  if (validBackendRsi.length > count * 0.7) {
+    for (let i = 0; i < count; i++) {
+      rsi6Vals[i] = kline[i].rsi6 ?? null;
+      rsi12Vals[i] = kline[i].rsi12 ?? null;
+    }
+    return { rsi6Vals, rsi12Vals };
+  }
+
+  if (count >= 2) {
+    const calcWilder = (period: number) => {
+      const res: (number | null)[] = new Array(count).fill(null);
+      if (count < period + 1) return res;
+
+      let sumGain = 0;
+      let sumLoss = 0;
+      for (let i = 1; i <= period; i++) {
+        const diff = kline[i].close - kline[i - 1].close;
+        if (diff > 0) sumGain += diff;
+        else sumLoss -= diff;
+      }
+      let avgGain = sumGain / period;
+      let avgLoss = sumLoss / period;
+      res[period] = avgLoss === 0 ? 100 : Math.round((100 - (100 / (1 + avgGain / avgLoss))) * 10) / 10;
+
+      for (let i = period + 1; i < count; i++) {
+        const diff = kline[i].close - kline[i - 1].close;
+        const gain = diff > 0 ? diff : 0;
+        const loss = diff < 0 ? -diff : 0;
+        avgGain = (avgGain * (period - 1) + gain) / period;
+        avgLoss = (avgLoss * (period - 1) + loss) / period;
+        res[i] = avgLoss === 0 ? 100 : Math.round((100 - (100 / (1 + avgGain / avgLoss))) * 10) / 10;
+      }
+      return res;
+    };
+
+    const r6 = calcWilder(6);
+    const r12 = calcWilder(12);
+    for (let i = 0; i < count; i++) {
+      rsi6Vals[i] = r6[i];
+      rsi12Vals[i] = r12[i];
+    }
+  }
+
+  return { rsi6Vals, rsi12Vals };
+}
+
 interface GlobalIndexChartModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -225,6 +326,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
   const [showMA, setShowMA] = useState(true);
   const [showBoll, setShowBoll] = useState(false);
   const [activeRange, setActiveRange] = useState<'1Y' | '2Y' | '6M' | '3M'>('3M');
+  const [subIndicator, setSubIndicator] = useState<'vol' | 'kd' | 'rsi'>('vol');
 
   const mainChartRef = useRef<HTMLDivElement | null>(null);
   const mainInstanceRef = useRef<echarts.ECharts | null>(null);
@@ -355,6 +457,8 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
 
     // 檢查是否有歷史成交量/額資料
     const hasVolumeData = kline.some((k: KlineBar) => (k.volume ?? 0) > 0);
+    // 是否顯示副圖 (成交量/額、KD 或 RSI)
+    const hasSubChart = (subIndicator === 'vol' && hasVolumeData) || subIndicator === 'kd' || subIndicator === 'rsi';
     // 是否為台股市場（加權或櫃買），單位為億元；其他市場若有量則以量為單位
     const isTwMarket = code === 'IX0001' || code === 'IX0043' || code === 'TSE' || code === 'OTC' || code === '^TWII' || code === 'MKT01' || code === 'MKT02';
     const volumeUnitLabel = isTwMarket ? '億元' : '量';
@@ -495,7 +599,12 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
       );
     }
 
-    if (hasVolumeData) {
+    // 取得/計算副圖 KD 與 RSI 指標數值 (確保大盤指數與任何缺漏 K 棒均有完整數值)
+    const { kVals, dVals } = getCalculatedKD(kline);
+    const { rsi6Vals, rsi12Vals } = getCalculatedRSI(kline);
+
+    // 副圖系列
+    if (subIndicator === 'vol' && hasVolumeData) {
       seriesList.push({
         name: isTwMarket ? '成交額' : '成交量',
         type: 'bar',
@@ -504,6 +613,111 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
         data: volumes,
         barMaxWidth: 35,
       });
+    } else if (subIndicator === 'kd') {
+      const kOver80 = kVals.map((v) => (v != null ? (v > 80 ? v : 80) : null));
+      const kUnder20 = kVals.map((v) => (v != null ? (v < 20 ? v : 20) : null));
+
+      seriesList.push(
+        // 超買區 (>80) 塗紅填充
+        {
+          name: 'KD-Over80',
+          type: 'line',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: kOver80,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { opacity: 0 },
+          areaStyle: {
+            origin: 80,
+            color: 'rgba(239, 68, 68, 0.4)',
+          },
+          silent: true,
+          tooltip: { show: false },
+          z: 1,
+        },
+        // 超賣區 (<20) 塗綠填充
+        {
+          name: 'KD-Under20',
+          type: 'line',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: kUnder20,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { opacity: 0 },
+          areaStyle: {
+            origin: 20,
+            color: 'rgba(16, 185, 129, 0.4)',
+          },
+          silent: true,
+          tooltip: { show: false },
+          z: 1,
+        },
+        {
+          name: 'K(9)',
+          type: 'line',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: kVals,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { color: '#0ea5e9', width: 1.8 },
+          markLine: {
+            symbol: 'none',
+            silent: true,
+            data: [
+              { yAxis: 80, lineStyle: { color: '#ef4444', type: 'dashed', width: 0.8 }, label: { formatter: '超買 80', position: 'insideStartTop', fontSize: 9, color: '#ef4444' } },
+              { yAxis: 20, lineStyle: { color: '#10b981', type: 'dashed', width: 0.8 }, label: { formatter: '超賣 20', position: 'insideStartBottom', fontSize: 9, color: '#10b981' } },
+            ],
+          },
+          z: 2,
+        },
+        {
+          name: 'D(9)',
+          type: 'line',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: dVals,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { color: '#f97316', width: 1.8 },
+          z: 2,
+        }
+      );
+    } else if (subIndicator === 'rsi') {
+      seriesList.push(
+        {
+          name: 'RSI(6)',
+          type: 'line',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: rsi6Vals,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { color: '#0ea5e9', width: 1.8 },
+          markLine: {
+            symbol: 'none',
+            silent: true,
+            data: [
+              { yAxis: 80, lineStyle: { color: '#ef4444', type: 'dashed', width: 0.8 }, label: { formatter: '80', position: 'insideStartTop', fontSize: 9, color: '#ef4444' } },
+              { yAxis: 20, lineStyle: { color: '#10b981', type: 'dashed', width: 0.8 }, label: { formatter: '20', position: 'insideStartBottom', fontSize: 9, color: '#10b981' } },
+            ],
+          },
+          z: 2,
+        },
+        {
+          name: 'RSI(12)',
+          type: 'line',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: rsi12Vals,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: { color: '#f97316', width: 1.8 },
+          z: 2,
+        }
+      );
     }
 
     const option: echarts.EChartsOption = {
@@ -532,8 +746,20 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           let html = `<div style="font-weight:700;margin-bottom:4px;">${k.date} ｜ ${data.name || code}</div>`;
           html += `<div style="color:${colorHex};font-weight:700;font-size:13px;margin-bottom:2px;">收盤: ${k.close.toLocaleString()} (${isUp ? '+' : ''}${chg.toFixed(2)}, ${chgPct.toFixed(2)}%)</div>`;
           html += `<div>開盤: ${k.open.toLocaleString()} ｜ 最高: ${k.high.toLocaleString()} ｜ 最低: ${k.low.toLocaleString()}</div>`;
-          if (hasVolumeData && (k.volume ?? 0) > 0) {
+          if (subIndicator === 'vol' && hasVolumeData && (k.volume ?? 0) > 0) {
             html += `<div style="color:${textColor};font-weight:600;margin-top:2px;">${isTwMarket ? '成交額' : '成交量'}: ${k.volume?.toLocaleString()} ${volumeUnitLabel}</div>`;
+          } else if (subIndicator === 'kd') {
+            const kVal = kVals[idx] ?? k.k;
+            const dVal = dVals[idx] ?? k.d;
+            const kStr = kVal != null ? kVal.toFixed(1) : '-';
+            const dStr = dVal != null ? dVal.toFixed(1) : '-';
+            html += `<div style="margin-top:3px;font-weight:600;"><span style="color:#0ea5e9;">◆ K(9): ${kStr}</span> ｜ <span style="color:#f97316;">◆ D(9): ${dStr}</span></div>`;
+          } else if (subIndicator === 'rsi') {
+            const r6Val = rsi6Vals[idx] ?? k.rsi6;
+            const r12Val = rsi12Vals[idx] ?? k.rsi12;
+            const r6Str = r6Val != null ? r6Val.toFixed(1) : '-';
+            const r12Str = r12Val != null ? r12Val.toFixed(1) : '-';
+            html += `<div style="margin-top:3px;font-weight:600;"><span style="color:#0ea5e9;">◆ RSI(6): ${r6Str}</span> ｜ <span style="color:#f97316;">◆ RSI(12): ${r12Str}</span></div>`;
           }
           return html;
         },
@@ -541,15 +767,15 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
       axisPointer: {
         link: [{ xAxisIndex: 'all' }],
       },
-      grid: hasVolumeData
+      grid: hasSubChart
         ? [
             { left: '45px', right: '78px', top: '25px', height: '56%' }, // 主圖 (K線，右側留 78px 供膠囊對齊)
-            { left: '45px', right: '78px', top: '69%', height: '20%' }, // 副圖 (成交量/額)
+            { left: '45px', right: '78px', top: '69%', height: '20%' }, // 副圖 (成交量/額、KD 或 RSI)
           ]
         : [
             { left: '45px', right: '78px', top: '25px', bottom: '50px' },
           ],
-      xAxis: hasVolumeData
+      xAxis: hasSubChart
         ? [
             {
               type: 'category',
@@ -600,7 +826,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
               splitLine: { show: true, lineStyle: { color: gridSplitLine } },
             },
           ],
-      yAxis: hasVolumeData
+      yAxis: hasSubChart
         ? [
             {
               type: 'value',
@@ -615,20 +841,35 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
                 formatter: (v: number) => v.toLocaleString(),
               },
             },
-            {
-              type: 'value',
-              scale: true,
-              gridIndex: 1,
-              position: 'right',
-              splitNumber: 2,
-              axisLine: { show: true, lineStyle: { color: gridBorder } },
-              splitLine: { show: false },
-              axisLabel: {
-                color: textColor,
-                fontSize: 10,
-                formatter: (v: number) => (isTwMarket ? `${Math.round(v)}億` : `${v}`),
-              },
-            },
+            subIndicator === 'vol'
+              ? {
+                  type: 'value',
+                  scale: true,
+                  gridIndex: 1,
+                  position: 'right',
+                  splitNumber: 2,
+                  axisLine: { show: true, lineStyle: { color: gridBorder } },
+                  splitLine: { show: false },
+                  axisLabel: {
+                    color: textColor,
+                    fontSize: 10,
+                    formatter: (v: number) => (isTwMarket ? `${Math.round(v)}億` : `${v}`),
+                  },
+                }
+              : {
+                  type: 'value',
+                  min: 0,
+                  max: 100,
+                  gridIndex: 1,
+                  position: 'right',
+                  splitNumber: 2,
+                  axisLine: { show: true, lineStyle: { color: gridBorder } },
+                  splitLine: { lineStyle: { color: gridSplitLine } },
+                  axisLabel: {
+                    color: textColor,
+                    fontSize: 10,
+                  },
+                },
           ]
         : [
             {
@@ -647,7 +888,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
       dataZoom: [
         {
           type: 'inside',
-          xAxisIndex: hasVolumeData ? [0, 1] : [0],
+          xAxisIndex: hasSubChart ? [0, 1] : [0],
           start: initStart,
           end: initEnd,
           zoomOnMouseWheel: true,
@@ -658,7 +899,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
         },
         {
           type: 'slider',
-          xAxisIndex: hasVolumeData ? [0, 1] : [0],
+          xAxisIndex: hasSubChart ? [0, 1] : [0],
           start: initStart,
           end: initEnd,
           minSpan: (MIN_VISIBLE_BARS / (totalBars + BUFFER_DAYS)) * 100,
@@ -726,7 +967,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
         chart.dispose();
       }
     };
-  }, [data, isOpen, showMA, showBoll, theme]);
+  }, [data, isOpen, showMA, showBoll, subIndicator, theme]);
 
   // ESC 鍵關閉支援
   useEffect(() => {
@@ -859,6 +1100,34 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
               </button>
             </div>
 
+            {/* 副圖指標切換 (成交額/量、KD、RSI) */}
+            <div className="chart-toggle-group">
+              <button
+                type="button"
+                className={`chart-indicator-toggle ${subIndicator === 'vol' ? 'active' : ''}`}
+                onClick={() => setSubIndicator('vol')}
+                title="副圖顯示 成交額/量"
+              >
+                {code === 'IX0001' || code === 'IX0043' || code === 'TSE' || code === 'OTC' ? '成交額' : '成交量'}
+              </button>
+              <button
+                type="button"
+                className={`chart-indicator-toggle ${subIndicator === 'kd' ? 'active' : ''}`}
+                onClick={() => setSubIndicator('kd')}
+                title="副圖顯示 KD 隨機指標（含 >80 超買塗紅、<20 超賣塗綠）"
+              >
+                KD 指標
+              </button>
+              <button
+                type="button"
+                className={`chart-indicator-toggle ${subIndicator === 'rsi' ? 'active' : ''}`}
+                onClick={() => setSubIndicator('rsi')}
+                title="副圖顯示 RSI(6) 與 RSI(12) 相對強弱指標"
+              >
+                RSI 指標
+              </button>
+            </div>
+
             <button
               type="button"
               className="global-modal-close"
@@ -890,6 +1159,20 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           <span className="legend-item legend-ma240">
             <span className="legend-color-box box-ma240" /> 240MA (年線)
           </span>
+          {subIndicator === 'kd' && (
+            <span className="legend-item legend-sub-kd" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '10px', borderLeft: '1px solid rgba(148, 163, 184, 0.3)', paddingLeft: '10px' }}>
+              <span style={{ color: '#0ea5e9', fontWeight: 700 }}>◆ K(9)</span>
+              <span style={{ color: '#f97316', fontWeight: 700, marginLeft: '6px' }}>◆ D(9)</span>
+              <span style={{ color: '#ef4444', fontSize: '11px', marginLeft: '6px' }}>■ &gt;80超買</span>
+              <span style={{ color: '#10b981', fontSize: '11px', marginLeft: '3px' }}>■ &lt;20超賣</span>
+            </span>
+          )}
+          {subIndicator === 'rsi' && (
+            <span className="legend-item legend-sub-rsi" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '10px', borderLeft: '1px solid rgba(148, 163, 184, 0.3)', paddingLeft: '10px' }}>
+              <span style={{ color: '#0ea5e9', fontWeight: 700 }}>◆ RSI(6)</span>
+              <span style={{ color: '#f97316', fontWeight: 700, marginLeft: '6px' }}>◆ RSI(12)</span>
+            </span>
+          )}
           <span className="legend-hint">
             💡 支援滑鼠滾輪滾動縮放，或拖拉下方時間軸滑塊調整視野
           </span>

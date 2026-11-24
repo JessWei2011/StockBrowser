@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import type { QuoteState, WatchlistItem, StockAnnouncement, StockMaSummary } from '../types';
 import { filterActiveAnnouncements } from '../utils/announcements';
 import { getRealtimeMaIndicators } from '../utils/maUtils';
+import { isLimitUpPrice, isLimitDownPrice } from '../utils/limitPriceUtils';
 import { StockNotePopover } from './StockNotePopover';
+import { StockTrendSparkline } from './StockTrendSparkline';
 
 interface QuoteTableProps {
   items: WatchlistItem[];
@@ -17,6 +19,7 @@ interface QuoteTableProps {
   onMoveItem?: (index: number, direction: 'up' | 'down') => Promise<void>;
   onReorderItems: (fromIndex: number, toIndex: number) => Promise<void>;
   onSelectStock?: (code: string) => void;
+  onOpenTrendModal?: (code: string) => void;
   onOpenOrder?: (code: string) => void;
 }
 
@@ -31,6 +34,7 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
   onRemoveItem,
   onReorderItems,
   onSelectStock,
+  onOpenTrendModal,
   onOpenOrder,
 }) => {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
@@ -113,6 +117,7 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
         <thead>
           <tr>
             <th className="th-sticky-stock">商品</th>
+            <th className="th-trend" title="今日分時微型走勢縮圖">走勢</th>
             <th>成交價</th>
             <th>零股價</th>
             <th>漲跌</th>
@@ -128,7 +133,7 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
         <tbody>
           {items.length === 0 ? (
             <tr>
-              <td colSpan={11} className="empty-message">
+              <td colSpan={12} className="empty-message">
                 目前群組沒有商品，請由上方搜尋並新增個股。
               </td>
             </tr>
@@ -149,9 +154,10 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                 else if (effectiveChg < 0) changeClass = 'color-down';
               }
 
-              // 2. 檢查漲跌停 (幅標 >= 9.5% 或 <= -9.5%)
-              const isLimitUp = effectivePct !== null && !isNaN(effectivePct) && effectivePct >= 9.5;
-              const isLimitDown = effectivePct !== null && !isNaN(effectivePct) && effectivePct <= -9.5;
+              // 2. 檢查漲跌停 (精準依漲跌停價判定，解開漲跌停後燈號即刻熄滅)
+              const isEtfOrBond = item.code.startsWith('00') || ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase());
+              const isLimitUp = isLimitUpPrice(last, q?.limitUp, prev, isEtfOrBond);
+              const isLimitDown = isLimitDownPrice(last, q?.limitDown, prev, isEtfOrBond);
 
               // 3. 樣式與徽章判定
               let badgeClass = '';
@@ -313,6 +319,20 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                         </>
                       );
                     })()}
+                  </td>
+
+                  {/* 當日走勢縮圖 */}
+                  <td className="td-trend">
+                    <StockTrendSparkline
+                      open={q?.open}
+                      high={q?.high}
+                      low={q?.low}
+                      last={last}
+                      previousClose={prev}
+                      code={item.code}
+                      name={item.name || q?.name}
+                      onClick={onOpenTrendModal ? () => onOpenTrendModal(item.code) : undefined}
+                    />
                   </td>
 
                   {/* 成交價 */}

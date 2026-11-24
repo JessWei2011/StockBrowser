@@ -19,6 +19,8 @@ class QuoteState(BaseModel):
     previousClose: Optional[float] = None
     change: Optional[float] = None
     changePercent: Optional[float] = None
+    limitUp: Optional[float] = None
+    limitDown: Optional[float] = None
     sourceTs: Optional[str] = None
     oddLotSourceTs: Optional[str] = None
     receivedAt: str = ""

@@ -39,11 +39,16 @@ async def test_websocket_e2e_snapshot_and_delta():
         assert "quotes" in snap_msg
         print(f"Successfully received initial snapshot with {len(snap_msg['quotes'])} quotes.")
 
-        # 2. 驗證 ping / pong
+        # 2. 驗證 ping / pong (接收到 pong 之前可能會穿插 1Hz 廣播之 quote_delta)
         await ws.send(json.dumps({"type": "ping"}))
-        pong_raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
-        pong_msg = json.loads(pong_raw)
-        assert pong_msg["type"] == "pong"
+        got_pong = False
+        for _ in range(5):
+            msg_raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
+            msg = json.loads(msg_raw)
+            if msg.get("type") == "pong":
+                got_pong = True
+                break
+        assert got_pong, "Failed to receive pong reply"
         print("Successfully received pong reply.")
 
         # 3. 驗證 1Hz delta 廣播

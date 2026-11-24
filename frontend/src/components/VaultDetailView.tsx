@@ -13,7 +13,7 @@ interface VaultDetailViewProps {
   onOpenChart?: (code: string) => void;
 }
 
-type SortKey = 'code' | 'last' | 'ydQuantity' | 'quantity' | 'costPrice' | 'cost' | 'pnl' | 'roi';
+type SortKey = 'code' | 'last' | 'costPrice' | 'cost' | 'marketVal' | 'pnl' | 'roi';
 
 // 計算台股扣除證交稅與賣出手續費後之真實淨損益與報酬率
 function calcPositionMetrics(
@@ -79,6 +79,7 @@ export const VaultDetailView: React.FC<VaultDetailViewProps> = ({
       const ydQty = pos.ydQuantity ?? pos.quantity;
       const todayQty = pos.quantity;
       const cost = Math.round(pos.costPrice * todayQty);
+      const marketVal = Math.round(currPrice * todayQty);
       const { pnl, roi } = calcPositionMetrics(
         pos.code,
         currPrice,
@@ -94,6 +95,7 @@ export const VaultDetailView: React.FC<VaultDetailViewProps> = ({
         ydQty,
         todayQty,
         cost,
+        marketVal,
         pnl: Math.round(pnl),
         roi: Number(roi.toFixed(2)),
         isDirty: dirtyCodes?.has(pos.code) || false,
@@ -123,14 +125,6 @@ export const VaultDetailView: React.FC<VaultDetailViewProps> = ({
           valA = a.currPrice;
           valB = b.currPrice;
           break;
-        case 'ydQuantity':
-          valA = a.ydQty;
-          valB = b.ydQty;
-          break;
-        case 'quantity':
-          valA = a.todayQty;
-          valB = b.todayQty;
-          break;
         case 'costPrice':
           valA = a.costPrice;
           valB = b.costPrice;
@@ -138,6 +132,10 @@ export const VaultDetailView: React.FC<VaultDetailViewProps> = ({
         case 'cost':
           valA = a.cost;
           valB = b.cost;
+          break;
+        case 'marketVal':
+          valA = a.marketVal;
+          valB = b.marketVal;
           break;
         case 'pnl':
           valA = a.pnl;
@@ -163,14 +161,12 @@ export const VaultDetailView: React.FC<VaultDetailViewProps> = ({
   const totals = useMemo(() => {
     let totalCost = 0;
     let totalPnl = 0;
-    let totalYdQty = 0;
-    let totalTodayQty = 0;
+    let totalMarketVal = 0;
 
     for (const p of detailedPositions) {
       totalCost += p.cost;
       totalPnl += p.pnl;
-      totalYdQty += p.ydQty;
-      totalTodayQty += p.todayQty;
+      totalMarketVal += p.marketVal;
     }
 
     const totalRoi = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
@@ -178,9 +174,7 @@ export const VaultDetailView: React.FC<VaultDetailViewProps> = ({
       totalCost,
       totalPnl,
       totalRoi,
-      totalYdQty,
-      totalTodayQty,
-      totalMarketVal: totalCost + totalPnl,
+      totalMarketVal,
       count: detailedPositions.length,
     };
   }, [detailedPositions]);
@@ -336,24 +330,6 @@ export const VaultDetailView: React.FC<VaultDetailViewProps> = ({
                 </th>
                 <th
                   className="col-num sortable"
-                  onClick={() => handleHeaderClick('ydQuantity')}
-                >
-                  <div className="th-content th-right">
-                    <span>昨日餘額</span>
-                    {getSortIndicator('ydQuantity')}
-                  </div>
-                </th>
-                <th
-                  className="col-num sortable"
-                  onClick={() => handleHeaderClick('quantity')}
-                >
-                  <div className="th-content th-right">
-                    <span>今日餘額</span>
-                    {getSortIndicator('quantity')}
-                  </div>
-                </th>
-                <th
-                  className="col-num sortable"
                   onClick={() => handleHeaderClick('costPrice')}
                 >
                   <div className="th-content th-right">
@@ -368,6 +344,15 @@ export const VaultDetailView: React.FC<VaultDetailViewProps> = ({
                   <div className="th-content th-right">
                     <span>付出成本</span>
                     {getSortIndicator('cost')}
+                  </div>
+                </th>
+                <th
+                  className="col-num sortable"
+                  onClick={() => handleHeaderClick('marketVal')}
+                >
+                  <div className="th-content th-right">
+                    <span>今日價值</span>
+                    {getSortIndicator('marketVal')}
                   </div>
                 </th>
                 <th
@@ -393,7 +378,7 @@ export const VaultDetailView: React.FC<VaultDetailViewProps> = ({
             <tbody>
               {filteredPositions.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="vault-empty-cell">
+                  <td colSpan={7} className="vault-empty-cell">
                     {searchQuery ? '無相符之持股標的' : '尚無持股資料，系統連線中...'}
                   </td>
                 </tr>
@@ -402,7 +387,7 @@ export const VaultDetailView: React.FC<VaultDetailViewProps> = ({
                   return (
                     <tr
                       key={pos.code}
-                      className={`vault-row ${pos.isDirty ? 'row-flash' : ''}`}
+                      className="vault-row"
                       onClick={() => onOpenChart && onOpenChart(pos.code)}
                       title="點擊查看個股走勢與技術分析"
                     >
@@ -420,17 +405,14 @@ export const VaultDetailView: React.FC<VaultDetailViewProps> = ({
                           {pos.currPrice.toFixed(2)}
                         </span>
                       </td>
-                      <td className="col-num col-balance">
-                        {pos.ydQty.toLocaleString()}
-                      </td>
-                      <td className="col-num col-balance">
-                        <strong>{pos.todayQty.toLocaleString()}</strong>
-                      </td>
                       <td className="col-num col-cost-price">
                         {pos.costPrice.toFixed(2)}
                       </td>
                       <td className="col-num col-cost">
                         {pos.cost.toLocaleString()}
+                      </td>
+                      <td className="col-num col-market-val">
+                        <strong>{pos.marketVal.toLocaleString()}</strong>
                       </td>
                       <td className="col-num col-pnl">
                         <span className={`pnl-value ${getPnlClass(pos.pnl)}`}>
@@ -457,13 +439,12 @@ export const VaultDetailView: React.FC<VaultDetailViewProps> = ({
                     <span className="total-title">合計（共 {totals.count} 檔）</span>
                   </td>
                   <td className="col-num col-last-price">-</td>
-                  <td className="col-num col-balance">{totals.totalYdQty.toLocaleString()}</td>
-                  <td className="col-num col-balance">
-                    <strong>{totals.totalTodayQty.toLocaleString()}</strong>
-                  </td>
                   <td className="col-num col-cost-price">-</td>
                   <td className="col-num col-cost">
                     <strong>{totals.totalCost.toLocaleString()}</strong>
+                  </td>
+                  <td className="col-num col-market-val">
+                    <strong>{totals.totalMarketVal.toLocaleString()}</strong>
                   </td>
                   <td className="col-num col-pnl">
                     <strong className={`total-pnl-val ${getPnlClass(totals.totalPnl)}`}>

@@ -16,6 +16,8 @@ export interface QuoteState {
   previousClose: number | null;
   change: number | null;
   changePercent: number | null;
+  limitUp?: number | null;
+  limitDown?: number | null;
   isSimulated?: boolean;
   isAttention?: boolean;
   dispositionLevel?: number;
@@ -471,6 +473,30 @@ export interface StockAiNote {
   updated_at?: string;
   error?: string;
 }
+
+export interface StockIntradayPoint {
+  time: string;
+  price: number;
+  volume: number;
+  high?: number;
+  low?: number;
+  open?: number;
+}
+
+export interface StockIntradayResponse {
+  code: string;
+  name: string;
+  exchange?: string;
+  prevClose?: number | null;
+  currPrice?: number | null;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  totalVolume?: number | null;
+  points: StockIntradayPoint[];
+  updatedAt: string;
+}
+
 
 
 

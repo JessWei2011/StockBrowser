@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { QuoteState, WatchlistItem, StockAnnouncement, StockMaSummary } from '../types';
 import { filterActiveAnnouncements } from '../utils/announcements';
 import { getRealtimeMaIndicators } from '../utils/maUtils';
+import { isLimitUpPrice, isLimitDownPrice } from '../utils/limitPriceUtils';
 import { StockNotePopover } from './StockNotePopover';
 
 interface CompactCardListProps {
@@ -115,9 +116,10 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
           else if (effectiveChg < 0) changeClass = 'color-down';
         }
 
-        // 2. 檢查漲跌停 (幅標 >= 9.5% 或 <= -9.5%)
-        const isLimitUp = effectivePct !== null && !isNaN(effectivePct) && effectivePct >= 9.5;
-        const isLimitDown = effectivePct !== null && !isNaN(effectivePct) && effectivePct <= -9.5;
+        // 2. 檢查漲跌停 (精準依漲跌停價判定，解開漲跌停後燈號即刻熄滅)
+        const isEtfOrBond = item.code.startsWith('00') || ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase());
+        const isLimitUp = isLimitUpPrice(last, q?.limitUp, prev, isEtfOrBond);
+        const isLimitDown = isLimitDownPrice(last, q?.limitDown, prev, isEtfOrBond);
 
         let badgeClass = '';
         if (isLimitUp) {
@@ -155,7 +157,6 @@ export const CompactCardList: React.FC<CompactCardListProps> = ({
         );
 
         const isOtc = ((item.exchange || q?.exchange || '').toUpperCase() === 'OTC');
-        const isEtfOrBond = item.code.startsWith('00') || ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase());
         const isStarred = Boolean(candidateCodes?.has(item.code));
 
         return (

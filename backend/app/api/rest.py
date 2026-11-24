@@ -283,6 +283,13 @@ async def get_stock_chart(code: str):
         raise HTTPException(status_code=404, detail=f"Stock {code} report not found in StockCenter")
     return chart_data
 
+@router.get("/stocks/{code}/intraday")
+async def get_stock_intraday(code: str):
+    """獲取個股當日即時 1 分鐘級分時走勢數據 (09:00 ~ 13:30)"""
+    from backend.app.services.stock_chart_service import get_stock_intraday_trend
+    return await asyncio.to_thread(get_stock_intraday_trend, code)
+
+
 @router.get("/indicators")
 async def get_stock_indicators(codes: str = Query("")):
     import asyncio

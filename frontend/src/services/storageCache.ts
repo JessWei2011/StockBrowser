@@ -41,6 +41,26 @@ export function loadBootstrapCache(): BootstrapCacheData | null {
     if (!parsed || !Array.isArray(parsed.groups) || parsed.groups.length === 0) {
       return null;
     }
+    // 檢查快取是否為今天的資料；若為昨日快取，自動將昨日收盤價轉為今日昨收，並清空開高低累計數據
+    const today = getTodayDateStr();
+    if (parsed.dateStr && parsed.dateStr !== today && parsed.quotes) {
+      const resetQuotes: Record<string, QuoteState> = {};
+      for (const [code, q] of Object.entries(parsed.quotes)) {
+        const yClose = q.last || q.previousClose;
+        resetQuotes[code] = {
+          ...q,
+          previousClose: yClose,
+          last: yClose,
+          open: null,
+          high: null,
+          low: null,
+          change: 0,
+          changePercent: 0,
+          totalVolume: 0,
+        };
+      }
+      parsed.quotes = resetQuotes;
+    }
     return parsed;
   } catch (e) {
     console.warn('[Cache] Failed to load bootstrap cache:', e);
