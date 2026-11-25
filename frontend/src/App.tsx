@@ -31,6 +31,7 @@ import { UsdTwdChartModal } from './components/UsdTwdChartModal';
 import { StockTrendModal } from './components/StockTrendModal';
 import { VaultDetailView } from './components/VaultDetailView';
 import { MobileNavBar, type MobileNavTab } from './components/MobileNavBar';
+import { DealToastContainer, type DealToastItem } from './components/DealToastContainer';
 import { fetchForexUsdTwd } from './services/api';
 import type { ForexRateResponse } from './types';
 import { loadBootstrapCache, saveBootstrapCache } from './services/storageCache';
@@ -56,6 +57,10 @@ export const App: React.FC = () => {
   const [marketModalTab, setMarketModalTab] = useState<'all' | 'tw' | 'us' | 'asia'>('all');
   const [isUsdTwdModalOpen, setIsUsdTwdModalOpen] = useState(false);
   const [selectedTrendStock, setSelectedTrendStock] = useState<{ code: string; name?: string } | null>(null);
+  const [dealToasts, setDealToasts] = useState<DealToastItem[]>([]);
+  const handleDismissDealToast = useCallback((id: string) => {
+    setDealToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
   const [forexData, setForexData] = useState<ForexRateResponse | null>(null);
   const [isForexLoading, setIsForexLoading] = useState(false);
   const [orderTargetCode, setOrderTargetCode] = useState<string | null>(null);
@@ -313,6 +318,25 @@ export const App: React.FC = () => {
           loadBootstrap();
           watchlistChangedTimerRef.current = null;
         }, 400);
+      } else if (msg.type === 'order_deal') {
+        const deal = msg.data;
+        const newToastId = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        setDealToasts((prev) => [{ ...deal, id: newToastId }, ...prev].slice(0, 5));
+
+        // 觸發全域自訂事件，讓下單側欄自動即時重新載入最新委託與成交狀態
+        window.dispatchEvent(new CustomEvent('stockbrowser:order_deal', { detail: deal }));
+
+        // 桌面原生 Notification (若在背景或最小化視窗)
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          try {
+            new Notification(`委託成交：${deal.name} (${deal.code})`, {
+              body: `${deal.action === 'Buy' ? '🔴 買進' : '🟢 賣出'} ${deal.quantity.toLocaleString()} ${deal.unit} @ $${deal.price}`,
+              icon: '/favicon.ico',
+            });
+          } catch (e) {
+            console.debug('Notification error:', e);
+          }
+        }
       }
     });
 
@@ -1320,6 +1344,9 @@ export const App: React.FC = () => {
         onSelectTab={handleSelectMobileTab}
         positionsCount={positions.length}
       />
+
+      {/* 全域成交通知 Toast (支援 Tailscale 遠端電腦同步推播) */}
+      <DealToastContainer toasts={dealToasts} onDismiss={handleDismissDealToast} />
     </div>
   );
 };

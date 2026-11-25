@@ -201,7 +201,17 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     if (isOpen && activeTab === 'order') {
       loadOrders();
       const timer = setInterval(loadOrders, 4000);
-      return () => clearInterval(timer);
+
+      // 當收到成交通知事件時立即向後端更新最新委託單狀態
+      const handleDeal = () => {
+        loadOrders();
+      };
+      window.addEventListener('stockbrowser:order_deal', handleDeal);
+
+      return () => {
+        clearInterval(timer);
+        window.removeEventListener('stockbrowser:order_deal', handleDeal);
+      };
     }
   }, [isOpen, activeTab]);
 
@@ -553,7 +563,6 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
         const isPreOrder = res.status === 'PreSubmitted' || res.statusCode === 'R';
         setOrderNotice(`✔ ${isPreOrder ? '預約單已成功受理' : '委託已成功送出'}！單號: ${res.orderId || '已確認'} | ${res.message}`);
         await loadOrders();
-        setOrderSubTab('orders');
       } else {
         setOrderNoticeType('error');
         setOrderNotice(`❌ 委託未成立: ${res.message || res.detail || '交易所退單'}`);
@@ -655,23 +664,27 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     }
   };
 
-  // 手動清除歷史委託單紀錄（僅清空已成交與已取消單，保留進行中的掛單）
+  // 手動清除已取消委託單紀錄（僅清空已取消/失敗單，完整保留當日成交單與進行中掛單）
   const handleClearOrders = async () => {
     const activeList = orders.filter((o) => o.canCancel);
-    const historyList = orders.filter((o) => !o.canCancel);
+    const filledList = orders.filter((o) => o.status === 'Filled' || (o.dealQty && o.dealQty > 0));
+    const cancelledList = orders.filter((o) => !o.canCancel && o.status !== 'Filled' && (!o.dealQty || o.dealQty === 0));
 
-    if (historyList.length === 0) {
-      if (activeList.length > 0) {
-        alert('目前所有委託單皆為掛單待撮合中，歷史單已清空或無歷史單。\n進行中的掛單將完整保留。');
+    if (cancelledList.length === 0) {
+      if (filledList.length > 0 || activeList.length > 0) {
+        alert('目前沒有已取消或失效的委託單可清空。\n當日成交單與進行中掛單皆已完整保留。');
       } else {
         alert('目前尚無任何委託單紀錄。');
       }
       return;
     }
 
-    let confirmMsg = `確定要清空已成交與已取消的歷史委託單嗎？（共 ${historyList.length} 筆）`;
-    if (activeList.length > 0) {
-      confirmMsg += `\n\n📌 目前進行中的 ${activeList.length} 筆掛單將會完整保留。`;
+    let confirmMsg = `確定要清空已取消/失敗的委託單嗎？（共 ${cancelledList.length} 筆）`;
+    const preservedNotes: string[] = [];
+    if (filledList.length > 0) preservedNotes.push(`今日成交單 ${filledList.length} 筆`);
+    if (activeList.length > 0) preservedNotes.push(`進行中掛單 ${activeList.length} 筆`);
+    if (preservedNotes.length > 0) {
+      confirmMsg += `\n\n📌 ${preservedNotes.join(' 與 ')}將會完整保留。`;
     }
 
     if (!window.confirm(confirmMsg)) return;
@@ -679,16 +692,14 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     try {
       setIsClearingOrders(true);
       await clearOrders();
-      // 保留正在掛單待撮合的委託單，僅移除非在途歷史單
-      setOrders((prev) => prev.filter((o) => o.canCancel));
+      // 保留正在掛單待撮合的委託單與已成交單，僅移除非在途且未成交的已取消/失敗單
+      setOrders((prev) => prev.filter((o) => o.canCancel || o.status === 'Filled' || (o.dealQty && o.dealQty > 0)));
       setOrderNoticeType('info');
       setOrderNotice(
-        `✔ 已清空 ${historyList.length} 筆歷史單${
-          activeList.length > 0 ? `，${activeList.length} 筆掛單已保留` : ''
-        }`
+        `✔ 已清空 ${cancelledList.length} 筆已取消單（當日成交單與掛單已保留）`
       );
       setTimeout(() => setOrderNotice(null), 5000);
-      // 向後端更新委託清單，確保掛單資訊與券商完全一致
+      // 向後端更新委託清單，確保掛單與成交單資訊與券商完全一致
       await loadOrders();
     } catch (err: any) {
       console.error('Failed to clear orders:', err);
@@ -1551,9 +1562,9 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                       className="btn-clear-orders"
                       onClick={handleClearOrders}
                       disabled={isClearingOrders || orders.length === 0}
-                      title={orders.length === 0 ? "目前尚無委託單可清空" : "清空已成交與已取消的歷史單（進行中掛單將完整保留）"}
+                      title={orders.length === 0 ? "目前尚無委託單可清空" : "清空已取消與失敗的委託單（當日成交單與進行中掛單將完整保留）"}
                     >
-                      {isClearingOrders ? '🧹 清空中...' : '🧹 清空歷史單'}
+                      {isClearingOrders ? '🧹 清空中...' : '🧹 清空已取消單'}
                     </button>
                     <button
                       type="button"
@@ -1605,7 +1616,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                     <div className="orders-empty-state">
                       <div className="empty-icon">📭</div>
                       <div className="empty-text">今日尚無符合條件的委託單</div>
-                      <div className="empty-subtext">（每日 15:00 收盤後自動歸檔清空，不影響次日交易）</div>
+                      <div className="empty-subtext">（每日開盤 08:30 前自動清空昨日成交單，手動清空僅清除已取消單）</div>
                       <button
                         type="button"
                         className="btn-goto-order"

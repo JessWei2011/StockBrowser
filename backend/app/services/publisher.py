@@ -55,6 +55,16 @@ class BatchPublisher:
             "generatedAt": now_iso()
         })
 
+    async def broadcast_order_deal(self, deal_data: dict):
+        """廣播委託成交事件給所有 WebSocket 連線之客戶端（含 Tailscale 遠端電腦）"""
+        version = quote_store.get_server_version()
+        await self.broadcast({
+            "type": "order_deal",
+            "serverVersion": version,
+            "generatedAt": now_iso(),
+            "data": deal_data
+        })
+
     async def start(self):
         if self._running:
             return

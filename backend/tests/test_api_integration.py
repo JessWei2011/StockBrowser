@@ -85,7 +85,7 @@ async def test_orders_and_clear_orders():
         assert clear_res.status_code == 200
         data = clear_res.json()
         assert data["success"] is True
-        assert "今日委託單紀錄已清空" in data["message"]
+        assert "已清空" in data["message"]
 
 @pytest.mark.asyncio
 async def test_stock_intraday_endpoint():

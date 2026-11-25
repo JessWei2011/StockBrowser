@@ -255,6 +255,32 @@ def format_index_amount(raw_amount: Optional[float]) -> tuple[Optional[float], O
     text = f"{int(round(val_in_yi)):,}億"
     return val_in_yi_rounded, text
 
+def get_market_order_cutoff(now: datetime) -> datetime:
+    """
+    計算委託單與成交單的自動保留截止時間。
+    規則：
+    1. 每個交易日（週一至週五）早上 08:25 開盤前自動清除前一交易日之成交單與歷史單。
+    2. 盤中、盤後（15:00 收盤後）、夜間及週末假日皆完整保留該交易日之成交單供檢視複盤。
+    """
+    target_date = now.date()
+    cutoff_minutes = 8 * 60 + 25
+    current_minutes = now.hour * 60 + now.minute
+
+    if now.weekday() == 5:  # 週六：保留週五交易日資料
+        target_date = target_date - timedelta(days=1)
+    elif now.weekday() == 6:  # 週日：保留週五交易日資料
+        target_date = target_date - timedelta(days=2)
+    elif current_minutes < cutoff_minutes:
+        # 週一至週五 08:25 前：保留前一交易日資料
+        if now.weekday() == 0:  # 週一 08:25 前保留週五資料
+            target_date = target_date - timedelta(days=3)
+        else:
+            target_date = target_date - timedelta(days=1)
+    # 若為週一至週五且已過 08:25，target_date 即為今天
+
+    return datetime.combine(target_date, datetime.min.time()).replace(hour=8, minute=25, second=0, microsecond=0)
+
+
 # Solace 報價連線主題上限控管 (永豐 Solace 硬上限 200，保留安全緩衝設為 195)
 MAX_SOLACE_TOPICS = 195
 INDEX_TOPICS = 2  # TSE (IX0001) 與 OTC (IX0043) 大盤指數
@@ -294,6 +320,9 @@ class ShioajiAdapter:
         self._last_preopen_warmup_date: Optional[str] = None
         self._orders_cleared_at: Optional[datetime] = None
         self._cleared_order_ids: set[str] = set()
+        self._notified_deal_keys: set[str] = set()
+        self._known_deal_quantities: dict[str, int] = {}
+        self._initialized_known_deals: bool = False
         self._last_reconnect_attempt_ts: float = 0.0
         self.stock_account: Any = None
         self.ca_activated: bool = False
@@ -381,15 +410,18 @@ class ShioajiAdapter:
 
                 is_weekday = (now_tw.weekday() < 5)
                 current_minutes = now_tw.hour * 60 + now_tw.minute
-                # 1. 營業日 08:30 開始執行開盤前重新登入連線與行情快照刷新
-                is_morning_window = (8 * 60 + 30 <= current_minutes <= 8 * 60 + 55)
+                # 1. 營業日 08:25 開始執行開盤前重新登入連線、清除前日歷史快取與合約快照刷新
+                is_morning_window = (8 * 60 + 25 <= current_minutes <= 8 * 60 + 55)
 
                 if is_weekday and is_morning_window and self._last_morning_sync_date != today_str:
-                    logger.info(f"Triggering scheduled 08:30 morning reconnect & sync for {today_str}...")
+                    logger.info(f"Triggering scheduled 08:25 morning reconnect & sync for {today_str}...")
                     self._last_morning_sync_date = today_str
                     if hasattr(self, "_cleared_order_ids") and self._cleared_order_ids:
                         self._cleared_order_ids.clear()
                     self._orders_cleared_at = None
+                    self._notified_deal_keys.clear()
+                    self._known_deal_quantities.clear()
+                    self._initialized_known_deals = False
                     # 執行完整的重新登入與連線重建 (重設底層 Solace 報價連線)
                     await self.reconnect()
                     # 刷新最新合約、基準昨收與當日最新 snapshot
@@ -446,11 +478,15 @@ class ShioajiAdapter:
                 # 建立合約快取以供搜尋
                 self._build_contracts_cache()
                 
-                # 設定 Quote callback (個股與指數) 與 盤中零股 Tick callback
+                # 設定 Quote callback (個股與指數) 與 盤中零股 Tick callback 及 委託成交 callback
                 self.api.set_on_quote_stk_v1_callback(self._on_quote_callback)
                 self.api.set_on_quote_idx_v1_callback(self._on_index_quote_callback)
                 self.api.set_on_tick_stk_v1_callback(self._on_tick_callback)
                 self.api.set_session_down_callback(self._on_session_down)
+                try:
+                    self.api.set_order_callback(self._on_order_callback)
+                except Exception as e:
+                    logger.warning(f"Error registering order callback: {e}")
 
                 # 初始化與訂閱大盤加權指數 (TSE IX0001) 與 櫃買指數 (OTC IX0043)
                 self._init_and_subscribe_indices()
@@ -613,6 +649,10 @@ class ShioajiAdapter:
             self.api.set_on_quote_idx_v1_callback(self._on_index_quote_callback)
             self.api.set_on_tick_stk_v1_callback(self._on_tick_callback)
             self.api.set_session_down_callback(self._on_session_down)
+            try:
+                self.api.set_order_callback(self._on_order_callback)
+            except Exception as e:
+                logger.warning(f"Error registering order callback on reconnect: {e}")
 
             self._init_and_subscribe_indices()
 
@@ -1352,6 +1392,166 @@ class ShioajiAdapter:
         except Exception as e:
             logger.error(f"Error parsing odd lot tick callback: {e}", exc_info=True)
 
+    def _on_order_callback(self, stat: Any, msg: Any):
+        """
+        Shioaji 委託與成交即時回呼 (Order Event Callback)。
+        當委託成交 (StockDeal) 或委託狀態變更 (StockOrder) 時由券商連線直接觸發。
+        """
+        try:
+            stat_name = getattr(stat, "name", str(stat))
+            stat_val = getattr(stat, "value", str(stat))
+            logger.info(f"Shioaji on_order callback: stat={stat_name}({stat_val}), msg={msg}")
+
+            is_deal = ("Deal" in stat_name) or ("DEAL" in stat_val) or (stat_name == "StockDeal")
+            if is_deal:
+                self._handle_deal_event(msg)
+            else:
+                self._handle_order_event(msg)
+        except Exception as e:
+            logger.error(f"Error handling order callback: {e}", exc_info=True)
+
+    def _handle_deal_event(self, msg: Any):
+        """解析 StockDealEvent 並即時透過 WebSocket 廣播成交通知"""
+        try:
+            def get_val(key, default=""):
+                if isinstance(msg, dict):
+                    return msg.get(key, default)
+                return getattr(msg, key, default)
+
+            code = str(get_val("code", "")).strip()
+            if not code:
+                return
+
+            action_raw = get_val("action", "Buy")
+            action_str = getattr(action_raw, "value", str(action_raw)).replace("Action.", "")
+            action_str = "Buy" if "Buy" in action_str else "Sell"
+
+            price = safe_float(get_val("price", 0.0)) or 0.0
+            quantity = safe_int(get_val("quantity", 0)) or 0
+            if quantity <= 0:
+                return
+
+            order_lot_raw = get_val("order_lot", "Common")
+            order_lot_str = getattr(order_lot_raw, "value", str(order_lot_raw)).replace("StockOrderLot.", "")
+            is_odd = order_lot_str in ("Odd", "IntradayOdd")
+            unit = "股" if is_odd else "張"
+
+            ordno = str(get_val("ordno", "")).strip()
+            trade_id = str(get_val("trade_id", "")).strip()
+            seqno = str(get_val("seqno", "")).strip()
+
+            deal_key = f"{trade_id}_{ordno}_{seqno}_{code}_{quantity}_{price}"
+            if deal_key in self._notified_deal_keys:
+                return
+            self._notified_deal_keys.add(deal_key)
+
+            name = self.contracts_cache.get(code, {}).get("name", "")
+            if not name and hasattr(self.api, "Contracts") and hasattr(self.api.Contracts, "Stocks"):
+                try:
+                    c_obj = self.api.Contracts.Stocks.get(code)
+                    if c_obj:
+                        name = getattr(c_obj, "name", "")
+                except Exception:
+                    pass
+
+            time_str = datetime.now().strftime("%H:%M:%S")
+            ts = get_val("ts", 0)
+            if ts:
+                try:
+                    time_str = datetime.fromtimestamp(float(ts)).strftime("%H:%M:%S")
+                except Exception:
+                    pass
+
+            deal_payload = {
+                "code": code,
+                "name": name or code,
+                "action": action_str,
+                "price": price,
+                "quantity": quantity,
+                "orderLot": order_lot_str,
+                "unit": unit,
+                "time": time_str,
+                "ordno": ordno,
+                "tradeId": trade_id,
+            }
+            logger.info(f"Broadcasting order deal via WebSocket: {deal_payload}")
+            if self._loop and not self._loop.is_closed():
+                from backend.app.services.publisher import publisher
+                fut = asyncio.run_coroutine_threadsafe(
+                    publisher.broadcast_order_deal(deal_payload),
+                    self._loop
+                )
+                fut.add_done_callback(
+                    lambda f: logger.info(f"Broadcast order deal completed: {deal_payload.get('code')}") if not f.exception() else logger.error(f"Broadcast order deal failed: {f.exception()}")
+                )
+        except Exception as e:
+            logger.error(f"Error in _handle_deal_event: {e}", exc_info=True)
+
+    def _handle_order_event(self, msg: Any):
+        """解析 StockOrderEvent 委託狀態變更 (例如成交量增加)"""
+        try:
+            status_obj = getattr(msg, "status", None) if not isinstance(msg, dict) else msg.get("status")
+            order_obj = getattr(msg, "order", None) if not isinstance(msg, dict) else msg.get("order")
+            contract_obj = getattr(msg, "contract", None) if not isinstance(msg, dict) else msg.get("contract")
+
+            if not status_obj or not order_obj:
+                return
+
+            order_id = getattr(order_obj, "id", "") if not isinstance(order_obj, dict) else order_obj.get("id", "")
+            deal_qty = safe_int(getattr(status_obj, "deal_quantity", 0) if not isinstance(status_obj, dict) else status_obj.get("deal_quantity", 0)) or 0
+            if deal_qty <= 0 or not order_id:
+                return
+
+            prev_deal_qty = self._known_deal_quantities.get(order_id, 0)
+            if deal_qty > prev_deal_qty:
+                new_filled_qty = deal_qty - prev_deal_qty
+                self._known_deal_quantities[order_id] = deal_qty
+
+                if self._initialized_known_deals:
+                    code = getattr(contract_obj, "code", "") if not isinstance(contract_obj, dict) else contract_obj.get("code", "")
+                    if not code and hasattr(order_obj, "code"):
+                        code = getattr(order_obj, "code", "")
+                    price = safe_float(getattr(order_obj, "price", 0.0) if not isinstance(order_obj, dict) else order_obj.get("price", 0.0)) or 0.0
+                    action_raw = getattr(order_obj, "action", "Buy") if not isinstance(order_obj, dict) else order_obj.get("action", "Buy")
+                    action_str = getattr(action_raw, "value", str(action_raw)).replace("Action.", "")
+                    action_str = "Buy" if "Buy" in action_str else "Sell"
+
+                    order_lot_raw = getattr(order_obj, "order_lot", "Common") if not isinstance(order_obj, dict) else order_obj.get("order_lot", "Common")
+                    order_lot_str = getattr(order_lot_raw, "value", str(order_lot_raw)).replace("StockOrderLot.", "")
+                    unit = "股" if order_lot_str in ("Odd", "IntradayOdd") else "張"
+
+                    ordno = getattr(order_obj, "ordno", "") if not isinstance(order_obj, dict) else order_obj.get("ordno", "")
+                    deal_key = f"order_{order_id}_{deal_qty}"
+                    if deal_key not in self._notified_deal_keys:
+                        self._notified_deal_keys.add(deal_key)
+                        name = self.contracts_cache.get(code, {}).get("name", code)
+                        deal_payload = {
+                            "code": code,
+                            "name": name,
+                            "action": action_str,
+                            "price": price,
+                            "quantity": new_filled_qty,
+                            "orderLot": order_lot_str,
+                            "unit": unit,
+                            "time": datetime.now().strftime("%H:%M:%S"),
+                            "ordno": str(ordno or ""),
+                            "tradeId": order_id,
+                        }
+                        logger.info(f"Broadcasting order deal from order status event: {deal_payload}")
+                        if self._loop and not self._loop.is_closed():
+                            from backend.app.services.publisher import publisher
+                            fut = asyncio.run_coroutine_threadsafe(
+                                publisher.broadcast_order_deal(deal_payload),
+                                self._loop
+                            )
+                            fut.add_done_callback(
+                                lambda f: logger.info(f"Broadcast order deal from status event completed: {deal_payload.get('code')}") if not f.exception() else logger.error(f"Broadcast order deal failed: {f.exception()}")
+                            )
+            else:
+                self._known_deal_quantities[order_id] = deal_qty
+        except Exception as e:
+            logger.error(f"Error in _handle_order_event: {e}", exc_info=True)
+
     def _subscribe_odd_lot(self, code: str):
         """訂閱個股盤中零股 Tick（含 Solace 總主題限額控管）"""
         if not self.api or not self.is_logged_in:
@@ -1858,7 +2058,7 @@ class ShioajiAdapter:
         }
 
     def fetch_orders(self) -> list[dict[str, Any]]:
-        """取得今日所有證券委託單與成交狀態"""
+        """取得今日所有證券委託單與成交狀態 (含手動清空已取消單過濾與 08:25 開盤前自動清除)"""
         if not self.api or not self.is_logged_in:
             return []
         account = getattr(self, "stock_account", None)
@@ -1873,14 +2073,9 @@ class ShioajiAdapter:
             logger.warning(f"Error calling update_status: {e}")
 
         now = datetime.now()
-        # 1. 決定基準截止點 (15:00 收盤後自動清空，且跨日不殘留歷史單)：
-        # - 若當前時間已過 15:00 (15:00 ~ 23:59)：今日 15:00 以前的盤中/盤後委託單已全數收盤結案，自動過濾掉
-        # - 若當前時間在 00:00 ~ 14:59 (開盤前與盤中)：僅採計今日 (當天 00:00 以後) 的委託單，自動排除昨日或更早的歷史單
-        if now.hour >= 15:
-            auto_cutoff = now.replace(hour=15, minute=0, second=0, microsecond=0)
-        else:
-            auto_cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
-
+        # 決定基準截止點：營業日 08:25 開盤前自動清空前一日成交單；
+        # 盤後 15:00 至夜間與清晨均完整保留成交單供檢視當日成交結果
+        auto_cutoff = get_market_order_cutoff(now)
         if auto_cutoff.tzinfo is not None:
             auto_cutoff = auto_cutoff.astimezone().replace(tzinfo=None)
 
@@ -1932,7 +2127,7 @@ class ShioajiAdapter:
                 if order_dt and order_dt.tzinfo is not None:
                     order_dt = order_dt.astimezone().replace(tzinfo=None)
 
-                # 跨日或收盤 15:00 以後之歷史單自動排除
+                # 營業日開盤 08:25 前之歷史單自動排除
                 if order_dt and order_dt < auto_cutoff:
                     continue
 
@@ -1950,10 +2145,11 @@ class ShioajiAdapter:
                 if not is_active and status_str == "Filled":
                     active_qty = 0
 
-                # 僅過濾手動清空之已完成/已取消歷史單；進行中之掛單待撮合單（active_qty > 0）完整保留
+                # 僅過濾手動清空之已取消/失效歷史單；進行中之掛單待撮合單（active_qty > 0）與當日成交單完整保留
                 is_order_active = is_active and active_qty > 0
+                is_order_filled = (status_str == "Filled") or (deal_qty > 0)
                 cleared_order_ids = getattr(self, "_cleared_order_ids", None)
-                if not is_order_active and cleared_order_ids and order_id in cleared_order_ids:
+                if not is_order_active and not is_order_filled and cleared_order_ids and order_id in cleared_order_ids:
                     continue
 
                 orig_price = safe_float(getattr(t.order, "price", 0.0)) or 0.0
@@ -1989,6 +2185,45 @@ class ShioajiAdapter:
                     "canUpdatePrice": can_update_price,
                     "canUpdateQty": can_update_qty,
                 })
+
+                # 追蹤已知成交數量，確保輪詢或更新委託清單時若有新成交也能即時廣播
+                if deal_qty > 0 and order_id:
+                    prev_deal = self._known_deal_quantities.get(order_id, 0)
+                    if deal_qty > prev_deal:
+                        diff = deal_qty - prev_deal
+                        self._known_deal_quantities[order_id] = deal_qty
+                        if self._initialized_known_deals:
+                            deal_key = f"fetch_{order_id}_{deal_qty}"
+                            if deal_key not in self._notified_deal_keys:
+                                self._notified_deal_keys.add(deal_key)
+                                is_odd = order_lot_str in ("Odd", "IntradayOdd")
+                                unit = "股" if is_odd else "張"
+                                deal_payload = {
+                                    "code": code,
+                                    "name": name or code,
+                                    "action": action_str,
+                                    "price": display_price,
+                                    "quantity": diff,
+                                    "orderLot": order_lot_str,
+                                    "unit": unit,
+                                    "time": time_str,
+                                    "ordno": getattr(t.order, "ordno", "") or "",
+                                    "tradeId": order_id,
+                                }
+                                logger.info(f"Detected new deal in fetch_orders: {deal_payload}")
+                                if self._loop and not self._loop.is_closed():
+                                    from backend.app.services.publisher import publisher
+                                    fut = asyncio.run_coroutine_threadsafe(
+                                        publisher.broadcast_order_deal(deal_payload),
+                                        self._loop
+                                    )
+                                    fut.add_done_callback(
+                                        lambda f: logger.info(f"Broadcast order deal from fetch_orders completed: {deal_payload.get('code')}") if not f.exception() else logger.error(f"Broadcast order deal failed: {f.exception()}")
+                                    )
+                    else:
+                        self._known_deal_quantities[order_id] = deal_qty
+
+            self._initialized_known_deals = True
         except Exception as e:
             logger.error(f"Error fetching orders from Shioaji: {e}", exc_info=True)
 
@@ -1996,7 +2231,7 @@ class ShioajiAdapter:
         return orders
 
     def clear_orders(self) -> dict[str, Any]:
-        """手動清空今日歷史委託單（僅清除已成交與已取消/失敗之歷史單，保留掛單中之委託單）"""
+        """手動清空今日已取消/失效之委託單（完整保留掛單中之委託單與今日成交單）"""
         if not hasattr(self, "_cleared_order_ids") or self._cleared_order_ids is None:
             self._cleared_order_ids = set()
 
@@ -2027,8 +2262,11 @@ class ShioajiAdapter:
                     is_active = status_str in ("Submitted", "PendingSubmit", "PreSubmitted", "PartFilled")
                     active_qty = max(0, orig_qty - cancel_qty - deal_qty) if is_active else 0
 
-                    # 僅清掉已完成交易（Filled）以及棄單/取消/失敗（Cancelled/Failed）等非掛單中歷史單
-                    if not (is_active and active_qty > 0):
+                    # 進行中之掛單（active_qty > 0）與當日已成交單（status == 'Filled' 或 deal_qty > 0）一律保留，僅清除已取消/失敗之委託單
+                    is_order_active = is_active and active_qty > 0
+                    is_order_filled = (status_str == "Filled") or (deal_qty > 0)
+
+                    if not is_order_active and not is_order_filled:
                         if order_id not in self._cleared_order_ids:
                             self._cleared_order_ids.add(order_id)
                             cleared_count += 1
@@ -2036,10 +2274,10 @@ class ShioajiAdapter:
                 logger.error(f"Error checking trades in clear_orders: {e}", exc_info=True)
 
         self._orders_cleared_at = datetime.now()
-        logger.info(f"User manually cleared {cleared_count} historical orders (total cleared: {len(self._cleared_order_ids)}) at {self._orders_cleared_at}")
+        logger.info(f"User manually cleared {cleared_count} cancelled orders (total cleared: {len(self._cleared_order_ids)}) at {self._orders_cleared_at}")
         return {
             "success": True,
-            "message": f"今日委託單紀錄已清空（已清除 {cleared_count} 筆歷史單，進行中掛單已保留）",
+            "message": f"今日已取消委託單已清空（已清除 {cleared_count} 筆已取消單，成交單與進行中掛單已保留）",
             "clearedCount": cleared_count,
             "clearedAt": self._orders_cleared_at.isoformat()
         }

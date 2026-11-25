@@ -33,10 +33,10 @@
   --bg-surface: #101722;
   --border-color: #243042;
   --border-subtle: #192433;
-  --text-main: #f8fafc;
-  --text-sub: #cbd5e1;
-  --text-secondary: #e2e8f0;
-  --text-muted: #94a3b8;
+  --text-main: #ffffff;
+  --text-sub: #f1f5f9;
+  --text-secondary: #f8fafc;
+  --text-muted: #e2e8f0;
   --color-up: #ef4444;       /* 夜間高對比亮紅 */
   --color-down: #22c55e;     /* 夜間高對比亮綠 */
   --color-orange: #f59e0b;
@@ -46,8 +46,8 @@
   --badge-bg: #101722;
   --pill-group-bg: #192433;
   --pill-active-bg: #243245;
-  --pill-text: #94a3b8;
-  --pill-active-text: #f8fafc;
+  --pill-text: #e2e8f0;
+  --pill-active-text: #ffffff;
   --btn-bg: #151d28;
   --btn-border: #334155;
   --btn-hover: #1f2b3b;
@@ -295,6 +295,259 @@ button, input, select, textarea {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* ==========================================================================
+   Global Deal Toast Notification System (支援 Tailscale 遠端成交同步通知)
+   ========================================================================== */
+.deal-toast-container {
+  position: fixed;
+  top: 70px;
+  right: 24px;
+  z-index: 100000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+  max-width: 360px;
+  width: calc(100vw - 48px);
+}
+
+.deal-toast-card {
+  pointer-events: auto;
+  border-radius: 10px;
+  padding: 9px 14px;
+  cursor: pointer;
+  animation: dealToastSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+  backdrop-filter: blur(14px);
+  /* 醒目亮金邊框與立體發光 */
+  border: 2px solid #fbbf24;
+  box-shadow: 0 0 0 1px #f59e0b, 0 0 16px rgba(245, 158, 11, 0.4), 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.deal-toast-card:hover {
+  transform: translateY(-2px) scale(1.01);
+  box-shadow: 0 0 0 2px #fbbf24, 0 0 24px rgba(251, 191, 36, 0.65), 0 12px 30px rgba(0, 0, 0, 0.6);
+}
+
+@keyframes dealToastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(40px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+/* 買進 (Red in TWSE + 亮金邊框) */
+.deal-toast-card.deal-buy {
+  background: linear-gradient(135deg, rgba(62, 14, 14, 0.96) 0%, rgba(36, 8, 8, 0.98) 100%);
+  color: #ffffff;
+  border: 2px solid #fbbf24;
+}
+
+[data-theme="light"] .deal-toast-card.deal-buy {
+  background: linear-gradient(135deg, #fff5f5 0%, #fee2e2 100%);
+  color: #991b1b;
+  border: 2px solid #f59e0b;
+  box-shadow: 0 0 0 1.5px #d97706, 0 0 16px rgba(245, 158, 11, 0.35), 0 8px 20px rgba(220, 38, 38, 0.15);
+}
+
+/* 賣出 (Green in TWSE + 亮金邊框) */
+.deal-toast-card.deal-sell {
+  background: linear-gradient(135deg, rgba(12, 48, 30, 0.96) 0%, rgba(7, 30, 18, 0.98) 100%);
+  color: #ffffff;
+  border: 2px solid #fbbf24;
+}
+
+[data-theme="light"] .deal-toast-card.deal-sell {
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  color: #065f46;
+  border: 2px solid #f59e0b;
+  box-shadow: 0 0 0 1.5px #d97706, 0 0 16px rgba(245, 158, 11, 0.35), 0 8px 20px rgba(5, 150, 105, 0.15);
+}
+
+/* 第一行：買進/賣出 + 股票名稱 + 代號 + 時間 + 關閉按鈕 */
+.deal-toast-row1 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  line-height: 1.25;
+}
+
+.deal-toast-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deal-action-badge {
+  font-size: 13px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.deal-toast-card.deal-buy .deal-action-badge {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+[data-theme="light"] .deal-toast-card.deal-buy .deal-action-badge {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.deal-toast-card.deal-sell .deal-action-badge {
+  background: #10b981;
+  color: #ffffff;
+}
+
+[data-theme="light"] .deal-toast-card.deal-sell .deal-action-badge {
+  background: #059669;
+  color: #ffffff;
+}
+
+.deal-stock-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+[data-theme="light"] .deal-stock-title {
+  color: #111827;
+}
+
+.deal-stock-code {
+  font-size: 12.5px;
+  color: #fef08a;
+  font-weight: 600;
+}
+
+[data-theme="light"] .deal-stock-code {
+  color: #b45309;
+}
+
+.deal-toast-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.deal-toast-time {
+  opacity: 0.85;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: #fde68a;
+}
+
+[data-theme="light"] .deal-toast-time {
+  color: #92400e;
+}
+
+.deal-toast-close {
+  background: transparent;
+  border: none;
+  color: #fef08a;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.8;
+  cursor: pointer;
+  padding: 0 2px;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.deal-toast-close:hover {
+  opacity: 1;
+  transform: scale(1.15);
+}
+
+[data-theme="light"] .deal-toast-close {
+  color: #b45309;
+}
+
+/* 第二行：--- 1 股 @ $90.6 --- 成交 */
+.deal-toast-row2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  line-height: 1.25;
+  color: #ffffff;
+}
+
+[data-theme="light"] .deal-toast-row2 {
+  color: #1f2937;
+}
+
+.deal-divider {
+  color: #fbbf24;
+  opacity: 0.7;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+}
+
+[data-theme="light"] .deal-divider {
+  color: #d97706;
+}
+
+.deal-toast-card.deal-buy .deal-qty,
+.deal-toast-card.deal-buy .deal-price {
+  color: #fca5a5;
+  font-weight: 800;
+  font-size: 14.5px;
+}
+
+[data-theme="light"] .deal-toast-card.deal-buy .deal-qty,
+[data-theme="light"] .deal-toast-card.deal-buy .deal-price {
+  color: #dc2626;
+  font-weight: 800;
+  font-size: 14.5px;
+}
+
+.deal-toast-card.deal-sell .deal-qty,
+.deal-toast-card.deal-sell .deal-price {
+  color: #86efac;
+  font-weight: 800;
+  font-size: 14.5px;
+}
+
+[data-theme="light"] .deal-toast-card.deal-sell .deal-qty,
+[data-theme="light"] .deal-toast-card.deal-sell .deal-price {
+  color: #16a34a;
+  font-weight: 800;
+  font-size: 14.5px;
+}
+
+.deal-at {
+  opacity: 0.75;
+  font-size: 12px;
+  margin: 0 1px;
+}
+
+.deal-status-tag {
+  color: #fde68a;
+  font-weight: 800;
+  font-size: 12.5px;
+  letter-spacing: 0.5px;
+}
+
+[data-theme="light"] .deal-status-tag {
+  color: #b45309;
 }
 
 .header-right {
@@ -1211,10 +1464,10 @@ button, input, select, textarea {
   background-color: var(--bg-hover);
 }
 
-/* 長期持有標的暗色處理 (財神簿內 ETF、債券 ETF、虎航 6757) - 對比度提升 50% 確保清晰易讀 */
+/* 長期持有標的暗色處理 (財神簿內 ETF、債券 ETF、虎航 6757) - 對比度提升確保清晰易讀 */
 .quote-row.row-dimmed td {
-  opacity: 0.78;
-  filter: saturate(0.88);
+  opacity: 0.90;
+  filter: saturate(0.92);
   transition: opacity 0.2s ease, filter 0.2s ease;
 }
 
@@ -1921,14 +2174,14 @@ button, input, select, textarea {
 .note-sec-title {
   font-size: 11px;
   font-weight: 600;
-  color: #94a3b8;
+  color: #e2e8f0;
 }
 
 .note-sec-body {
   margin: 0;
   font-size: 12.5px;
   line-height: 1.55;
-  color: #cbd5e1;
+  color: #f8fafc;
   word-break: break-word;
 }
 
@@ -2010,7 +2263,7 @@ button, input, select, textarea {
 
 .note-edit-label {
   font-size: 11px;
-  color: #94a3b8;
+  color: #e2e8f0;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -2135,9 +2388,9 @@ button, input, select, textarea {
 }
 
 .btn-note-action {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #e2e8f0;
   font-size: 11px;
   padding: 3px 8px;
   border-radius: 4px;

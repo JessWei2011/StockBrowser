@@ -325,11 +325,32 @@ async def get_orders():
 
 @router.post("/orders/clear")
 async def clear_orders():
-    """手動清空今日委託單紀錄"""
+    """手動清空已取消之委託單紀錄（保留當日成交單與進行中掛單）"""
     try:
         return await shioaji_adapter.run_in_broker_executor(shioaji_adapter.clear_orders)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/orders/test-deal")
+async def test_order_deal(body: Optional[dict] = None):
+    """測試發送成交 Toast 廣播（供驗證 WebSocket 推播管道）"""
+    import time as _t
+    from datetime import datetime as _dt
+    payload = body if (body and isinstance(body, dict)) else {
+        "code": "3661",
+        "name": "世芯-KY",
+        "action": "Buy",
+        "price": 3590.0,
+        "quantity": 5,
+        "orderLot": "IntradayOdd",
+        "unit": "股",
+        "time": _dt.now().strftime("%H:%M:%S"),
+        "ordno": "TEST01",
+        "tradeId": f"test_{int(_t.time())}"
+    }
+    from backend.app.services.publisher import publisher
+    await publisher.broadcast_order_deal(payload)
+    return {"status": "ok", "broadcasted": payload}
 
 @router.post("/orders/{order_id}/cancel")
 async def cancel_order(order_id: str):

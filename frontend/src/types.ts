@@ -273,6 +273,19 @@ export interface InstrumentSearchResult {
   dispositionPeriod?: string | null;
 }
 
+export interface OrderDealNotification {
+  code: string;
+  name: string;
+  action: 'Buy' | 'Sell';
+  price: number;
+  quantity: number;
+  orderLot: string;
+  unit: string;
+  time: string;
+  ordno?: string;
+  tradeId?: string;
+}
+
 export type WebSocketMessage =
   | {
       type: 'snapshot';
@@ -292,6 +305,12 @@ export type WebSocketMessage =
       wealthSummary?: WealthSummary;
       marketIndices?: Record<string, MarketIndexState>;
       upstream?: UpstreamStatus;
+    }
+  | {
+      type: 'order_deal';
+      serverVersion: number;
+      generatedAt: string;
+      data: OrderDealNotification;
     }
   | {
       type: 'watchlist_changed';

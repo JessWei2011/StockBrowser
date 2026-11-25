@@ -16,12 +16,12 @@
   --v-border: #243042;
   --v-border-strong: #374151;
   --v-border-subtle: #192433;
-  --v-text-primary: #f8fafc;
-  --v-text-secondary: #cbd5e1;
-  --v-text-muted: #94a3b8;
+  --v-text-primary: #ffffff;
+  --v-text-secondary: #f1f5f9;
+  --v-text-muted: #e2e8f0;
   --v-color-up: #ef4444;       /* 夜間高對比亮紅 */
   --v-color-down: #22c55e;     /* 夜間高對比亮綠 */
-  --v-color-neutral: #94a3b8;
+  --v-color-neutral: #e2e8f0;
   --v-input-bg: #111827;
   --v-input-border: #374151;
   --v-btn-bg: #1f2937;
