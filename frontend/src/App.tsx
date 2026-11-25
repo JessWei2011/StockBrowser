@@ -32,7 +32,7 @@ import { UsdTwdChartModal } from './components/UsdTwdChartModal';
 import { StockTrendModal } from './components/StockTrendModal';
 import { VaultDetailView } from './components/VaultDetailView';
 import { MobileNavBar, type MobileNavTab } from './components/MobileNavBar';
-import { DealToastContainer, type DealToastItem } from './components/DealToastContainer';
+import { DealToastContainer, type DealToastItem, type SmartToastItem } from './components/DealToastContainer';
 import { fetchForexUsdTwd } from './services/api';
 import type { ForexRateResponse } from './types';
 import { loadBootstrapCache, saveBootstrapCache } from './services/storageCache';
@@ -61,6 +61,10 @@ export const App: React.FC = () => {
   const [dealToasts, setDealToasts] = useState<DealToastItem[]>([]);
   const handleDismissDealToast = useCallback((id: string) => {
     setDealToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+  const [smartToasts, setSmartToasts] = useState<SmartToastItem[]>([]);
+  const handleDismissSmartToast = useCallback((id: string) => {
+    setSmartToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
   const [forexData, setForexData] = useState<ForexRateResponse | null>(null);
   const [isForexLoading, setIsForexLoading] = useState(false);
@@ -332,6 +336,28 @@ export const App: React.FC = () => {
           try {
             new Notification(`委託成交：${deal.name} (${deal.code})`, {
               body: `${deal.action === 'Buy' ? '🔴 買進' : '🟢 賣出'} ${deal.quantity.toLocaleString()} ${deal.unit} @ $${deal.price}`,
+              icon: '/favicon.ico',
+            });
+          } catch (e) {
+            console.debug('Notification error:', e);
+          }
+        }
+      } else if (msg.type === 'smart_order_triggered') {
+        const alert = msg.data;
+        const newToastId = `smart_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        setSmartToasts((prev) => {
+          if (prev.some((t) => t.orderId === alert.orderId)) {
+            return prev;
+          }
+          return [{ ...alert, id: newToastId }, ...prev].slice(0, 5);
+        });
+
+        window.dispatchEvent(new CustomEvent('stockbrowser:smart_order_triggered', { detail: alert }));
+
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          try {
+            new Notification(`智慧預約單達標：${alert.name} (${alert.code})`, {
+              body: alert.triggerReason,
               icon: '/favicon.ico',
             });
           } catch (e) {
@@ -799,6 +825,24 @@ export const App: React.FC = () => {
     setDrawerTab('order');
     setIsDrawerOpen(true);
   };
+
+  // 點擊智慧預約單警報 Toast：開啟財神筆下單抽屜並自動帶入該檔股號、數量與觸發價
+  const handleClickSmartToast = useCallback((toast: SmartToastItem) => {
+    setPendingOrderParams({
+      action: 'sell',
+      unit: 'share',
+      qty: toast.quantity,
+      price: toast.price,
+    });
+    if (!isVaultAuthenticated()) {
+      setPendingOrderCode(toast.code);
+      setIsVaultPasswordModalOpen(true);
+      return;
+    }
+    setOrderTargetCode(toast.code);
+    setDrawerTab('order');
+    setIsDrawerOpen(true);
+  }, []);
 
   // 定時載入 USD/TWD 即時匯率 (初始載入 + 每 30 秒輪詢)
   const loadForex = useCallback(async (force: boolean = false) => {
@@ -1419,8 +1463,14 @@ export const App: React.FC = () => {
         positionsCount={positions.length}
       />
 
-      {/* 全域成交通知 Toast (支援 Tailscale 遠端電腦同步推播) */}
-      <DealToastContainer toasts={dealToasts} onDismiss={handleDismissDealToast} />
+      {/* 全域成交通知與智慧警報 Toast (支援 Tailscale 遠端電腦同步推播) */}
+      <DealToastContainer
+        toasts={dealToasts}
+        onDismiss={handleDismissDealToast}
+        smartToasts={smartToasts}
+        onDismissSmartToast={handleDismissSmartToast}
+        onClickSmartToast={handleClickSmartToast}
+      />
     </div>
   );
 };

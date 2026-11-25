@@ -1,20 +1,41 @@
 import React, { useEffect } from 'react';
-import type { OrderDealNotification } from '../types';
+import type { OrderDealNotification, SmartOrderTriggeredNotification } from '../types';
 
 export interface DealToastItem extends OrderDealNotification {
+  id: string;
+}
+
+export interface SmartToastItem extends SmartOrderTriggeredNotification {
   id: string;
 }
 
 interface DealToastContainerProps {
   toasts: DealToastItem[];
   onDismiss: (id: string) => void;
+  smartToasts?: SmartToastItem[];
+  onDismissSmartToast?: (id: string) => void;
+  onClickSmartToast?: (toast: SmartToastItem) => void;
 }
 
-export const DealToastContainer: React.FC<DealToastContainerProps> = ({ toasts, onDismiss }) => {
-  if (toasts.length === 0) return null;
+export const DealToastContainer: React.FC<DealToastContainerProps> = ({
+  toasts,
+  onDismiss,
+  smartToasts = [],
+  onDismissSmartToast,
+  onClickSmartToast,
+}) => {
+  if (toasts.length === 0 && smartToasts.length === 0) return null;
 
   return (
     <div className="deal-toast-container" aria-live="polite">
+      {smartToasts.map((toast) => (
+        <SmartAlertToastCard
+          key={toast.id}
+          toast={toast}
+          onDismiss={onDismissSmartToast}
+          onClick={onClickSmartToast}
+        />
+      ))}
       {toasts.map((toast) => (
         <DealToastCard key={toast.id} toast={toast} onDismiss={onDismiss} />
       ))}
@@ -80,6 +101,53 @@ const DealToastCard: React.FC<DealToastCardProps> = ({ toast, onDismiss }) => {
         </strong>
         <span className="deal-divider">---</span>
         <span className="deal-status-tag">成交</span>
+      </div>
+    </div>
+  );
+};
+
+interface SmartAlertToastCardProps {
+  toast: SmartToastItem;
+  onDismiss?: (id: string) => void;
+  onClick?: (toast: SmartToastItem) => void;
+}
+
+const SmartAlertToastCard: React.FC<SmartAlertToastCardProps> = ({ toast, onDismiss, onClick }) => {
+  // 智慧預約單警報需手動點擊 × 才關閉（不設自動消失定時器）
+  return (
+    <div
+      className="deal-toast-card deal-smart-alert"
+      role="alert"
+      onClick={() => onClick?.(toast)}
+      title={`點擊帶入「${toast.name} (${toast.code})」快速下單`}
+    >
+      {/* 第一行：[智慧警報] 股名 (代號) + 時間 + 手動關閉 × */}
+      <div className="deal-toast-row1">
+        <div className="deal-toast-title-group">
+          <span className="deal-action-badge smart-alert-badge">智慧警報</span>
+          <strong className="deal-stock-title">{toast.name}</strong>
+          <span className="deal-stock-code">({toast.code})</span>
+        </div>
+        <div className="deal-toast-meta">
+          <span className="deal-toast-time">{toast.time}</span>
+          <button
+            type="button"
+            className="deal-toast-close"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDismiss?.(toast.id);
+            }}
+            title="關閉通知"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+
+      {/* 第二行：觸發條件原因 + 點擊下單提示 */}
+      <div className="deal-toast-row2">
+        <span className="smart-alert-reason">{toast.triggerReason}</span>
+        <span className="deal-status-tag smart-order-action-tag">下單 ↗</span>
       </div>
     </div>
   );

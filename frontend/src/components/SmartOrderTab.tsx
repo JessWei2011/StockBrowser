@@ -139,6 +139,11 @@ export const SmartOrderTab: React.FC<SmartOrderTabProps> = ({
 
   useEffect(() => {
     loadSmartOrders();
+    const handleTriggered = () => {
+      loadSmartOrders();
+    };
+    window.addEventListener('stockbrowser:smart_order_triggered', handleTriggered);
+    return () => window.removeEventListener('stockbrowser:smart_order_triggered', handleTriggered);
   }, []);
 
   const handleCreateOrder = async (e: React.FormEvent) => {
@@ -199,7 +204,7 @@ export const SmartOrderTab: React.FC<SmartOrderTabProps> = ({
 
       setMessage({
         type: 'success',
-        text: `已成功儲存【${cleanCode}】出場警報通知設定！明日 09:00 開盤即啟動盯盤，任一條件符合時即發送 Discord 通知。`,
+        text: `已成功儲存【${cleanCode}】出場警報通知設定！盤中條件符合時將立即彈出視窗 Toast 通知。`,
       });
       await loadSmartOrders();
     } catch (err: any) {
@@ -345,7 +350,7 @@ export const SmartOrderTab: React.FC<SmartOrderTabProps> = ({
                   </div>
                 </div>
               </div>
-              <span className="input-hint">💡 兩欄即時自動換算，達到此門檻立即向 Discord 發出高價通知。</span>
+              <span className="input-hint">💡 兩欄即時自動換算，達到此門檻立即彈出高價 Toast 通知。</span>
             </div>
           )}
         </div>
@@ -505,7 +510,7 @@ export const SmartOrderTab: React.FC<SmartOrderTabProps> = ({
                   ))}
                 </div>
               </div>
-              <span className="input-hint">💡 盤中動態均線跌破時，第一時間發送 Discord 警報。</span>
+              <span className="input-hint">💡 盤中動態均線跌破時，第一時間彈出 Toast 警報通知。</span>
             </div>
           )}
         </div>

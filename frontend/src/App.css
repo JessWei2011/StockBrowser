@@ -630,6 +630,42 @@ button, input, select, textarea {
   box-shadow: 0 0 0 1.5px #d97706, 0 0 16px rgba(245, 158, 11, 0.35), 0 8px 20px rgba(5, 150, 105, 0.15);
 }
 
+/* 智慧預約單達標警報 (琥珀紫金高對比 + 亮金邊框) */
+.deal-toast-card.deal-smart-alert {
+  background: linear-gradient(135deg, rgba(49, 25, 75, 0.97) 0%, rgba(28, 15, 48, 0.98) 100%);
+  color: #ffffff;
+  border: 2px solid #fbbf24;
+}
+
+[data-theme="light"] .deal-toast-card.deal-smart-alert {
+  background: linear-gradient(135deg, #fefce8 0%, #fef3c7 100%);
+  color: #78350f;
+  border: 2px solid #f59e0b;
+  box-shadow: 0 0 0 1.5px #d97706, 0 0 16px rgba(245, 158, 11, 0.35), 0 8px 20px rgba(217, 119, 6, 0.18);
+}
+
+.smart-alert-badge {
+  background: #f59e0b !important;
+  color: #111827 !important;
+  font-weight: 800;
+}
+
+.smart-alert-reason {
+  font-weight: 700;
+  font-size: 12.5px;
+  letter-spacing: 0.2px;
+}
+
+.smart-order-action-tag {
+  background: rgba(249, 115, 22, 0.9) !important;
+  color: #ffffff !important;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 /* 第一行：買進/賣出 + 股票名稱 + 代號 + 時間 + 關閉按鈕 */
 .deal-toast-row1 {
   display: flex;

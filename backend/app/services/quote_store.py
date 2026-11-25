@@ -346,6 +346,12 @@ class QuoteStore:
             self._dirty_codes.clear()
             return self._server_version, dirty_list
 
+    def get_quote(self, code: str) -> Optional[QuoteState]:
+        """取得單一商品最新報價快照"""
+        with self._lock:
+            q = self._quotes.get(code)
+            return q.model_copy() if q else None
+
     def get_all_quotes(self) -> tuple[int, dict[str, QuoteState]]:
         """取得目前所有快照"""
         with self._lock:

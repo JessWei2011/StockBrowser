@@ -624,6 +624,76 @@ async def resume_pending_smart_order(order_id: str):
         raise HTTPException(status_code=400, detail="無法恢復 (單號不存在或狀態不符)")
     return {"status": "ok", "message": f"已重新啟動盯盤 {order_id}"}
 
+@router.post("/smart-orders/simulate")
+async def simulate_smart_order_trigger(body: Optional[dict] = None):
+    """
+    模擬智慧預約單觸發條件並發送 WebSocket Toast 通知 (供測試與驗收使用)。
+    - 若傳入 order_id 與 price：直接以該價格透過 SmartOrderService 評估真實條件單（會更新資料庫狀態與推播 Toast）。
+    - 若傳入 code 與 price（未指定 order_id）：針對該股所有 PENDING 條件單以該價格評估；若無 PENDING 條件單則直接廣播測試警報 Toast。
+    """
+    from backend.app.services.smart_order_service import smart_order_service
+    from backend.app.services.stock_chart_service import get_stock_ma_summary
+    from backend.app.services.publisher import publisher
+
+    body = body or {}
+    order_id = body.get("order_id")
+    code = (body.get("code") or "").strip().upper()
+    sim_price = body.get("price")
+
+    if order_id:
+        orders = await get_smart_orders()
+        target = next((o for o in orders if o["id"] == order_id), None)
+        if not target:
+            raise HTTPException(status_code=404, detail=f"找不到條件單 {order_id}")
+        if target["status"] != "PENDING":
+            raise HTTPException(status_code=400, detail=f"條件單 {order_id} 目前狀態為 {target['status']}，非 PENDING")
+        q = quote_store.get_quote(target["code"])
+        test_price = float(sim_price) if sim_price is not None else float((q.last if q and q.last else None) or target.get("opt1_price") or target.get("opt2_price") or target.get("opt3_price") or 100.0)
+        ma_summary = await asyncio.to_thread(get_stock_ma_summary, target["code"]) if target.get("opt4_enabled") else None
+        res = await smart_order_service.process_order_tick(
+            order=target,
+            current_price=test_price,
+            prev_close=float(q.previousClose) if (q and q.previousClose) else None,
+            stock_name=(q.name if q else None) or target.get("name"),
+            ma_summary=ma_summary,
+        )
+        return {"status": "ok", "mode": "evaluated_order", **res}
+
+    if code and sim_price is not None:
+        pending = [o for o in await get_smart_orders(status="PENDING") if o["code"] == code]
+        if pending:
+            q = quote_store.get_quote(code)
+            ma_summary = await asyncio.to_thread(get_stock_ma_summary, code) if any(o.get("opt4_enabled") for o in pending) else None
+            results = []
+            for o in pending:
+                r = await smart_order_service.process_order_tick(
+                    order=o,
+                    current_price=float(sim_price),
+                    prev_close=float(q.previousClose) if (q and q.previousClose) else None,
+                    stock_name=(q.name if q else None) or o.get("name"),
+                    ma_summary=ma_summary,
+                )
+                results.append({"orderId": o["id"], **r})
+            return {"status": "ok", "mode": "evaluated_code", "results": results}
+
+    # 單純測試 Toast 外觀與點擊下單流程
+    test_code = code or "2330"
+    q = quote_store.get_quote(test_code)
+    test_name = (q.name if q else None) or body.get("name") or "台積電"
+    test_price = float(sim_price) if sim_price is not None else float((q.last if q and q.last else None) or 1050.0)
+    payload = {
+        "orderId": f"sim-{uuid.uuid4().hex[:8]}",
+        "code": test_code,
+        "name": test_name,
+        "quantity": int(body.get("quantity") or 100),
+        "price": round(test_price, 2),
+        "triggerReason": body.get("triggerReason") or f"現價 ${test_price:.2f} 突破高價門檻 (模擬測試)",
+        "optType": body.get("optType") or "opt1",
+        "time": datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%H:%M:%S"),
+    }
+    await publisher.broadcast_smart_order_triggered(payload)
+    return {"status": "ok", "mode": "direct_toast", "alert": payload}
+
 
 # =========================================================================
 # 個股 AI 產業筆記 (業務/客戶/AI交會點 - 100字內)

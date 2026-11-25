@@ -292,6 +292,17 @@ export interface OrderDealNotification {
   tradeId?: string;
 }
 
+export interface SmartOrderTriggeredNotification {
+  orderId: string;
+  code: string;
+  name: string;
+  quantity: number;
+  price: number;
+  triggerReason: string;
+  optType?: 'opt1' | 'opt2' | 'opt3' | 'opt4';
+  time: string;
+}
+
 export type WebSocketMessage =
   | {
       type: 'snapshot';
@@ -317,6 +328,12 @@ export type WebSocketMessage =
       serverVersion: number;
       generatedAt: string;
       data: OrderDealNotification;
+    }
+  | {
+      type: 'smart_order_triggered';
+      serverVersion: number;
+      generatedAt: string;
+      data: SmartOrderTriggeredNotification;
     }
   | {
       type: 'watchlist_changed';

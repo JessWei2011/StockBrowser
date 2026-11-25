@@ -640,9 +640,57 @@ async def cancel_smart_order(order_id: str) -> bool:
 async def resume_smart_order(order_id: str) -> bool:
     async with get_db_connection() as db:
         cur = await db.execute(
-            "UPDATE smart_orders SET status = 'PENDING', updated_at = ? WHERE id = ? AND status IN ('CANCELLED', 'TRIGGERED')",
+            """
+            UPDATE smart_orders
+            SET status = 'PENDING',
+                triggered_at = NULL,
+                trigger_reason = NULL,
+                peak_price = NULL,
+                updated_at = ?
+            WHERE id = ? AND status IN ('CANCELLED', 'TRIGGERED')
+            """,
             (now_iso(), order_id)
         )
+        await db.commit()
+        return cur.rowcount > 0
+
+async def update_smart_order_peak_price(order_id: str, peak_price: float) -> bool:
+    async with get_db_connection() as db:
+        cur = await db.execute(
+            "UPDATE smart_orders SET peak_price = ?, updated_at = ? WHERE id = ? AND status = 'PENDING'",
+            (peak_price, now_iso(), order_id)
+        )
+        await db.commit()
+        return cur.rowcount > 0
+
+async def trigger_smart_order(order_id: str, trigger_reason: str, peak_price: Optional[float] = None) -> bool:
+    ts = now_iso()
+    async with get_db_connection() as db:
+        if peak_price is not None:
+            cur = await db.execute(
+                """
+                UPDATE smart_orders
+                SET status = 'TRIGGERED',
+                    triggered_at = ?,
+                    trigger_reason = ?,
+                    peak_price = ?,
+                    updated_at = ?
+                WHERE id = ? AND status = 'PENDING'
+                """,
+                (ts, trigger_reason, peak_price, ts, order_id)
+            )
+        else:
+            cur = await db.execute(
+                """
+                UPDATE smart_orders
+                SET status = 'TRIGGERED',
+                    triggered_at = ?,
+                    trigger_reason = ?,
+                    updated_at = ?
+                WHERE id = ? AND status = 'PENDING'
+                """,
+                (ts, trigger_reason, ts, order_id)
+            )
         await db.commit()
         return cur.rowcount > 0
 

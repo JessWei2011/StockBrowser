@@ -65,6 +65,16 @@ class BatchPublisher:
             "data": deal_data
         })
 
+    async def broadcast_smart_order_triggered(self, alert_data: dict):
+        """廣播智慧預約單達標警報給所有 WebSocket 連線之客戶端"""
+        version = quote_store.get_server_version()
+        await self.broadcast({
+            "type": "smart_order_triggered",
+            "serverVersion": version,
+            "generatedAt": now_iso(),
+            "data": alert_data
+        })
+
     async def start(self):
         if self._running:
             return
