@@ -80,6 +80,263 @@ button, input, select, textarea {
   min-height: 100vh;
 }
 
+/* ─────────────────────────────────────────────────────────────
+   最上方個股快速追蹤區 (1~5 號，靠左規劃)
+   ───────────────────────────────────────────────────────────── */
+.quick-tracker-wrapper {
+  background-color: var(--header-bg);
+  border-bottom: 1px solid var(--border-color);
+  padding: 6px 20px;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+  position: relative;
+  z-index: 10;
+}
+
+.quick-tracker-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: thin;
+}
+
+.quick-tracker-container::-webkit-scrollbar {
+  height: 4px;
+}
+
+.quick-tracker-container::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+.quick-tracker-slots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* 槽位卡片通用樣式 */
+.quick-tracker-slot {
+  height: 46px;
+  min-width: 175px;
+  max-width: 205px;
+  border-radius: 6px;
+  padding: 4px 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+/* 空白待追蹤槽位 */
+.slot-empty {
+  background: transparent;
+  border: 1px dashed var(--border-color);
+  opacity: 0.75;
+  justify-content: center;
+}
+
+.slot-empty:hover {
+  border-color: var(--color-orange);
+  opacity: 1;
+  background-color: var(--bg-hover);
+}
+
+.slot-empty-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.slot-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  line-height: 1.2;
+}
+
+.slot-badge-empty {
+  background: var(--pill-group-bg);
+  color: var(--text-muted);
+}
+
+.slot-empty-text {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* 活躍槽位 */
+.slot-active {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  position: relative;
+}
+
+.slot-active:hover {
+  border-color: #f97316;
+  background-color: var(--bg-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(249, 115, 22, 0.22);
+}
+
+.slot-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  line-height: 1.2;
+}
+
+.slot-id-wrap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slot-badge-active {
+  background: #3b82f6;
+  color: #ffffff;
+  font-size: 10px;
+  padding: 0 4px;
+}
+
+.slot-code {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: 0.3px;
+}
+
+.slot-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-sub);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 80px;
+}
+
+.slot-btn-remove {
+  background: transparent;
+  border: none;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  opacity: 0.5;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.slot-btn-remove:hover {
+  opacity: 1;
+  color: #ef4444;
+}
+
+.slot-bottom-row {
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+}
+
+.slot-price-data {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 4px;
+}
+
+.slot-price-item {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.slot-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.slot-val {
+  font-size: 11px;
+  font-weight: 700;
+  font-feature-settings: "tnum";
+}
+
+.slot-btn-order {
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  cursor: pointer;
+  line-height: 1.3;
+  white-space: nowrap;
+  transition: filter 0.15s ease, transform 0.1s ease;
+  box-shadow: 0 1px 2px rgba(249, 115, 22, 0.3);
+}
+
+.slot-btn-order:hover {
+  filter: brightness(1.1);
+  transform: scale(1.04);
+}
+
+.slot-btn-order:active {
+  transform: scale(0.96);
+}
+
+/* 快速追蹤 Toast 通知 */
+.quick-tracker-toast {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #fef2f2;
+  border: 1px solid #f87171;
+  color: #b91c1c;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  box-shadow: var(--shadow-sm);
+  animation: fadeIn 0.2s ease;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+[data-theme="dark"] .quick-tracker-toast {
+  background: #450a0a;
+  border-color: #991b1b;
+  color: #fca5a5;
+}
+
+.quick-tracker-toast-close {
+  background: transparent;
+  border: none;
+  font-size: 14px;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.quick-tracker-toast-close:hover {
+  opacity: 1;
+}
+
 /* 頂部 Header */
 .app-header {
   display: flex;
@@ -1602,6 +1859,57 @@ button, input, select, textarea {
   cursor: grabbing;
 }
 
+/* 星號與快速追蹤驚嘆號直向微型組合 */
+.stock-icon-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  margin: 0 4px 0 2px;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.stock-icon-stack .btn-star {
+  padding: 0;
+  margin: 0;
+  line-height: 1;
+}
+
+.btn-quick-track {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  color: #ef4444;
+  opacity: 0.42;
+  transition: all 0.15s ease;
+  line-height: 1;
+  vertical-align: middle;
+  border-radius: 3px;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.btn-quick-track:hover {
+  opacity: 1;
+  transform: scale(1.18);
+}
+
+.btn-quick-track.tracked {
+  opacity: 1;
+}
+
+.btn-quick-track.tracked:hover {
+  transform: scale(1.18);
+  filter: drop-shadow(0 0 3px rgba(239, 68, 68, 0.6));
+}
+
 .btn-star {
   display: inline-flex;
   align-items: center;
@@ -2546,6 +2854,57 @@ button, input, select, textarea {
   vertical-align: middle;
 }
 
+/* 星號與快速追蹤驚嘆號直向微型組合 */
+.stock-icon-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  margin: 0 4px 0 2px;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.stock-icon-stack .btn-star {
+  padding: 0;
+  margin: 0;
+  line-height: 1;
+}
+
+.btn-quick-track {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  color: #ef4444;
+  opacity: 0.42;
+  transition: all 0.15s ease;
+  line-height: 1;
+  vertical-align: middle;
+  border-radius: 3px;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.btn-quick-track:hover {
+  opacity: 1;
+  transform: scale(1.18);
+}
+
+.btn-quick-track.tracked {
+  opacity: 1;
+}
+
+.btn-quick-track.tracked:hover {
+  transform: scale(1.18);
+  filter: drop-shadow(0 0 3px rgba(239, 68, 68, 0.6));
+}
+
 .btn-star {
   display: inline-flex;
   align-items: center;
@@ -3164,6 +3523,12 @@ button, input, select, textarea {
 
 /* 行動版 RWD */
 @media (max-width: 768px) {
+  /* 手機端畫面有限，不顯示最上方快速追蹤區與相關圖示 */
+  .quick-tracker-wrapper,
+  .btn-quick-track {
+    display: none !important;
+  }
+
   .app-header {
     padding: 8px 12px;
     gap: 8px;

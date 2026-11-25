@@ -16,6 +16,7 @@ import {
 } from './services/api';
 import { wsClient } from './services/websocket';
 import { Header } from './components/Header';
+import { QuickTrackerBar, type QuickTrackedStock } from './components/QuickTrackerBar';
 import { GroupTabs } from './components/GroupTabs';
 import { QuoteTable } from './components/QuoteTable';
 import { CompactCardList } from './components/CompactCardList';
@@ -627,6 +628,66 @@ export const App: React.FC = () => {
     }
   };
 
+  // 快速追蹤區（1~8 號熱門個股固定槽位，LocalStorage 本地記憶保存）
+  const [quickTrackedStocks, setQuickTrackedStocks] = useState<QuickTrackedStock[]>(() => {
+    try {
+      const saved = localStorage.getItem('stock_browser_quick_tracker');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed.slice(0, 8);
+      }
+    } catch (e) {
+      console.error('Failed to load quick tracker from localStorage:', e);
+    }
+    return [];
+  });
+  const [quickTrackToast, setQuickTrackToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('stock_browser_quick_tracker', JSON.stringify(quickTrackedStocks));
+    } catch (e) {
+      console.error('Failed to save quick tracker to localStorage:', e);
+    }
+  }, [quickTrackedStocks]);
+
+  useEffect(() => {
+    if (quickTrackToast) {
+      const timer = window.setTimeout(() => setQuickTrackToast(null), 3500);
+      return () => window.clearTimeout(timer);
+    }
+  }, [quickTrackToast]);
+
+  const quickTrackedCodes = useMemo(
+    () => new Set(quickTrackedStocks.map((s) => s.code)),
+    [quickTrackedStocks]
+  );
+
+  const handleToggleQuickTrack = useCallback((code: string, name?: string, exchange?: string) => {
+    const cleanCode = code.trim().toUpperCase();
+    setQuickTrackedStocks((prev) => {
+      const exists = prev.some((s) => s.code === cleanCode);
+      if (exists) {
+        // 取消追蹤：自快速追蹤區移除並自動遞補
+        return prev.filter((s) => s.code !== cleanCode);
+      } else {
+        // 新增追蹤：防呆檢查是否已達 8 檔上限
+        if (prev.length >= 8) {
+          setQuickTrackToast('快速追蹤區已滿 8 檔，請先移除其他個股');
+          return prev;
+        }
+        const stockName = name || quotes[cleanCode]?.name || cleanCode;
+        const stockExchange = exchange || quotes[cleanCode]?.exchange || 'TSE';
+        return [...prev, { code: cleanCode, name: stockName, exchange: stockExchange }];
+      }
+    });
+  }, [quotes]);
+
+  const handleRemoveQuickTrack = useCallback((code: string) => {
+    const cleanCode = code.trim().toUpperCase();
+    setQuickTrackedStocks((prev) => prev.filter((s) => s.code !== cleanCode));
+  }, []);
+
   // 移動排序
   const handleMoveStock = async (index: number, direction: 'up' | 'down') => {
     if (!activeGroup) return;
@@ -867,6 +928,17 @@ export const App: React.FC = () => {
 
   return (
     <div className="stock-browser-app">
+      {viewMode === 'table' && (
+        <QuickTrackerBar
+          trackedStocks={quickTrackedStocks}
+          quotes={quotes}
+          toastMessage={quickTrackToast}
+          onDismissToast={() => setQuickTrackToast(null)}
+          onRemoveTrack={handleRemoveQuickTrack}
+          onOpenOrder={handleOpenOrder}
+        />
+      )}
+
       <Header
         currentGroupId={activeGroup?.id || null}
         isWealthGroup={isSystemGroup}
@@ -1205,6 +1277,8 @@ export const App: React.FC = () => {
                 dirtyCodes={dirtyCodes}
                 candidateCodes={candidateCodes}
                 onToggleCandidate={handleToggleCandidate}
+                quickTrackedCodes={quickTrackedCodes}
+                onToggleQuickTrack={handleToggleQuickTrack}
                 onRemoveItem={handleRemoveStock}
                 onMoveItem={handleMoveStock}
                 onReorderItems={handleReorderItems}

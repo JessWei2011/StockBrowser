@@ -1,5 +1,11 @@
 export type DataStatus = 'live' | 'stale' | 'initializing' | 'closed' | 'error';
 
+export interface QuickTrackedStock {
+  code: string;
+  name: string;
+  exchange?: string;
+}
+
 export interface QuoteState {
   code: string;
   name: string;

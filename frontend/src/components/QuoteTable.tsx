@@ -15,6 +15,8 @@ interface QuoteTableProps {
   dirtyCodes: Set<string>;
   candidateCodes?: Set<string>;
   onToggleCandidate?: (code: string) => void;
+  quickTrackedCodes?: Set<string>;
+  onToggleQuickTrack?: (code: string, name?: string, exchange?: string) => void;
   onRemoveItem: (code: string) => Promise<void>;
   onMoveItem?: (index: number, direction: 'up' | 'down') => Promise<void>;
   onReorderItems: (fromIndex: number, toIndex: number) => Promise<void>;
@@ -31,6 +33,8 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
   indicators = {},
   candidateCodes,
   onToggleCandidate,
+  quickTrackedCodes,
+  onToggleQuickTrack,
   onRemoveItem,
   onReorderItems,
   onSelectStock,
@@ -206,31 +210,58 @@ export const QuoteTable: React.FC<QuoteTableProps> = ({
                       const isOtc = ((item.exchange || q?.exchange || '').toUpperCase() === 'OTC');
                       const isEtfOrBond = item.code.startsWith('00') || ['ETF', 'BOND'].includes((item.securityType || q?.securityType || '').toUpperCase());
                       const isStarred = Boolean(candidateCodes?.has(item.code));
+                      const isTracked = Boolean(quickTrackedCodes?.has(item.code));
                       return (
                         <div className="stock-cell-wrap">
                           <span className="drag-handle" title="按住滑鼠拖曳整列以調整順序">⠿</span>
-                          <button
-                            type="button"
-                            className={`btn-star ${isStarred ? 'starred' : ''}`}
-                            title={isStarred ? '從選手區移除' : '加入選手區'}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onToggleCandidate?.(item.code);
-                            }}
-                          >
-                            <svg
-                              width="13"
-                              height="13"
-                              viewBox="0 0 24 24"
-                              fill={isStarred ? "#f59e0b" : "none"}
-                              stroke={isStarred ? "#f59e0b" : "currentColor"}
-                              strokeWidth="2.2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
+                          <div className="stock-icon-stack">
+                            <button
+                              type="button"
+                              className={`btn-star ${isStarred ? 'starred' : ''}`}
+                              title={isStarred ? '從選手區移除' : '加入選手區'}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onToggleCandidate?.(item.code);
+                              }}
                             >
-                              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                            </svg>
-                          </button>
+                              <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill={isStarred ? "#f59e0b" : "none"}
+                                stroke={isStarred ? "#f59e0b" : "currentColor"}
+                                strokeWidth="2.2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              className={`btn-quick-track ${isTracked ? 'tracked' : ''}`}
+                              title={isTracked ? '從最上方快速追蹤區移除' : '加入最上方快速追蹤區 (1~8號)'}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onToggleQuickTrack?.(item.code, item.name || q?.name, item.exchange || q?.exchange);
+                              }}
+                            >
+                              <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill={isTracked ? "#ef4444" : "none"}
+                                stroke="#ef4444"
+                                strokeWidth="2.2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                <line x1="12" y1="9" x2="12" y2="13" stroke={isTracked ? "#ffffff" : "#ef4444"} strokeWidth="2.5" />
+                                <line x1="12" y1="17" x2="12.01" y2="17" stroke={isTracked ? "#ffffff" : "#ef4444"} strokeWidth="2.5" />
+                              </svg>
+                            </button>
+                          </div>
                           <span
                             className={isEtfOrBond ? 'stock-plain' : 'stock-clickable'}
                             onClick={!isEtfOrBond && onSelectStock ? () => onSelectStock(item.code) : undefined}
