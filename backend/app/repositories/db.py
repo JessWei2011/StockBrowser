@@ -172,6 +172,57 @@ async def init_db():
             updated_at TEXT NOT NULL
         );
         """)
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS pocket_ledger (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL,
+            amount_twd REAL NOT NULL,
+            balance_after_twd REAL NOT NULL,
+            settlement_date TEXT,
+            note TEXT NOT NULL DEFAULT '',
+            details_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL
+        );
+        """)
+        try:
+            await db.execute("ALTER TABLE pocket_ledger ADD COLUMN details_json TEXT NOT NULL DEFAULT '[]'")
+        except Exception:
+            pass
+        await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_pocket_ledger_created ON pocket_ledger(id DESC);
+        """)
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS pocket_settlements (
+            settlement_date TEXT PRIMARY KEY,
+            amount_twd REAL NOT NULL DEFAULT 0.0,
+            stock_summary TEXT NOT NULL DEFAULT '',
+            details_json TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            updated_at TEXT NOT NULL
+        );
+        """)
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS pocket_daily_deals (
+            deal_uid TEXT PRIMARY KEY,
+            trade_date TEXT NOT NULL,
+            ordno TEXT NOT NULL DEFAULT '',
+            code TEXT NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            action TEXT NOT NULL,
+            qty INTEGER NOT NULL,
+            price REAL NOT NULL,
+            total_price REAL NOT NULL,
+            fee INTEGER NOT NULL,
+            tax INTEGER NOT NULL,
+            net_amount REAL NOT NULL,
+            net_amount_wan REAL NOT NULL,
+            source TEXT NOT NULL DEFAULT 'deal_event',
+            created_at TEXT NOT NULL
+        );
+        """)
+        await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_pocket_daily_deals_date ON pocket_daily_deals(trade_date);
+        """)
         await db.commit()
 
         # 檢查是否需要預設種子資料
@@ -738,5 +789,383 @@ async def save_stock_ai_note(code: str, name: str, business: str, customers: str
         "raw_text": raw_text,
         "updated_at": ts
     }
+
+
+async def _ensure_pocket_migrated(db: aiosqlite.Connection) -> Optional[float]:
+    """若 pocket_ledger 為空但 app_settings 有舊本金，自動遷移為初始 INIT 紀錄"""
+    cur = await db.execute("SELECT balance_after_twd FROM pocket_ledger ORDER BY id DESC LIMIT 1")
+    row = await cur.fetchone()
+    if row is not None:
+        return float(row[0])
+
+    cur_set = await db.execute("SELECT value, updated_at FROM app_settings WHERE key = 'account_capital_wan'")
+    set_row = await cur_set.fetchone()
+    if set_row and str(set_row[0]).strip() != "":
+        cap_twd = round(float(set_row[0]) * 10000.0, 2)
+        ts = str(set_row[1] or now_iso())
+        await db.execute(
+            "INSERT INTO pocket_ledger (event_type, amount_twd, balance_after_twd, settlement_date, note, created_at) "
+            "VALUES (?, ?, ?, NULL, ?, ?)",
+            ("INIT", cap_twd, cap_twd, "從舊版設定遷移初始本金", ts),
+        )
+        await db.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES ('account_capital_configured_at', ?, ?) "
+            "ON CONFLICT(key) DO NOTHING",
+            (ts, ts),
+        )
+        await db.commit()
+        return cap_twd
+    return None
+
+
+async def set_pocket_initial_capital(capital_wan: float, mode: str, today_date: str) -> dict:
+    """手動設定/校正口袋本金，並依 mode (before_t0/after_t0) 標記今日交割是否已計入"""
+    ts = now_iso()
+    cap_twd = round(capital_wan * 10000.0, 2)
+    mode_norm = mode if mode in ("before_t0", "after_t0") else "after_t0"
+    note = f"手動設定本金 ({'T+0 扣款後' if mode_norm == 'after_t0' else 'T+0 扣款前'})"
+
+    async with get_db_connection() as db:
+        await db.execute(
+            "INSERT INTO pocket_ledger (event_type, amount_twd, balance_after_twd, settlement_date, note, created_at) "
+            "VALUES (?, ?, ?, NULL, ?, ?)",
+            ("INIT", cap_twd, cap_twd, note, ts),
+        )
+        for k, v in [
+            ("account_capital_wan", str(capital_wan)),
+            ("account_capital_mode", mode_norm),
+            ("account_capital_configured_at", ts),
+        ]:
+            await db.execute(
+                "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                (k, v, ts),
+            )
+
+        if today_date:
+            if mode_norm == "after_t0":
+                # 今日及以前都已計入此本金，不可重複結轉
+                await db.execute(
+                    "UPDATE pocket_settlements SET status = 'SETTLED', updated_at = ? WHERE settlement_date <= ?",
+                    (ts, today_date),
+                )
+                await db.execute(
+                    "INSERT INTO pocket_settlements (settlement_date, amount_twd, stock_summary, details_json, status, updated_at) "
+                    "VALUES (?, 0.0, '', '[]', 'SETTLED', ?) ON CONFLICT(settlement_date) DO NOTHING",
+                    (today_date, ts),
+                )
+            else:
+                # 僅今日以前已結清；今日保留 PENDING 讓格子 1 扣除並於隔日結轉
+                await db.execute(
+                    "UPDATE pocket_settlements SET status = 'SETTLED', updated_at = ? WHERE settlement_date < ?",
+                    (ts, today_date),
+                )
+                await db.execute(
+                    "UPDATE pocket_settlements SET status = 'PENDING', updated_at = ? WHERE settlement_date = ?",
+                    (ts, today_date),
+                )
+
+        await db.commit()
+    return {"capitalWan": capital_wan, "capitalMode": mode_norm, "configuredAt": ts}
+
+
+async def adjust_pocket_capital(delta_wan: float, note: str = "") -> dict:
+    """業外存提快捷記帳 (直接寫入 pocket_ledger 流水)"""
+    ts = now_iso()
+    delta_twd = round(delta_wan * 10000.0, 2)
+    async with get_db_connection() as db:
+        cur_twd = await _ensure_pocket_migrated(db)
+        if cur_twd is None:
+            raise ValueError("請先設定起始投資本金後再進行業外存提")
+        new_twd = round(cur_twd + delta_twd, 2)
+        event_type = "DEPOSIT" if delta_twd >= 0 else "WITHDRAW"
+        final_note = note.strip() or (f"業外存入 +{delta_wan:g}萬" if delta_wan >= 0 else f"生活領出 {delta_wan:g}萬")
+        await db.execute(
+            "INSERT INTO pocket_ledger (event_type, amount_twd, balance_after_twd, settlement_date, note, created_at) "
+            "VALUES (?, ?, ?, NULL, ?, ?)",
+            (event_type, delta_twd, new_twd, final_note, ts),
+        )
+        new_wan = round(new_twd / 10000.0, 4)
+        await db.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES ('account_capital_wan', ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            (str(new_wan), ts),
+        )
+        await db.commit()
+    return {"deltaWan": delta_wan, "balanceAfterWan": new_wan, "updatedAt": ts}
+
+
+async def sync_and_rollover_pocket_settlements(
+    today_date: str,
+    live_settlements: list[dict],
+) -> dict:
+    """同步券商在途交割至本地狀態表，並自動將已過期 (settlement_date < today_date) 之 PENDING 交割款結轉入帳本"""
+    import json
+    ts = now_iso()
+    async with get_db_connection() as db:
+        settled_cash_twd = await _ensure_pocket_migrated(db)
+
+        # 1. 將目前取得的 T+0 / T+1 / T+2 寫入或更新至 pocket_settlements
+        for s in live_settlements:
+            s_date = str(s.get("date") or "").strip()
+            if not s_date:
+                continue
+            amt_twd = float(s.get("amount", 0.0) or 0.0)
+            summary = str(s.get("stockSummary") or "")
+            details_json = json.dumps(s.get("details") or [], ensure_ascii=False)
+
+            cur = await db.execute(
+                "SELECT status FROM pocket_settlements WHERE settlement_date = ?",
+                (s_date,),
+            )
+            existing = await cur.fetchone()
+            if existing is None:
+                init_status = "PENDING"
+                await db.execute(
+                    "INSERT INTO pocket_settlements (settlement_date, amount_twd, stock_summary, details_json, status, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (s_date, amt_twd, summary, details_json, init_status, ts),
+                )
+            else:
+                # 若已標記為 SETTLED (例如今日 after_t0)，保持 SETTLED 不重覆扣款，僅更新顯示明細
+                await db.execute(
+                    "UPDATE pocket_settlements SET amount_twd = ?, stock_summary = ?, details_json = ?, updated_at = ? "
+                    "WHERE settlement_date = ?",
+                    (amt_twd, summary, details_json, ts, s_date),
+                )
+
+        # 2. 自動結轉所有過期 (settlement_date < today_date) 且仍為 PENDING 的交割日
+        if today_date:
+            cur_pending = await db.execute(
+                "SELECT settlement_date, amount_twd, stock_summary, details_json FROM pocket_settlements "
+                "WHERE settlement_date < ? AND status = 'PENDING' ORDER BY settlement_date ASC",
+                (today_date,),
+            )
+            pending_rows = await cur_pending.fetchall()
+            for row in pending_rows:
+                p_date = str(row[0])
+                p_amt = float(row[1] or 0.0)
+                p_summary = str(row[2] or "")
+                p_details_json = str(row[3] or "[]")
+                has_details = p_details_json not in ("", "[]")
+                if settled_cash_twd is not None and (abs(p_amt) > 0.01 or has_details):
+                    settled_cash_twd = round(settled_cash_twd + p_amt, 2)
+                    note_label = f"{p_date} 交割自動結轉" + (f" ({p_summary})" if p_summary else "")
+                    await db.execute(
+                        "INSERT INTO pocket_ledger (event_type, amount_twd, balance_after_twd, settlement_date, note, details_json, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        ("SETTLEMENT", p_amt, settled_cash_twd, p_date, note_label, p_details_json, ts),
+                    )
+                    await db.execute(
+                        "INSERT INTO app_settings (key, value, updated_at) VALUES ('account_capital_wan', ?, ?) "
+                        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                        (str(round(settled_cash_twd / 10000.0, 4)), ts),
+                    )
+                await db.execute(
+                    "UPDATE pocket_settlements SET status = 'SETTLED', updated_at = ? WHERE settlement_date = ?",
+                    (ts, p_date),
+                )
+
+        # 3. 讀取今日 T+0 狀態 (是否已 SETTLED)
+        today_settled = False
+        if today_date:
+            cur_t0 = await db.execute(
+                "SELECT status FROM pocket_settlements WHERE settlement_date = ?",
+                (today_date,),
+            )
+            t0_row = await cur_t0.fetchone()
+            if t0_row and t0_row[0] == "SETTLED":
+                today_settled = True
+
+        # 4. 讀取最近 20 筆帳本流水
+        cur_ledger = await db.execute(
+            "SELECT id, event_type, amount_twd, balance_after_twd, settlement_date, note, details_json, created_at "
+            "FROM pocket_ledger ORDER BY id DESC LIMIT 20"
+        )
+        ledger_rows = []
+        for r in await cur_ledger.fetchall():
+            item_dict = dict(r)
+            try:
+                item_dict["details"] = json.loads(item_dict.pop("details_json", "[]") or "[]")
+            except Exception:
+                item_dict["details"] = []
+            ledger_rows.append(item_dict)
+
+        # 5. 讀取設定時間與模式
+        cur_cfg = await db.execute(
+            "SELECT key, value FROM app_settings WHERE key IN ('account_capital_mode', 'account_capital_configured_at')"
+        )
+        cfg_map = {r[0]: r[1] for r in await cur_cfg.fetchall()}
+
+        # 6. 讀取本地儲存的歷史明細 (供 T+0 / T+1 補齊明細)
+        cur_hist = await db.execute(
+            "SELECT settlement_date, details_json, stock_summary FROM pocket_settlements WHERE settlement_date >= ?",
+            (today_date or "1970-01-01",),
+        )
+        local_details_map = {}
+        for r in await cur_hist.fetchall():
+            try:
+                local_details_map[r[0]] = {
+                    "details": json.loads(r[1] or "[]"),
+                    "stockSummary": r[2] or "",
+                }
+            except Exception:
+                pass
+
+        await db.commit()
+
+    return {
+        "settledCashTwd": settled_cash_twd,
+        "todaySettled": today_settled,
+        "capitalMode": cfg_map.get("account_capital_mode", "after_t0"),
+        "configuredAt": cfg_map.get("account_capital_configured_at", ""),
+        "ledger": ledger_rows,
+        "localDetailsMap": local_details_map,
+    }
+
+
+async def record_intraday_deal_event(
+    trade_date: str,
+    deal_uid: str,
+    ordno: str,
+    code: str,
+    name: str,
+    action: str,
+    qty: int,
+    price: float,
+    total_price: float,
+    fee: int,
+    tax: int,
+    net_amount: float,
+) -> None:
+    """即時記錄 Shioaji 盤中成交回報 (以真實零股/整股成交價與股數為準)"""
+    ts = now_iso()
+    async with get_db_connection() as db:
+        await db.execute(
+            """
+            INSERT INTO pocket_daily_deals (
+                deal_uid, trade_date, ordno, code, name, action,
+                qty, price, total_price, fee, tax, net_amount, net_amount_wan, source, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'deal_event', ?)
+            ON CONFLICT(deal_uid) DO NOTHING
+            """,
+            (
+                deal_uid,
+                trade_date,
+                ordno,
+                code,
+                name,
+                action,
+                qty,
+                price,
+                round(total_price, 2),
+                fee,
+                tax,
+                round(net_amount, 2),
+                round(net_amount / 10000.0, 4),
+                ts,
+            ),
+        )
+        await db.commit()
+
+
+async def sync_today_trades_snapshot(trade_date: str, deals: list[dict]) -> None:
+    """將 list_trades() 取得的今日真實成交明細同步寫入 pocket_daily_deals (覆蓋同日舊 snapshot)"""
+    if not trade_date or not deals:
+        return
+    ts = now_iso()
+    async with get_db_connection() as db:
+        await db.execute(
+            "DELETE FROM pocket_daily_deals WHERE trade_date = ? AND source = 'list_trades'",
+            (trade_date,),
+        )
+        for idx, d in enumerate(deals):
+            ordno = str(d.get("ordno") or "")
+            uid = f"{trade_date}_lt_{ordno or idx}_{d.get('code','')}_{d.get('action','')}"
+            net_amt = float(d.get("netAmount", 0.0) or 0.0)
+            await db.execute(
+                """
+                INSERT INTO pocket_daily_deals (
+                    deal_uid, trade_date, ordno, code, name, action,
+                    qty, price, total_price, fee, tax, net_amount, net_amount_wan, source, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'list_trades', ?)
+                ON CONFLICT(deal_uid) DO UPDATE SET
+                    qty = excluded.qty,
+                    price = excluded.price,
+                    total_price = excluded.total_price,
+                    fee = excluded.fee,
+                    tax = excluded.tax,
+                    net_amount = excluded.net_amount,
+                    net_amount_wan = excluded.net_amount_wan
+                """,
+                (
+                    uid,
+                    trade_date,
+                    ordno,
+                    str(d.get("code") or ""),
+                    str(d.get("name") or ""),
+                    str(d.get("action") or "Buy"),
+                    int(d.get("qty") or 0),
+                    float(d.get("price") or 0.0),
+                    float(d.get("totalPrice") or 0.0),
+                    int(d.get("fee") or 0),
+                    int(d.get("tax") or 0),
+                    round(net_amt, 2),
+                    round(net_amt / 10000.0, 4),
+                    ts,
+                ),
+            )
+        await db.commit()
+
+
+async def get_recorded_deals_by_date(days: int = 10) -> dict[str, list[dict]]:
+    """讀取本地紀錄的盤中真實成交明細 (按交易日分組，list_trades 優先於同 ordno 之 deal_event)"""
+    from datetime import date, timedelta
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    async with get_db_connection() as db:
+        cur = await db.execute(
+            """
+            SELECT trade_date, ordno, code, name, action, qty, price, total_price, fee, tax, net_amount, net_amount_wan, source
+            FROM pocket_daily_deals
+            WHERE trade_date >= ?
+            ORDER BY created_at ASC
+            """,
+            (cutoff,),
+        )
+        rows = await cur.fetchall()
+
+    by_date_raw: dict[str, list[dict]] = {}
+    for r in rows:
+        by_date_raw.setdefault(r[0], []).append({
+            "tradeDate": r[0],
+            "ordno": r[1],
+            "code": r[2],
+            "name": r[3],
+            "action": r[4],
+            "qty": r[5],
+            "price": r[6],
+            "totalPrice": r[7],
+            "fee": r[8],
+            "tax": r[9],
+            "netAmount": r[10],
+            "netAmountWan": r[11],
+            "source": r[12],
+        })
+
+    result: dict[str, list[dict]] = {}
+    for t_date, items in by_date_raw.items():
+        lt_items = [x for x in items if x["source"] == "list_trades"]
+        lt_ordnos = {x["ordno"] for x in lt_items if x["ordno"]}
+        ev_items = [x for x in items if x["source"] == "deal_event" and (not x["ordno"] or x["ordno"] not in lt_ordnos)]
+        combined = lt_items + ev_items
+        for x in combined:
+            x.pop("source", None)
+            x.pop("ordno", None)
+            x.pop("tradeDate", None)
+        if combined:
+            result[t_date] = combined
+    return result
+
+
 
 

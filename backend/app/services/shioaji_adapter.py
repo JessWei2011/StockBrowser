@@ -941,8 +941,15 @@ class ShioajiAdapter:
                 pass
         return code
 
+    @staticmethod
+    def _normalize_date_str(d_raw: Any) -> str:
+        s = str(d_raw or "").strip().replace("/", "-")
+        if len(s) == 8 and s.isdigit():
+            return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+        return s[:10] if len(s) >= 10 else s
+
     def fetch_settlement_history_details(self) -> dict[str, list[dict[str, Any]]]:
-        """從券商庫存明細與交易紀錄中，索取近期（T+0, T+1）的買賣成交紀錄"""
+        """從券商庫存明細(買入)與已實現損益(賣出)中，索取近期交易紀錄"""
         if not self.api or not self.is_logged_in:
             return {}
         try:
@@ -951,25 +958,36 @@ class ShioajiAdapter:
                 return {}
 
             import shioaji as sj
-            positions = self.api.list_positions(account, unit=sj.Unit.Share)
+            from datetime import timedelta
             date_to_deals: dict[str, list[dict[str, Any]]] = {}
 
+            # 1. 買進紀錄 (從庫存明細)
+            positions = self.api.list_positions(account, unit=sj.Unit.Share)
             if positions:
                 for pos in positions:
                     p_id = getattr(pos, "id", 0)
+                    pos_last_p = float(getattr(pos, "last_price", 0.0) or 0.0)
                     details = self.api.list_position_detail(account, detail_id=p_id)
                     if not details:
                         continue
                     for d in details:
-                        d_date = str(getattr(d, "date", "")).strip()
+                        d_date = self._normalize_date_str(getattr(d, "date", ""))
                         if not d_date:
                             continue
                         code = str(getattr(d, "code", "")).strip()
                         fee = int(getattr(d, "fee", 0.0) or 0)
                         raw_cost = float(getattr(d, "price", 0.0) or 0.0)
-                        qty = int(getattr(d, "quantity", 0) or 0)
-                        if qty == 0:
+                        d_qty_lots = int(getattr(d, "quantity", 0) or 0)
+                        d_last_val = float(getattr(d, "last_price", 0.0) or 0.0)
+                        if d_qty_lots > 0:
+                            qty = d_qty_lots * 1000
+                        elif d_last_val > 0 and pos_last_p > 0:
+                            qty = max(1, round(d_last_val / pos_last_p))
+                        else:
                             qty = int(getattr(pos, "quantity", 0) or 1)
+
+                        # list_position_detail 的 d.price 已是含手續費的總買入成本
+                        total_val = max(0.0, raw_cost - fee)
                         net_amt = -raw_cost if raw_cost > 0 else 0.0
                         name = self.get_stock_name(code)
 
@@ -978,8 +996,8 @@ class ShioajiAdapter:
                             "name": name,
                             "action": "Buy",
                             "qty": qty,
-                            "price": round(raw_cost / qty, 2) if qty > 0 else raw_cost,
-                            "totalPrice": raw_cost - fee if raw_cost >= fee else raw_cost,
+                            "price": round(total_val / qty, 2) if qty > 0 else raw_cost,
+                            "totalPrice": round(total_val, 2),
                             "fee": fee,
                             "tax": 0,
                             "netAmount": round(net_amt, 2),
@@ -987,6 +1005,59 @@ class ShioajiAdapter:
                             "dealDate": d_date
                         }
                         date_to_deals.setdefault(d_date, []).append(item)
+
+            # 2. 賣出紀錄 (從已實現損益查詢近 7 日)
+            try:
+                end_dt = datetime.now().date()
+                begin_dt = end_dt - timedelta(days=7)
+                pls = self.api.list_profit_loss(
+                    account,
+                    begin_date=begin_dt.isoformat(),
+                    end_date=end_dt.isoformat(),
+                    unit=sj.Unit.Share,
+                )
+                if pls:
+                    for pl in pls:
+                        pl_date = self._normalize_date_str(getattr(pl, "date", ""))
+                        if not pl_date:
+                            continue
+                        code = str(getattr(pl, "code", "")).strip()
+                        qty = int(getattr(pl, "quantity", 0) or 0)
+                        price = float(getattr(pl, "price", 0.0) or 0.0)
+                        if qty <= 0 or price <= 0:
+                            continue
+                        total_val = round(price * qty, 2)
+                        min_fee = 1 if qty < 1000 else 20
+                        fee = max(min_fee, int(total_val * 0.001425))
+
+                        info = self.contracts_cache.get(code)
+                        sec_type = info["securityType"] if info else "STOCK"
+                        sec_upper = str(sec_type).upper()
+                        tax_rate = 0.003
+                        if sec_upper == "BOND" or (code.startswith("00") and code.upper().endswith("B")):
+                            tax_rate = 0.0
+                        elif code.startswith("00") or sec_upper == "ETF":
+                            tax_rate = 0.001
+                        tax = int(total_val * tax_rate)
+                        net_amt = total_val - tax - fee
+                        name = self.get_stock_name(code)
+
+                        item = {
+                            "code": code,
+                            "name": name,
+                            "action": "Sell",
+                            "qty": qty,
+                            "price": round(price, 2),
+                            "totalPrice": total_val,
+                            "fee": fee,
+                            "tax": tax,
+                            "netAmount": round(net_amt, 2),
+                            "netAmountWan": round(net_amt / 10000.0, 4),
+                            "dealDate": pl_date,
+                        }
+                        date_to_deals.setdefault(pl_date, []).append(item)
+            except Exception as pl_err:
+                logger.warning(f"Error fetching list_profit_loss for settlement history: {pl_err}")
 
             return date_to_deals
         except Exception as e:
@@ -1019,30 +1090,57 @@ class ShioajiAdapter:
                 matched_details: list[dict[str, Any]] = []
                 summary_str = ""
 
-                if amt != 0:
-                    if t_val == 2 and today_deals:
-                        matched_details = today_deals
+                if t_val == 2 and today_deals:
+                    matched_details = today_deals
+                    # 盤中券商尚未日結時，api.settlements() 的 T=2 常回傳 0；改以今日即時成交試算優先
+                    if amt == 0.0:
+                        amt = round(sum(float(d.get("netAmount", 0.0)) for d in today_deals), 2)
+                elif t_val == 2 and not today_deals:
+                    # 晚間清盤後 list_trades() 為空，優先以今日日期從歷史庫存/已實現損益取回今日交易清單
+                    today_str = datetime.now().date().isoformat()
+                    if today_str in hist_deals_by_date:
+                        matched_details = hist_deals_by_date[today_str]
+                elif amt != 0:
+                    # 從歷史庫存/損益比對 (金額相符優先，寬容度放寬以兼容手續費折讓差異)
+                    best_date = None
+                    best_diff = float("inf")
+                    for deal_date, d_list in hist_deals_by_date.items():
+                        total_net = sum(x["netAmount"] for x in d_list)
+                        diff = abs(total_net - amt)
+                        if diff < best_diff and diff <= max(5000.0, abs(amt) * 0.02):
+                            best_diff = diff
+                            best_date = deal_date
+
+                    # 若因部分庫存已賣出導致金額無法完全吻合，依交割日反推對應營業日 (T=0 對應 2 個營業日前, T=1 對應 1 個營業日前)
+                    if not best_date and d_str:
+                        try:
+                            from datetime import timedelta
+                            s_dt = datetime.fromisoformat(self._normalize_date_str(d_str)).date()
+                            # 往回推 2 個工作日 (略過週六日)
+                            target_dt = s_dt
+                            steps_back = 2
+                            while steps_back > 0:
+                                target_dt -= timedelta(days=1)
+                                if target_dt.weekday() < 5:
+                                    steps_back -= 1
+                            cand = target_dt.isoformat()
+                            if cand in hist_deals_by_date:
+                                best_date = cand
+                        except Exception:
+                            pass
+
+                    if best_date and best_date in hist_deals_by_date:
+                        matched_details = hist_deals_by_date[best_date]
+
+                if matched_details:
+                    names = [f"{d['name'] or d['code']}" for d in matched_details]
+                    unique_names = list(dict.fromkeys(names))
+                    act = "買入" if amt < 0 else ("賣出" if amt > 0 else "買賣互抵")
+                    if len(unique_names) == 1:
+                        qty_info = f" {matched_details[0]['qty']}股" if matched_details[0].get('qty') else ""
+                        summary_str = f"{act} {unique_names[0]} ({matched_details[0]['code']}){qty_info}"
                     else:
-                        # 從歷史庫存比對 (金額相符優先)
-                        best_date = None
-                        for deal_date, d_list in hist_deals_by_date.items():
-                            total_net = sum(x["netAmount"] for x in d_list)
-                            if abs(total_net - amt) < 2.0:
-                                best_date = deal_date
-                                break
-
-                        if best_date and best_date in hist_deals_by_date:
-                            matched_details = hist_deals_by_date[best_date]
-
-                    if matched_details:
-                        names = [f"{d['name'] or d['code']}" for d in matched_details]
-                        unique_names = list(dict.fromkeys(names))
-                        act = "買入" if amt < 0 else "賣出"
-                        if len(unique_names) == 1:
-                            qty_info = f" {matched_details[0]['qty']}股" if matched_details[0].get('qty') else ""
-                            summary_str = f"{act} {unique_names[0]} ({matched_details[0]['code']}){qty_info}"
-                        else:
-                            summary_str = f"{act} {unique_names[0]} 等 {len(unique_names)} 檔"
+                        summary_str = f"{act} {unique_names[0]} 等 {len(unique_names)} 檔"
 
                 results.append({
                     "t": t_val,
@@ -1060,8 +1158,28 @@ class ShioajiAdapter:
             logger.error(f"Error fetching settlements: {e}", exc_info=True)
             return []
 
+    @staticmethod
+    def _parse_trade_order_dt(t) -> Optional[datetime]:
+        order_dt_raw = getattr(t.status, "order_datetime", None)
+        order_dt: Optional[datetime] = None
+        if isinstance(order_dt_raw, datetime):
+            order_dt = order_dt_raw
+        elif isinstance(order_dt_raw, (int, float)):
+            try:
+                order_dt = datetime.fromtimestamp(order_dt_raw)
+            except Exception:
+                pass
+        elif isinstance(order_dt_raw, str):
+            try:
+                order_dt = datetime.fromisoformat(order_dt_raw)
+            except Exception:
+                pass
+        if order_dt and order_dt.tzinfo is not None:
+            order_dt = order_dt.astimezone().replace(tzinfo=None)
+        return order_dt
+
     def fetch_today_deals_breakdown(self) -> list[dict[str, Any]]:
-        """查詢今日所有已成交的委託明細與各筆淨交割款計算 (算式: a + b - c)"""
+        """查詢今日所有已成交的委託明細與各筆淨交割款計算 (維持 0.1425% 保守估算)"""
         if not self.api or not self.is_logged_in:
             return []
         try:
@@ -1073,18 +1191,32 @@ class ShioajiAdapter:
             if not trades:
                 return []
 
+            auto_cutoff = get_market_order_cutoff(datetime.now())
+            if auto_cutoff.tzinfo is not None:
+                auto_cutoff = auto_cutoff.astimezone().replace(tzinfo=None)
+
             details = []
             for t in trades:
-                deal_qty = safe_int(getattr(t.status, 'deal_quantity', 0)) or 0
-                if deal_qty <= 0:
+                order_dt = self._parse_trade_order_dt(t)
+                if order_dt and order_dt < auto_cutoff:
                     continue
+
+                deal_qty_raw = safe_int(getattr(t.status, 'deal_quantity', 0)) or 0
+                if deal_qty_raw <= 0:
+                    continue
+
+                order_lot_raw = getattr(t.order, "order_lot", "Common")
+                order_lot_str = getattr(order_lot_raw, "value", str(order_lot_raw)).replace("StockOrderLot.", "")
+                is_odd = "Odd" in order_lot_str
+                lot_multiplier = 1 if is_odd else 1000
+                deal_shares = deal_qty_raw * lot_multiplier
 
                 code = str(getattr(t.contract, 'code', '') or getattr(t.order, 'code', '')).strip()
                 action_raw = getattr(t.order, 'action', 'Buy')
                 action = 'Sell' if 'Sell' in str(action_raw) else 'Buy'
-                
+
                 info = self.contracts_cache.get(code)
-                name = info['name'] if info else code
+                name = info['name'] if info else self.get_stock_name(code)
                 sec_type = info['securityType'] if info else 'STOCK'
 
                 deals = getattr(t.status, 'deals', [])
@@ -1093,23 +1225,25 @@ class ShioajiAdapter:
                     for d in deals:
                         d_p = safe_float(getattr(d, 'price', 0.0)) or 0.0
                         d_q = safe_int(getattr(d, 'quantity', 0)) or 0
-                        total_val += d_p * d_q
+                        total_val += d_p * (d_q * lot_multiplier)
                 else:
                     avg_p = safe_float(getattr(t.order, 'price', 0.0)) or 0.0
-                    total_val = avg_p * deal_qty
+                    total_val = avg_p * deal_shares
 
-                avg_price = round(total_val / deal_qty, 2) if deal_qty > 0 else 0.0
+                avg_price = round(total_val / deal_shares, 2) if deal_shares > 0 else 0.0
 
-                # 計算手續費 (0.1425%, 最低1元)
-                fee = max(1, int(total_val * 0.001425))
+                # 手續費維持 0.1425% 保守估算（零股低消 1 元，整股低消 20 元）
+                min_fee = 1 if is_odd else 20
+                fee = max(min_fee, int(total_val * 0.001425))
 
                 # 計算證券交易稅 (賣出才有)
                 tax = 0
                 if action == 'Sell':
                     tax_rate = 0.003
-                    if 'B' in code.upper() or str(sec_type).upper() == 'BOND':
+                    sec_upper = str(sec_type).upper()
+                    if sec_upper == 'BOND' or (code.startswith('00') and code.upper().endswith('B')):
                         tax_rate = 0.0
-                    elif code.startswith('00') or str(sec_type).upper() == 'ETF':
+                    elif code.startswith('00') or sec_upper == 'ETF':
                         tax_rate = 0.001
                     tax = int(total_val * tax_rate)
 
@@ -1118,11 +1252,13 @@ class ShioajiAdapter:
                 else:
                     net_amt = -(total_val + fee)
 
+                ordno = str(getattr(t.order, "ordno", "") or "").strip()
                 details.append({
+                    "ordno": ordno,
                     "code": code,
                     "name": name,
                     "action": action,
-                    "qty": deal_qty,
+                    "qty": deal_shares,
                     "price": avg_price,
                     "totalPrice": round(total_val, 2),
                     "fee": fee,
@@ -1131,10 +1267,103 @@ class ShioajiAdapter:
                     "netAmountWan": round(net_amt / 10000.0, 4)
                 })
 
+            if details and self._loop and not self._loop.is_closed():
+                try:
+                    from backend.app.repositories.db import sync_today_trades_snapshot
+                    today_str = datetime.now().date().isoformat()
+                    asyncio.run_coroutine_threadsafe(
+                        sync_today_trades_snapshot(today_str, details),
+                        self._loop,
+                    )
+                except Exception as sync_err:
+                    logger.debug(f"Failed to schedule sync_today_trades_snapshot: {sync_err}")
+
             return details
         except Exception as e:
             logger.error(f"Error fetching today deals breakdown: {e}", exc_info=True)
             return []
+
+    def fetch_pending_buy_orders(self) -> dict[str, Any]:
+        """查詢今日進行中（尚未成交）的買進委託單與預估凍結資金"""
+        if not self.api or not self.is_logged_in:
+            return {"totalAmountTwd": 0.0, "totalAmountWan": 0.0, "details": []}
+        try:
+            account = self.api.stock_account
+            if not account:
+                return {"totalAmountTwd": 0.0, "totalAmountWan": 0.0, "details": []}
+            self.api.update_status(account)
+            trades = self.api.list_trades()
+            if not trades:
+                return {"totalAmountTwd": 0.0, "totalAmountWan": 0.0, "details": []}
+
+            auto_cutoff = get_market_order_cutoff(datetime.now())
+            if auto_cutoff.tzinfo is not None:
+                auto_cutoff = auto_cutoff.astimezone().replace(tzinfo=None)
+
+            details = []
+            total_twd = 0.0
+            for t in trades:
+                order_dt = self._parse_trade_order_dt(t)
+                if order_dt and order_dt < auto_cutoff:
+                    continue
+
+                action_raw = getattr(t.order, "action", "Buy")
+                action_str = getattr(action_raw, "value", str(action_raw)).replace("Action.", "")
+                if "Buy" not in action_str:
+                    continue
+
+                status_raw = getattr(t.status, "status", "Pending")
+                status_str = getattr(status_raw, "value", str(status_raw)).replace("OrderStatus.", "")
+                if status_str not in ("Submitted", "PendingSubmit", "PreSubmitted", "PartFilled"):
+                    continue
+
+                orig_qty = safe_int(getattr(t.order, "quantity", 0)) or 0
+                deal_qty = safe_int(getattr(t.status, "deal_quantity", 0)) or 0
+                cancel_qty = safe_int(getattr(t.status, "cancel_quantity", 0)) or 0
+                active_qty_raw = max(0, orig_qty - cancel_qty - deal_qty)
+                if active_qty_raw <= 0:
+                    continue
+
+                order_lot_raw = getattr(t.order, "order_lot", "Common")
+                order_lot_str = getattr(order_lot_raw, "value", str(order_lot_raw)).replace("StockOrderLot.", "")
+                is_odd = "Odd" in order_lot_str
+                lot_multiplier = 1 if is_odd else 1000
+                active_shares = active_qty_raw * lot_multiplier
+
+                orig_price = safe_float(getattr(t.order, "price", 0.0)) or 0.0
+                mod_price = safe_float(getattr(t.status, "modified_price", 0.0)) or 0.0
+                order_id = getattr(t.order, "id", "")
+                if getattr(self, "_order_modified_prices", None) and order_id in self._order_modified_prices:
+                    mod_price = self._order_modified_prices[order_id]
+                price = mod_price if mod_price > 0 else orig_price
+                if price <= 0:
+                    continue
+
+                code = str(getattr(t.contract, "code", "") or getattr(t.order, "code", "")).strip()
+                name = self.get_stock_name(code)
+                val = price * active_shares
+                min_fee = 1 if is_odd else 20
+                fee = max(min_fee, int(val * 0.001425))
+                est_cost = round(val + fee, 2)
+                total_twd += est_cost
+
+                details.append({
+                    "code": code,
+                    "name": name,
+                    "qty": active_shares,
+                    "price": price,
+                    "estimatedCostTwd": est_cost,
+                    "estimatedCostWan": round(est_cost / 10000.0, 4),
+                })
+
+            return {
+                "totalAmountTwd": round(total_twd, 2),
+                "totalAmountWan": round(total_twd / 10000.0, 4),
+                "details": details,
+            }
+        except Exception as e:
+            logger.error(f"Error fetching pending buy orders: {e}", exc_info=True)
+            return {"totalAmountTwd": 0.0, "totalAmountWan": 0.0, "details": []}
 
     def _init_and_subscribe_indices(self):
         """初始化並訂閱大盤加權指數 (TSE IX0001) 與 櫃買指數 (OTC IX0043)"""
@@ -1477,12 +1706,55 @@ class ShioajiAdapter:
             logger.info(f"Broadcasting order deal via WebSocket: {deal_payload}")
             if self._loop and not self._loop.is_closed():
                 from backend.app.services.publisher import publisher
+                from backend.app.repositories.db import record_intraday_deal_event
+
                 fut = asyncio.run_coroutine_threadsafe(
                     publisher.broadcast_order_deal(deal_payload),
                     self._loop
                 )
                 fut.add_done_callback(
                     lambda f: logger.info(f"Broadcast order deal completed: {deal_payload.get('code')}") if not f.exception() else logger.error(f"Broadcast order deal failed: {f.exception()}")
+                )
+
+                # 即時將盤中真實成交金額寫入口袋成交紀錄 (零股/整股分開計價，不換算)
+                deal_shares = quantity if is_odd else quantity * 1000
+                total_val = round(price * deal_shares, 2)
+                min_fee = 1 if is_odd else 20
+                fee = max(min_fee, int(total_val * 0.001425))
+                tax = 0
+                if action_str == "Sell":
+                    info = self.contracts_cache.get(code)
+                    sec_upper = str(info["securityType"] if info else "STOCK").upper()
+                    tax_rate = 0.003
+                    if sec_upper == "BOND" or (code.startswith("00") and code.upper().endswith("B")):
+                        tax_rate = 0.0
+                    elif code.startswith("00") or sec_upper == "ETF":
+                        tax_rate = 0.001
+                    tax = int(total_val * tax_rate)
+                net_amt = (total_val - tax - fee) if action_str == "Sell" else -(total_val + fee)
+                trade_date_str = datetime.now().date().isoformat()
+                if ts:
+                    try:
+                        trade_date_str = datetime.fromtimestamp(float(ts)).date().isoformat()
+                    except Exception:
+                        pass
+                deal_uid = f"{trade_date_str}_ev_{deal_key}"
+                asyncio.run_coroutine_threadsafe(
+                    record_intraday_deal_event(
+                        trade_date=trade_date_str,
+                        deal_uid=deal_uid,
+                        ordno=ordno,
+                        code=code,
+                        name=name or code,
+                        action=action_str,
+                        qty=deal_shares,
+                        price=price,
+                        total_price=total_val,
+                        fee=fee,
+                        tax=tax,
+                        net_amount=net_amt,
+                    ),
+                    self._loop,
                 )
         except Exception as e:
             logger.error(f"Error in _handle_deal_event: {e}", exc_info=True)

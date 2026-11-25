@@ -237,10 +237,33 @@ class SettlementItem(BaseModel):
     stockSummary: str = ""  # 標的摘要，例如 "凱基台灣TOP50 (009816)"
     details: list[SettlementTradeDetail] = []  # 該日買賣明細
 
+class PocketLedgerEntry(BaseModel):
+    id: int
+    eventType: str  # 'INIT' | 'DEPOSIT' | 'WITHDRAW' | 'SETTLEMENT'
+    amountTwd: float
+    amountWan: float
+    balanceAfterWan: float
+    settlementDate: Optional[str] = None
+    note: str = ""
+    details: list[SettlementTradeDetail] = []
+    createdAt: str = ""
+
+
+class PendingBuyOrderDetail(BaseModel):
+    code: str
+    name: str = ""
+    qty: int
+    price: float
+    estimatedCostTwd: float
+    estimatedCostWan: float
+
+
 class AccountBalanceState(BaseModel):
     hasConfigured: bool = False  # 使用者是否已手動設定過本金
-    baseCapitalWan: Optional[float] = None  # 起始投資本金 (萬)
+    baseCapitalWan: Optional[float] = None  # 口袋已交割現金餘額 (萬)
     capitalMode: str = "after_t0"  # 'before_t0' (T+0扣款前) 或 'after_t0' (T+0扣款後)
+    todaySettled: bool = True  # 今日 T+0 是否已計入本金 (若 True 則格子1不再重複扣)
+    configuredAt: str = ""  # 上次手動設定/校正本金的時間
     t0Date: str = ""
     t0Amount: float = 0.0  # 今日 T+0 交割金額 (元)
     t0RemainingWan: Optional[float] = None  # 格子 1: T+0 餘額 (萬)
@@ -253,13 +276,23 @@ class AccountBalanceState(BaseModel):
     t1Details: list[SettlementTradeDetail] = []
     t2Date: str = ""
     t2Amount: float = 0.0  # 後天 T+2 交割金額 (元)
-    t2RemainingWan: Optional[float] = None  # 格子 3: T+2 最終可用本金 (萬)
+    t2RemainingWan: Optional[float] = None  # 格子 3: T+2 已成交可用本金 (萬)
     t2Formula: str = ""  # 算式表示法，例如: "+10.83萬(富喬) +1.01萬(今國光) -5.45萬(大毅)"
     t2Details: list[SettlementTradeDetail] = []  # 當日買賣成交明細
+    pendingBuyAmountTwd: float = 0.0  # 委託中尚未成交買單預估凍結金額 (元)
+    pendingBuyAmountWan: float = 0.0  # 委託中尚未成交買單預估凍結金額 (萬)
+    t2WithPendingRemainingWan: Optional[float] = None  # 含委託中買單後預估可用餘額 (萬)
+    pendingBuyDetails: list[PendingBuyOrderDetail] = []
     settlements: list[SettlementItem] = []
+    ledger: list[PocketLedgerEntry] = []
     updatedAt: str = ""
 
 class UpdateCapitalRequest(BaseModel):
     capitalWan: float
     capitalMode: Optional[str] = "after_t0"
+
+
+class AdjustCapitalRequest(BaseModel):
+    deltaWan: float
+    note: Optional[str] = ""
 

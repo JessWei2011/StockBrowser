@@ -18,6 +18,9 @@ from backend.app.domain.models import (
     UpdateOrderRequest,
     AccountBalanceState,
     UpdateCapitalRequest,
+    AdjustCapitalRequest,
+    PocketLedgerEntry,
+    PendingBuyOrderDetail,
     SettlementItem,
     SettlementTradeDetail,
     CalendarMonthResponse,
@@ -29,6 +32,10 @@ import uuid
 from backend.app.repositories.db import (
     get_setting,
     set_setting,
+    set_pocket_initial_capital,
+    adjust_pocket_capital,
+    sync_and_rollover_pocket_settlements,
+    get_recorded_deals_by_date,
     now_iso,
     get_smart_orders,
     create_smart_order,
@@ -398,17 +405,50 @@ async def update_order(order_id: str, body: UpdateOrderRequest):
 
 @router.get("/account/balance", response_model=AccountBalanceState)
 async def get_account_balance():
-    """取得帳戶本金設定與 T+0 / T+1 / T+2 交割試算餘額"""
+    """取得帳戶本金設定、帳本自動結轉與 T+0 / T+1 / T+2 交割試算餘額"""
     try:
-        raw_cap = await get_setting("account_capital_wan")
-        has_configured = raw_cap is not None and raw_cap.strip() != ""
-        base_cap = float(raw_cap) if has_configured else None
-
-        raw_mode = await get_setting("account_capital_mode")
-        capital_mode = raw_mode if raw_mode in ("before_t0", "after_t0") else "after_t0"
-
         settlements_raw = await shioaji_adapter.run_in_broker_executor(shioaji_adapter.fetch_settlements)
-        
+        pending_buy_raw = await shioaji_adapter.run_in_broker_executor(shioaji_adapter.fetch_pending_buy_orders)
+        recorded_deals_by_date = await get_recorded_deals_by_date()
+
+        today_date = datetime.date.today().isoformat()
+        for s in settlements_raw:
+            if s.get("t") == 0 and s.get("date"):
+                today_date = str(s.get("date")).strip()
+                break
+
+        # 優先以盤中真實成交紀錄 (pocket_daily_deals) 覆蓋對應交割日明細，避免整張/零股換算失真
+        for s in settlements_raw:
+            d_str = str(s.get("date", "")).strip()
+            if not d_str:
+                continue
+            try:
+                s_dt = datetime.date.fromisoformat(d_str[:10])
+                target_dt = s_dt
+                steps_back = 2
+                while steps_back > 0:
+                    target_dt -= datetime.timedelta(days=1)
+                    if target_dt.weekday() < 5:
+                        steps_back -= 1
+                trade_dt_str = target_dt.isoformat()
+                if trade_dt_str in recorded_deals_by_date:
+                    rec_list = recorded_deals_by_date[trade_dt_str]
+                    s["details"] = rec_list
+                    if s.get("t") == 2 and float(s.get("amount", 0.0) or 0.0) == 0.0:
+                        s["amount"] = round(sum(float(x.get("netAmount", 0.0)) for x in rec_list), 2)
+                        s["amountWan"] = round(s["amount"] / 10000.0, 4)
+            except Exception:
+                pass
+
+        sync_res = await sync_and_rollover_pocket_settlements(today_date, settlements_raw)
+        settled_cash_twd = sync_res["settledCashTwd"]
+        has_configured = settled_cash_twd is not None
+        base_cap = round(settled_cash_twd / 10000.0, 4) if settled_cash_twd is not None else None
+        capital_mode = sync_res["capitalMode"] if sync_res["capitalMode"] in ("before_t0", "after_t0") else "after_t0"
+        today_settled = bool(sync_res["todaySettled"])
+        configured_at = sync_res["configuredAt"] or ""
+        local_details_map = sync_res["localDetailsMap"]
+
         t0_amt = 0.0
         t0_date = ""
         t0_details: list[SettlementTradeDetail] = []
@@ -423,18 +463,24 @@ async def get_account_balance():
         t2_date = ""
         t2_details: list[SettlementTradeDetail] = []
         t2_formula_str = ""
-        
+
         items: list[SettlementItem] = []
         for s in settlements_raw:
             t = s.get("t", 0)
-            d = s.get("date", "")
+            d = str(s.get("date", "")).strip()
             amt = float(s.get("amount", 0.0))
-            amt_wan = float(s.get("amountWan", 0.0))
+            amt_wan = round(amt / 10000.0, 4)
             raw_dtls = s.get("details", [])
-            dtl_objs = [SettlementTradeDetail(**x) for x in raw_dtls]
             stock_summary = s.get("stockSummary", "")
 
-            # 拼裝個別交割日算式膠囊文字
+            # 若券商回傳缺乏 T+0/T+1 明細，從本地 pocket_settlements 歷史紀錄補齊
+            if not raw_dtls and d in local_details_map and local_details_map[d].get("details"):
+                raw_dtls = local_details_map[d]["details"]
+                if not stock_summary:
+                    stock_summary = local_details_map[d].get("stockSummary", "")
+
+            dtl_objs = [SettlementTradeDetail(**x) for x in raw_dtls]
+
             formula_parts = []
             for item_d in dtl_objs:
                 sign = "+" if item_d.netAmount >= 0 else "-"
@@ -468,28 +514,50 @@ async def get_account_balance():
                 t2_details = dtl_objs
                 t2_formula_str = cur_formula
 
+        pending_buy_twd = float(pending_buy_raw.get("totalAmountTwd", 0.0) or 0.0)
+        pending_buy_wan = float(pending_buy_raw.get("totalAmountWan", 0.0) or 0.0)
+        pending_buy_details = [
+            PendingBuyOrderDetail(**x) for x in (pending_buy_raw.get("details") or [])
+        ]
+
         t0_remaining = None
         t1_remaining = None
         t2_remaining = None
+        t2_with_pending_remaining = None
 
         if has_configured and base_cap is not None:
-            # 計算三格餘額 (單位: 萬)
-            # 若使用者填的是「T+0 扣款前」：則格子 1 (T+0 餘額) = 起始本金 + 今日交割款
-            # 若使用者填的是「T+0 扣款後」：則今日交割款已在填入本金中反映，格子 1 (T+0 餘額) = 起始本金
-            if capital_mode == "before_t0":
-                t0_remaining = round(base_cap + (t0_amt / 10000.0), 4)
-            else:
+            # 若 today_settled 為 True (今日手動選 T+0 扣款後)，格子 1 直接等於已交割現金；
+            # 否則 (今日手動選 T+0 扣款前，或跨日自動結轉過來的)，格子 1 需扣減今日 T+0 交割款
+            if today_settled:
                 t0_remaining = round(base_cap, 4)
+            else:
+                t0_remaining = round(base_cap + (t0_amt / 10000.0), 4)
 
-            # 格子 2 (T+1): T+0 餘額 + 次日交割款
             t1_remaining = round(t0_remaining + (t1_amt / 10000.0), 4)
-            # 格子 3 (T+2): T+1 餘額 + 後天交割款
             t2_remaining = round(t1_remaining + (t2_amt / 10000.0), 4)
+            t2_with_pending_remaining = round(t2_remaining - pending_buy_wan, 4)
+
+        ledger_entries = [
+            PocketLedgerEntry(
+                id=row["id"],
+                eventType=row["event_type"],
+                amountTwd=float(row["amount_twd"]),
+                amountWan=round(float(row["amount_twd"]) / 10000.0, 4),
+                balanceAfterWan=round(float(row["balance_after_twd"]) / 10000.0, 4),
+                settlementDate=row.get("settlement_date"),
+                note=row.get("note", ""),
+                details=[SettlementTradeDetail(**d) for d in (row.get("details") or [])],
+                createdAt=row.get("created_at", ""),
+            )
+            for row in (sync_res.get("ledger") or [])
+        ]
 
         return AccountBalanceState(
             hasConfigured=has_configured,
-            baseCapitalWan=round(base_cap, 4) if base_cap is not None else None,
+            baseCapitalWan=base_cap,
             capitalMode=capital_mode,
+            todaySettled=today_settled,
+            configuredAt=configured_at,
             t0Date=t0_date,
             t0Amount=t0_amt,
             t0RemainingWan=t0_remaining,
@@ -505,22 +573,39 @@ async def get_account_balance():
             t2RemainingWan=t2_remaining,
             t2Formula=t2_formula_str,
             t2Details=t2_details,
+            pendingBuyAmountTwd=pending_buy_twd,
+            pendingBuyAmountWan=pending_buy_wan,
+            t2WithPendingRemainingWan=t2_with_pending_remaining,
+            pendingBuyDetails=pending_buy_details,
             settlements=items,
-            updatedAt=now_iso() if "now_iso" in globals() else ""
+            ledger=ledger_entries,
+            updatedAt=now_iso()
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/account/capital")
 async def update_account_capital(body: UpdateCapitalRequest):
-    """更新帳戶起始投資本金與扣款模式 (單位: 萬)"""
+    """手動設定/校正帳戶投資本金與扣款模式 (單位: 萬)"""
     try:
-        await set_setting("account_capital_wan", str(body.capitalWan))
+        today_str = datetime.date.today().isoformat()
         mode = body.capitalMode if body.capitalMode in ("before_t0", "after_t0") else "after_t0"
-        await set_setting("account_capital_mode", mode)
-        return {"status": "ok", "capitalWan": body.capitalWan, "capitalMode": mode}
+        res = await set_pocket_initial_capital(body.capitalWan, mode, today_str)
+        return {"status": "ok", **res}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/account/capital/adjust")
+async def adjust_account_capital_endpoint(body: AdjustCapitalRequest):
+    """業外存提快捷記帳 (寫入口袋流水帳)"""
+    try:
+        res = await adjust_pocket_capital(body.deltaWan, body.note or "")
+        return {"status": "ok", **res}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/smart-orders", response_model=list[SmartOrderCondition])
 async def list_smart_orders(status: Optional[str] = None):

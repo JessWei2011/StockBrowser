@@ -7609,6 +7609,197 @@ button, input, select, textarea {
   border-radius: 4px;
 }
 
+.capital-configured-at {
+  font-size: 11px;
+  font-weight: 400;
+  color: #94a3b8;
+}
+
+.pending-orders-box {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px dashed rgba(148, 163, 184, 0.25);
+  font-size: 11.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pending-orders-box.has-pending {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.pending-orders-summary,
+.pending-orders-after {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pending-freeze-val {
+  font-weight: 600;
+  color: #f59e0b;
+}
+
+.pending-orders-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.pending-pill {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+}
+
+.ledger-header-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ledger-toggle-icon {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.ledger-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ledger-init { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+.ledger-deposit { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+.ledger-withdraw { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+.ledger-settlement { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
+
+.settle-itemized-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ledger-itemized-list {
+  margin-top: 6px;
+  padding-left: 6px;
+  border-left: 2px solid rgba(148, 163, 184, 0.25);
+}
+
+.settle-itemized-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.itemized-name {
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.itemized-name small {
+  font-weight: 400;
+  color: #94a3b8;
+}
+
+.itemized-qty-price,
+.itemized-fees {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.itemized-net {
+  margin-left: auto;
+  font-weight: 600;
+}
+
+.details-header-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.cashflow-summary-strip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+.row-settled-muted {
+  opacity: 0.55;
+}
+
+.row-settled-muted .num-font {
+  text-decoration: line-through;
+}
+
+.tag-settled-done {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+}
+
+.settlements-table tbody tr.row-stage-t0 {
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.settlements-table tbody tr.row-stage-t1 {
+  background: rgba(245, 158, 11, 0.09);
+}
+
+.settlements-table tbody tr.row-stage-t1 td {
+  border-top: 2px solid rgba(245, 158, 11, 0.35);
+}
+
+.settlements-table tbody tr.row-stage-t2 {
+  background: rgba(56, 189, 248, 0.09);
+}
+
+.settlements-table tbody tr.row-stage-t2 td {
+  border-top: 2px solid rgba(56, 189, 248, 0.38);
+}
+
+[data-theme="light"] .settlements-table tbody tr.row-stage-t0 {
+  background: #f1f5f9;
+}
+
+[data-theme="light"] .settlements-table tbody tr.row-stage-t1 {
+  background: #fffbeb;
+}
+
+[data-theme="light"] .settlements-table tbody tr.row-stage-t1 td {
+  border-top: 2px solid #fcd34d;
+}
+
+[data-theme="light"] .settlements-table tbody tr.row-stage-t2 {
+  background: #f0f9ff;
+}
+
+[data-theme="light"] .settlements-table tbody tr.row-stage-t2 td {
+  border-top: 2px solid #7dd3fc;
+}
+
 /* 區塊 3: 永豐在途交割款清單表格 */
 .balance-details-card {
   background: var(--bg-secondary);

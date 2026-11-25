@@ -467,10 +467,33 @@ export interface SettlementTradeDetail {
   netAmountWan: number;
 }
 
+export interface PocketLedgerEntry {
+  id: number;
+  eventType: 'INIT' | 'DEPOSIT' | 'WITHDRAW' | 'SETTLEMENT' | string;
+  amountTwd: number;
+  amountWan: number;
+  balanceAfterWan: number;
+  settlementDate?: string | null;
+  note: string;
+  details?: SettlementTradeDetail[];
+  createdAt: string;
+}
+
+export interface PendingBuyOrderDetail {
+  code: string;
+  name: string;
+  qty: number;
+  price: number;
+  estimatedCostTwd: number;
+  estimatedCostWan: number;
+}
+
 export interface AccountBalanceState {
   hasConfigured: boolean;
   baseCapitalWan: number | null;
   capitalMode: 'before_t0' | 'after_t0';
+  todaySettled: boolean;
+  configuredAt?: string;
   t0Date: string;
   t0Amount: number;
   t0RemainingWan: number | null;
@@ -486,7 +509,12 @@ export interface AccountBalanceState {
   t2RemainingWan: number | null;
   t2Formula?: string;
   t2Details?: SettlementTradeDetail[];
+  pendingBuyAmountTwd: number;
+  pendingBuyAmountWan: number;
+  t2WithPendingRemainingWan: number | null;
+  pendingBuyDetails?: PendingBuyOrderDetail[];
   settlements: SettlementItem[];
+  ledger?: PocketLedgerEntry[];
   updatedAt: string;
 }
 

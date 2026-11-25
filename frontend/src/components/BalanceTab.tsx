@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { AccountBalanceState } from '../types';
-import { fetchAccountBalance, updateAccountCapital } from '../services/api';
+import { fetchAccountBalance, updateAccountCapital, adjustAccountCapital } from '../services/api';
 
 interface BalanceTabProps {
   onRefreshNeeded?: () => void;
@@ -17,13 +17,44 @@ export const BalanceTab: React.FC<BalanceTabProps> = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [showLedger, setShowLedger] = useState(false);
 
-  // 快捷加減本金 (以萬為單位)
-  const adjustCapital = (deltaWan: number) => {
+  // 快捷加減本金 (若已設定過本金則直接寫入帳本流水)
+  const adjustCapital = async (deltaWan: number) => {
+    if (balance?.hasConfigured && !isEditing) {
+      setIsSaving(true);
+      try {
+        await adjustAccountCapital(deltaWan);
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 1800);
+        await loadBalance();
+      } catch (err: any) {
+        alert(`業外存提記帳失敗: ${err.message}`);
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
     const cur = parseFloat(inputCapital) || 0;
     const next = Math.max(0, Math.round((cur + deltaWan) * 100) / 100);
     setInputCapital(next.toString());
     setIsEditing(true);
+  };
+
+  const formatDateTime = (isoStr?: string) => {
+    if (!isoStr) return '';
+    try {
+      const d = new Date(isoStr);
+      if (isNaN(d.getTime())) return isoStr;
+      return d.toLocaleString('zh-TW', {
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return isoStr;
+    }
   };
 
   const loadBalance = async () => {
@@ -62,6 +93,7 @@ export const BalanceTab: React.FC<BalanceTabProps> = () => {
     setIsSaving(true);
     try {
       await updateAccountCapital(val, modeToSave);
+      setIsEditing(false);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
       await loadBalance();
@@ -72,19 +104,8 @@ export const BalanceTab: React.FC<BalanceTabProps> = () => {
     }
   };
 
-  // 格式化交割款加減文字
-  const formatSettleDelta = (amtWan: number, amtRaw: number) => {
-    if (amtRaw === 0) {
-      return <span className="delta-zero">無交割款 (0元)</span>;
-    }
-    const isIncome = amtRaw > 0;
-    const sign = isIncome ? '+' : '';
-    return (
-      <span className={isIncome ? 'delta-income' : 'delta-expense'}>
-        {sign}{amtWan.toFixed(2)} 萬 ({sign}{Math.round(amtRaw).toLocaleString()} 元)
-      </span>
-    );
-  };
+  // 格式化交割款加減文字 (保留供擴充)
+  void 0;
 
   return (
     <div className="balance-tab-container">
@@ -106,10 +127,268 @@ export const BalanceTab: React.FC<BalanceTabProps> = () => {
 
       {error && <div className="balance-error-banner">⚠️ {error}</div>}
 
-      {/* 區塊 1：手填帳戶本金與業外存提 */}
+      {/* 區塊 1：T+2 最終可投資餘額 */}
+      <div className="balance-stages-grid">
+        <div className="balance-grid-card stage-t2 highlight-target">
+          <div className="grid-card-tag badge-final">最終可用</div>
+          <div className="grid-card-title">
+            <span>T+2 可投資餘額</span>
+            <span className="grid-date">{balance?.t2Date || 'T+2 交割日'}</span>
+          </div>
+          <div className="grid-amount-row highlight-amount">
+            <span className="grid-main-val">
+              {balance && balance.hasConfigured && balance.t2RemainingWan !== null
+                ? balance.t2RemainingWan.toFixed(2)
+                : '--'}
+            </span>
+            <span className="grid-val-unit">萬</span>
+          </div>
+          {balance && balance.hasConfigured && (
+            <div className={`pending-orders-box ${balance.pendingBuyAmountTwd > 0 ? 'has-pending' : ''}`}>
+              <div className="pending-orders-summary">
+                <span>⏳ 委託中買單凍結：</span>
+                <span className="pending-freeze-val">
+                  {balance.pendingBuyAmountTwd > 0 ? `-${balance.pendingBuyAmountWan.toFixed(2)} 萬` : '0.00 萬'}
+                </span>
+              </div>
+              {balance.t2WithPendingRemainingWan !== null && balance.t2WithPendingRemainingWan !== undefined && (
+                <div className="pending-orders-after">
+                  若掛單全成交後可用：
+                  <strong className={balance.t2WithPendingRemainingWan < 0 ? 'color-down' : 'color-up'}>
+                    {balance.t2WithPendingRemainingWan.toFixed(2)} 萬
+                  </strong>
+                </div>
+              )}
+              {balance.pendingBuyDetails && balance.pendingBuyDetails.length > 0 && (
+                <div className="pending-orders-pills">
+                  {balance.pendingBuyDetails.map((pd, i) => (
+                    <span
+                      key={i}
+                      className="pending-pill"
+                      title={`${pd.name} (${pd.code}) 買進掛單 ${pd.qty}股 @ ${pd.price}元\n預估含手續費: ${Math.round(pd.estimatedCostTwd).toLocaleString()}元`}
+                    >
+                      {pd.name || pd.code} {pd.qty}股 (-{pd.estimatedCostWan.toFixed(2)}萬)
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 區塊 3：在途款項明細清單 */}
+      <div className="balance-details-card">
+        <div className="details-header-row">
+          <h4 className="details-title" style={{ margin: 0 }}>📋 永豐證券在途交割款清單</h4>
+          {balance && balance.hasConfigured && balance.t0RemainingWan !== null && balance.t2RemainingWan !== null && (
+            <div className="cashflow-summary-strip">
+              現有 <strong>{balance.t0RemainingWan.toFixed(2)}萬</strong>
+              {' '}
+              <span className={balance.t1Amount >= 0 ? 'color-up' : 'color-down'}>
+                {balance.t1Amount >= 0 ? '+' : ''}{(balance.t1Amount / 10000).toFixed(2)}萬(T+1)
+              </span>
+              {' '}
+              <span className={balance.t2Amount >= 0 ? 'color-up' : 'color-down'}>
+                {balance.t2Amount >= 0 ? '+' : ''}{(balance.t2Amount / 10000).toFixed(2)}萬(T+2)
+              </span>
+              {' = '}
+              <strong className={balance.t2RemainingWan < 0 ? 'color-down' : 'color-up'}>
+                {balance.t2RemainingWan.toFixed(2)}萬
+              </strong>
+            </div>
+          )}
+        </div>
+        <div className="settlements-table-wrap" style={{ marginTop: 10 }}>
+          <table className="settlements-table">
+            <thead>
+              <tr>
+                <th>時程</th>
+                <th>預計交割日</th>
+                <th>收付性質</th>
+                <th>成交標的明細</th>
+                <th className="align-right">交割款 (萬元)</th>
+                <th className="align-right">台幣金額 (元)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {balance?.settlements && balance.settlements.length > 0 ? (
+                balance.settlements.map((s, idx) => {
+                  const isPositive = s.amount > 0;
+                  const isNegative = s.amount < 0;
+                  const isT0AlreadySettled = s.t === 0 && balance.todaySettled;
+                  return (
+                    <tr
+                      key={idx}
+                      className={`row-stage-t${s.t} ${isT0AlreadySettled ? 'row-settled-muted' : ''}`}
+                    >
+                      <td>
+                        <span className={`badge-t badge-t${s.t}`}>T+{s.t}</span>
+                      </td>
+                      <td className="settle-date">{s.date}</td>
+                      <td>
+                        {isT0AlreadySettled ? (
+                          <span className="tag-settled-done" title="已計入現有本金，不影響後續餘額">
+                            已結清 (不扣款)
+                          </span>
+                        ) : isNegative ? (
+                          <span className="tag-pay">買入扣款 (付)</span>
+                        ) : isPositive ? (
+                          <span className="tag-receive">賣出入帳 (收)</span>
+                        ) : (
+                          <span className="tag-none">無收付</span>
+                        )}
+                      </td>
+                      <td>
+                        {s.details && s.details.length > 0 ? (
+                          <div className="settle-itemized-list">
+                            {s.details.map((d, dIdx) => {
+                              const isSell = d.action === 'Sell';
+                              return (
+                                <div key={dIdx} className="settle-itemized-row">
+                                  <span className={`settle-stock-tag ${isSell ? 'tag-stock-sell' : 'tag-stock-buy'}`}>
+                                    {isSell ? '賣出' : '買入'}
+                                  </span>
+                                  <span className="itemized-name">
+                                    {d.name || d.code} <small>({d.code})</small>
+                                  </span>
+                                  <span className="itemized-qty-price">
+                                    {d.qty.toLocaleString()}股 × {d.price}
+                                  </span>
+                                  <span className="itemized-fees">
+                                    費{d.fee}{d.tax > 0 ? ` / 稅${d.tax}` : ''}
+                                  </span>
+                                  <span className={`itemized-net num-font ${d.netAmount >= 0 ? 'color-up' : 'color-down'}`}>
+                                    {d.netAmount >= 0 ? '+' : ''}{d.netAmountWan.toFixed(2)}萬 ({d.netAmount >= 0 ? '+' : ''}{Math.round(d.netAmount).toLocaleString()}元)
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : s.stockSummary ? (
+                          <span className="settle-stock-text">{s.stockSummary}</span>
+                        ) : (
+                          <span className="tag-none">-</span>
+                        )}
+                      </td>
+                      <td className={`align-right num-font ${isNegative ? 'color-down' : isPositive ? 'color-up' : ''}`}>
+                        {isPositive ? '+' : ''}{s.amountWan.toFixed(2)} 萬
+                      </td>
+                      <td className={`align-right num-font ${isNegative ? 'color-down' : isPositive ? 'color-up' : ''}`}>
+                        {isPositive ? '+' : ''}{Math.round(s.amount).toLocaleString()} 元
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={6} className="table-empty">
+                    目前無在途交割款項紀錄
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 區塊 4：口袋帳本異動流水紀錄 */}
+      {balance?.ledger && balance.ledger.length > 0 && (
+        <div className="balance-details-card ledger-card">
+          <div
+            className="ledger-header-toggle"
+            onClick={() => setShowLedger(!showLedger)}
+            role="button"
+            tabIndex={0}
+          >
+            <h4 className="details-title" style={{ margin: 0 }}>
+              📖 口袋資金流水帳（近 {balance.ledger.length} 筆）
+            </h4>
+            <span className="ledger-toggle-icon">{showLedger ? '▲ 收合' : '▼ 展開'}</span>
+          </div>
+          {showLedger && (
+            <div className="settlements-table-wrap" style={{ marginTop: 10 }}>
+              <table className="settlements-table ledger-table">
+                <thead>
+                  <tr>
+                    <th>時間</th>
+                    <th>類型</th>
+                    <th>說明</th>
+                    <th className="align-right">異動 (萬元)</th>
+                    <th className="align-right">結餘 (萬元)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {balance.ledger.map((entry) => {
+                    const isInit = entry.eventType === 'INIT';
+                    const isPos = entry.amountTwd > 0;
+                    const typeLabel =
+                      entry.eventType === 'INIT'
+                        ? '設定校正'
+                        : entry.eventType === 'DEPOSIT'
+                          ? '業外存入'
+                          : entry.eventType === 'WITHDRAW'
+                            ? '生活領出'
+                            : '交割結轉';
+                    return (
+                      <tr key={entry.id}>
+                        <td className="settle-date">{formatDateTime(entry.createdAt)}</td>
+                        <td>
+                          <span className={`ledger-badge ledger-${entry.eventType.toLowerCase()}`}>
+                            {typeLabel}
+                          </span>
+                        </td>
+                        <td>
+                          <div>{entry.note}</div>
+                          {entry.details && entry.details.length > 0 && (
+                            <div className="settle-itemized-list ledger-itemized-list">
+                              {entry.details.map((d, dIdx) => {
+                                const isSell = d.action === 'Sell';
+                                return (
+                                  <div key={dIdx} className="settle-itemized-row">
+                                    <span className={`settle-stock-tag ${isSell ? 'tag-stock-sell' : 'tag-stock-buy'}`}>
+                                      {isSell ? '賣出' : '買入'}
+                                    </span>
+                                    <span className="itemized-name">
+                                      {d.name || d.code} <small>({d.code})</small>
+                                    </span>
+                                    <span className="itemized-qty-price">
+                                      {d.qty.toLocaleString()}股 × {d.price}
+                                    </span>
+                                    <span className={`itemized-net num-font ${d.netAmount >= 0 ? 'color-up' : 'color-down'}`}>
+                                      {d.netAmount >= 0 ? '+' : ''}{d.netAmountWan.toFixed(2)}萬 ({d.netAmount >= 0 ? '+' : ''}{Math.round(d.netAmount).toLocaleString()}元)
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </td>
+                        <td className={`align-right num-font ${isInit ? '' : isPos ? 'color-up' : 'color-down'}`}>
+                          {isInit ? `${entry.amountWan.toFixed(2)} 萬` : `${isPos ? '+' : ''}${entry.amountWan.toFixed(2)} 萬`}
+                        </td>
+                        <td className="align-right num-font">
+                          <strong>{entry.balanceAfterWan.toFixed(2)} 萬</strong>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 區塊 4：手填帳戶本金與業外存提 (移至最下方) */}
       <div className="balance-capital-card">
         <div className="capital-card-header">
-          <span className="capital-label">🏦 帳戶起始投資本金</span>
+          <span className="capital-label">
+            🏦 口袋已交割現金（自動結轉）
+            {balance?.configuredAt && (
+              <span className="capital-configured-at"> · 上次校正 {formatDateTime(balance.configuredAt)}</span>
+            )}
+          </span>
           <span className="capital-unit">單位：萬元 (NT$)</span>
         </div>
 
@@ -151,7 +430,6 @@ export const BalanceTab: React.FC<BalanceTabProps> = () => {
               value={inputCapital}
               onChange={(e) => {
                 const val = e.target.value;
-                // 只允許數字與小數點
                 if (/^[0-9]*\.?[0-9]*$/.test(val)) {
                   setInputCapital(val);
                   setIsEditing(true);
@@ -178,256 +456,45 @@ export const BalanceTab: React.FC<BalanceTabProps> = () => {
 
         {/* 業外收入 / 生活開銷快捷調整 */}
         <div className="capital-adjust-toolbar">
-          <span className="adjust-tip">業外存提快捷：</span>
+          <span className="adjust-tip">業外存提快捷（即時記帳）：</span>
           <div className="adjust-buttons">
             <button
               type="button"
               className="btn-adjust btn-adjust-sub"
-              onClick={() => {
-                adjustCapital(-10);
-                setIsEditing(true);
-              }}
-              title="生活支出領出 10 萬"
+              disabled={isSaving}
+              onClick={() => adjustCapital(-10)}
+              title="從口袋領出 10 萬作生活支出"
             >
               -10萬
             </button>
             <button
               type="button"
               className="btn-adjust btn-adjust-sub"
-              onClick={() => {
-                adjustCapital(-5);
-                setIsEditing(true);
-              }}
-              title="生活支出領出 5 萬"
+              disabled={isSaving}
+              onClick={() => adjustCapital(-5)}
+              title="從口袋領出 5 萬作生活支出"
             >
               -5萬
             </button>
             <button
               type="button"
               className="btn-adjust btn-adjust-add"
-              onClick={() => {
-                adjustCapital(5);
-                setIsEditing(true);
-              }}
-              title="業外存入 5 萬"
+              disabled={isSaving}
+              onClick={() => adjustCapital(5)}
+              title="業外存入 5 萬至投資口袋"
             >
               +5萬
             </button>
             <button
               type="button"
               className="btn-adjust btn-adjust-add"
-              onClick={() => {
-                adjustCapital(10);
-                setIsEditing(true);
-              }}
-              title="業外存入 10 萬"
+              disabled={isSaving}
+              onClick={() => adjustCapital(10)}
+              title="業外存入 10 萬至投資口袋"
             >
               +10萬
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* 區塊 2：三大階段餘額格子 (格子1: T+0, 格子2: T+1, 格子3: T+2) */}
-      <div className="balance-stages-grid">
-        {/* 格子 1: T+0 今日交割後 */}
-        <div className="balance-grid-card stage-t0">
-          <div className="grid-card-tag">格子 1 · 今日</div>
-          <div className="grid-card-title">
-            <span>T+0 交割餘額</span>
-            <span className="grid-date">{balance?.t0Date || '今日'}</span>
-          </div>
-          <div className="grid-amount-row">
-            <span className="grid-main-val">
-              {balance && balance.hasConfigured && balance.t0RemainingWan !== null
-                ? balance.t0RemainingWan.toFixed(2)
-                : '--'}
-            </span>
-            <span className="grid-val-unit">萬</span>
-          </div>
-          <div className="grid-delta-row">
-            <span className="grid-delta-label">今日交割：</span>
-            {balance ? (
-              capitalMode === 'after_t0' ? (
-                <span className="delta-applied" title="您填入的本金已是扣款後數字，不再重複扣抵">
-                  (已計入本金 · 交割款 {balance.t0Amount >= 0 ? '+' : ''}{(balance.t0Amount / 10000).toFixed(2)}萬)
-                </span>
-              ) : (
-                formatSettleDelta(balance.t0Amount / 10000, balance.t0Amount)
-              )
-            ) : '--'}
-          </div>
-        </div>
-
-        {/* 格子 2: T+1 明日交割後 */}
-        <div className="balance-grid-card stage-t1">
-          <div className="grid-card-tag">格子 2 · 明日</div>
-          <div className="grid-card-title">
-            <span>T+1 交割剩餘</span>
-            <span className="grid-date">{balance?.t1Date || '次營業日'}</span>
-          </div>
-          <div className="grid-amount-row">
-            <span className="grid-main-val">
-              {balance && balance.hasConfigured && balance.t1RemainingWan !== null
-                ? balance.t1RemainingWan.toFixed(2)
-                : '--'}
-            </span>
-            <span className="grid-val-unit">萬</span>
-          </div>
-          <div className="grid-delta-row t2-delta-formula-row">
-            <span className="grid-delta-label">次日交割算式：</span>
-            {balance && balance.t1Details && balance.t1Details.length > 0 ? (
-              <div className="t2-formula-container">
-                <div className="t2-formula-pills">
-                  {balance.t1Details.map((td, idx) => {
-                    const isIncome = td.netAmount >= 0;
-                    return (
-                      <span
-                        key={idx}
-                        className={`t2-formula-item ${isIncome ? 'formula-plus' : 'formula-minus'}`}
-                        title={`${td.name} (${td.code}) ${td.action === 'Sell' ? '賣出' : '買入'} ${td.qty}股 @ ${td.price}元\n總值: ${td.totalPrice} | 手續費: ${td.fee} | 稅: ${td.tax}\n淨額: ${td.netAmount} 元`}
-                      >
-                        <span className="formula-op">{isIncome ? '+' : '-'}</span>
-                        <span className="formula-val">{Math.abs(td.netAmountWan).toFixed(2)}萬</span>
-                        <span className="formula-name">({td.name || td.code})</span>
-                      </span>
-                    );
-                  })}
-                  <span className="t2-formula-equal">=</span>
-                  <span className={`t2-formula-total ${balance.t1Amount >= 0 ? 'color-up' : 'color-down'}`}>
-                    {balance.t1Amount >= 0 ? '+' : ''}{(balance.t1Amount / 10000).toFixed(2)}萬 ({balance.t1Amount >= 0 ? '+' : ''}{Math.round(balance.t1Amount).toLocaleString()}元)
-                  </span>
-                </div>
-              </div>
-            ) : balance ? (
-              formatSettleDelta(balance.t1Amount / 10000, balance.t1Amount)
-            ) : '--'}
-          </div>
-        </div>
-
-        {/* 格子 3: T+2 後天交割後 (最終可用本金) */}
-        <div className="balance-grid-card stage-t2 highlight-target">
-          <div className="grid-card-tag badge-final">格子 3 · 最終可用</div>
-          <div className="grid-card-title">
-            <span>T+2 可投資餘額</span>
-            <span className="grid-date">{balance?.t2Date || 'T+2 交割日'}</span>
-          </div>
-          <div className="grid-amount-row highlight-amount">
-            <span className="grid-main-val">
-              {balance && balance.hasConfigured && balance.t2RemainingWan !== null
-                ? balance.t2RemainingWan.toFixed(2)
-                : '--'}
-            </span>
-            <span className="grid-val-unit">萬</span>
-          </div>
-          <div className="grid-delta-row t2-delta-formula-row">
-            <span className="grid-delta-label">今日買賣算式：</span>
-            {balance && balance.t2Details && balance.t2Details.length > 0 ? (
-              <div className="t2-formula-container">
-                <div className="t2-formula-pills">
-                  {balance.t2Details.map((td, idx) => {
-                    const isIncome = td.netAmount >= 0;
-                    return (
-                      <span
-                        key={idx}
-                        className={`t2-formula-item ${isIncome ? 'formula-plus' : 'formula-minus'}`}
-                        title={`${td.name} (${td.code}) ${td.action === 'Sell' ? '賣出' : '買入'} ${td.qty}股 @ ${td.price}元\n總值: ${td.totalPrice} | 手續費: ${td.fee} | 稅: ${td.tax}\n淨額: ${td.netAmount} 元`}
-                      >
-                        <span className="formula-op">{isIncome ? '+' : '-'}</span>
-                        <span className="formula-val">{Math.abs(td.netAmountWan).toFixed(2)}萬</span>
-                        <span className="formula-name">({td.name || td.code})</span>
-                      </span>
-                    );
-                  })}
-                  <span className="t2-formula-equal">=</span>
-                  <span className={`t2-formula-total ${balance.t2Amount >= 0 ? 'color-up' : 'color-down'}`}>
-                    {balance.t2Amount >= 0 ? '+' : ''}{(balance.t2Amount / 10000).toFixed(2)}萬 ({balance.t2Amount >= 0 ? '+' : ''}{Math.round(balance.t2Amount).toLocaleString()}元)
-                  </span>
-                </div>
-              </div>
-            ) : balance ? (
-              formatSettleDelta(balance.t2Amount / 10000, balance.t2Amount)
-            ) : '--'}
-          </div>
-          <div className="grid-card-footnote">
-            ★ 已預先扣除 T+2 即將發生的交割款，此為收盤後實質剩餘本金
-          </div>
-        </div>
-      </div>
-
-      {/* 區塊 3：在途款項明細清單 */}
-      <div className="balance-details-card">
-        <h4 className="details-title">📋 永豐證券在途交割款清單</h4>
-        <div className="settlements-table-wrap">
-          <table className="settlements-table">
-            <thead>
-              <tr>
-                <th>時程</th>
-                <th>預計交割日</th>
-                <th>收付性質</th>
-                <th>成交標的明細</th>
-                <th className="align-right">交割款 (萬元)</th>
-                <th className="align-right">台幣金額 (元)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {balance?.settlements && balance.settlements.length > 0 ? (
-                balance.settlements.map((s, idx) => {
-                  const isPositive = s.amount > 0;
-                  const isNegative = s.amount < 0;
-                  return (
-                    <tr key={idx}>
-                      <td>
-                        <span className={`badge-t badge-t${s.t}`}>T+{s.t}</span>
-                      </td>
-                      <td className="settle-date">{s.date}</td>
-                      <td>
-                        {isNegative ? (
-                          <span className="tag-pay">買入扣款 (付)</span>
-                        ) : isPositive ? (
-                          <span className="tag-receive">賣出入帳 (收)</span>
-                        ) : (
-                          <span className="tag-none">無收付</span>
-                        )}
-                      </td>
-                      <td>
-                        {s.details && s.details.length > 0 ? (
-                          <div className="settle-stocks-wrap">
-                            {s.details.map((d, dIdx) => (
-                              <span
-                                key={dIdx}
-                                className={`settle-stock-tag ${d.action === 'Sell' ? 'tag-stock-sell' : 'tag-stock-buy'}`}
-                                title={`${d.name} (${d.code}) ${d.action === 'Sell' ? '賣出' : '買入'} ${d.qty}股 @ ${d.price}元\n總值: ${d.totalPrice} | 手續費: ${d.fee} | 稅: ${d.tax}\n淨額: ${d.netAmount} 元`}
-                              >
-                                {d.action === 'Sell' ? '賣出' : '買入'} {d.name || d.code}
-                                {d.qty ? ` · ${d.qty}股` : ''}
-                              </span>
-                            ))}
-                          </div>
-                        ) : s.stockSummary ? (
-                          <span className="settle-stock-text">{s.stockSummary}</span>
-                        ) : (
-                          <span className="tag-none">-</span>
-                        )}
-                      </td>
-                      <td className={`align-right num-font ${isNegative ? 'color-down' : isPositive ? 'color-up' : ''}`}>
-                        {isPositive ? '+' : ''}{s.amountWan.toFixed(2)} 萬
-                      </td>
-                      <td className={`align-right num-font ${isNegative ? 'color-down' : isPositive ? 'color-up' : ''}`}>
-                        {isPositive ? '+' : ''}{Math.round(s.amount).toLocaleString()} 元
-                      </td>
-                    </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan={6} className="table-empty">
-                    目前無在途交割款項紀錄
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
         </div>
       </div>
     </div>

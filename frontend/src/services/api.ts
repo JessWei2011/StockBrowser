@@ -337,6 +337,19 @@ export async function updateAccountCapital(capitalWan: number, capitalMode: 'bef
   return res.json();
 }
 
+export async function adjustAccountCapital(deltaWan: number, note: string = ''): Promise<{ status: string; deltaWan: number; balanceAfterWan: number }> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/account/capital/adjust`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deltaWan, note }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || '業外存提記帳失敗');
+  }
+  return res.json();
+}
+
 export async function fetchCalendarMonth(year?: number, month?: number): Promise<import('../types').CalendarMonthData> {
   const query = [];
   if (year) query.push(`year=${year}`);
