@@ -734,6 +734,17 @@ def parse_stock_report(
         cur_low = float(live_quote.get("low") or cur_close)
         cur_vol = float(live_quote.get("totalVolume") or live_quote.get("volume") or 0.0)
 
+        # 若為台股大盤指數但成交額尚未傳入，自動自 shioaji_adapter 補齊最新成交金額 (單位: 億元)
+        if is_index and cur_vol <= 0 and code in ("IX0001", "TSE", "^TWII", "MKT01", "IX0043", "OTC", "^TWOII", "MKT02"):
+            try:
+                from backend.app.services.shioaji_adapter import shioaji_adapter
+                target_key = "TSE" if code in ("IX0001", "TSE", "^TWII", "MKT01") else "OTC"
+                m_info = shioaji_adapter.market_indices.get(target_key)
+                if m_info and m_info.get("volumeAmount"):
+                    cur_vol = float(m_info["volumeAmount"])
+            except Exception:
+                pass
+
         if is_index:
             today_label = today_date.strftime("%Y-%m-%d")
         else:

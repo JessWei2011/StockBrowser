@@ -232,6 +232,29 @@ async def get_stock_chart(code: str):
             from backend.app.services.yahoo_market_service import yahoo_market_service
             from backend.app.services.shioaji_adapter import shioaji_adapter
             global_data = yahoo_market_service.get_global_indices()
+
+            def _get_tw_index_vol(info: Optional[dict]) -> float:
+                if not info:
+                    return 0.0
+                vol_amt = info.get("volumeAmount")
+                if vol_amt is not None and vol_amt > 0:
+                    return float(vol_amt)
+                t_m = info.get("turnoverM")
+                if t_m is not None:
+                    try:
+                        return round(float(t_m) / 100.0, 2)
+                    except Exception:
+                        pass
+                v_txt = info.get("volumeText")
+                if v_txt:
+                    try:
+                        cleaned = re.sub(r"[^\d.]", "", str(v_txt))
+                        if cleaned:
+                            return float(cleaned)
+                    except Exception:
+                        pass
+                return 0.0
+
             if code in ("IX0001", "TSE", "^TWII", "MKT01"):
                 tw_info = shioaji_adapter.market_indices.get("TSE") or global_data.get("tw", {}).get("TSE")
                 if tw_info and tw_info.get("price"):
@@ -240,7 +263,7 @@ async def get_stock_chart(code: str):
                         "high": tw_info.get("high"),
                         "low": tw_info.get("low"),
                         "last": tw_info.get("price"),
-                        "totalVolume": tw_info.get("turnoverM") or 0,
+                        "totalVolume": _get_tw_index_vol(tw_info),
                     }
             elif code in ("IX0043", "OTC", "^TWOII", "MKT02"):
                 tw_info = shioaji_adapter.market_indices.get("OTC") or global_data.get("tw", {}).get("OTC")
@@ -250,7 +273,7 @@ async def get_stock_chart(code: str):
                         "high": tw_info.get("high"),
                         "low": tw_info.get("low"),
                         "last": tw_info.get("price"),
-                        "totalVolume": tw_info.get("turnoverM") or 0,
+                        "totalVolume": _get_tw_index_vol(tw_info),
                     }
             else:
                 for item in global_data.get("us", []):
