@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as echarts from 'echarts';
 import type { StockChartData, KlineBar } from '../types';
 import { fetchStockChart } from '../services/api';
+import { getCalculatedKD, type KdPeriod } from '../utils/kdIndicator';
 
 interface StockChartDrawerProps {
   code: string | null;
@@ -388,6 +389,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
   const [marginSubMode, setMarginSubMode] = useState<'maintenance' | 'balance'>('maintenance');
+  const [kdPeriod, setKdPeriod] = useState<KdPeriod>('daily');
 
   // 若外部指定 initialTab 變更，同步更新
   useEffect(() => {
@@ -516,8 +518,11 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
     // 計算預設顯示範圍：近 60 根或全部，保留使用者手動縮放視野
     const initBars = Math.min(60, realTotal);
     const calculatedInit = calcZoomFromVisibleBars(initBars, realTotal, BUFFER_DAYS);
-    const initStart = zoomRangeRef.current?.start ?? calculatedInit.start;
-    const initEnd = zoomRangeRef.current?.end ?? calculatedInit.end;
+    if (!zoomRangeRef.current) {
+      zoomRangeRef.current = calculatedInit;
+    }
+    const initStart = zoomRangeRef.current.start;
+    const initEnd = zoomRangeRef.current.end;
 
     const option: any = {
       animation: false,
@@ -1106,20 +1111,23 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
         ],
       };
     } else if (activeTab === 'kd') {
-      // 技術指標：KD 指標 (與上方主圖日期 100% 相同並同步縮放)
+      // 技術指標：KD 指標 (支援日KD / 週KD 切換，與上方主圖日期 100% 相同並同步縮放)
       const kline = (data.kline || []).filter(
         (k) => k.volume > 0 || k.open !== k.close || k.high !== k.low
       );
       const expandedDates = kline.map((k) => k.date).concat(new Array(BUFFER_DAYS).fill(''));
-      const kVals = kline.map((k) => k.k ?? null);
-      const dVals = kline.map((k) => k.d ?? null);
+      const { kVals, dVals } = getCalculatedKD(kline, kdPeriod);
+      const kdLabelPrefix = kdPeriod === 'weekly' ? '週' : '日';
+      const kSeriesName = `${kdLabelPrefix}K(9)`;
+      const dSeriesName = `${kdLabelPrefix}D(9)`;
       // 超買 (>80) 與超賣 (<20) 填色輔助數據
       const kOver80 = kVals.map((v) => (v != null ? (v > 80 ? v : 80) : null));
       const kUnder20 = kVals.map((v) => (v != null ? (v < 20 ? v : 20) : null));
 
-      // 取得主圖目前的 dataZoom 狀態
-      const curStart = zoomRangeRef.current?.start ?? 0;
-      const curEnd = zoomRangeRef.current?.end ?? 100;
+      // 取得主圖目前的 dataZoom 狀態（若尚未縮放過則與主圖預設近 60 根範圍同步）
+      const defaultZoom = calcZoomFromVisibleBars(Math.min(60, kline.length), kline.length, BUFFER_DAYS);
+      const curStart = zoomRangeRef.current?.start ?? defaultZoom.start;
+      const curEnd = zoomRangeRef.current?.end ?? defaultZoom.end;
 
       subOption = {
         animation: false,
@@ -1135,17 +1143,19 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
             if (idx >= kline.length) return '';
             const kItem = kline[idx];
             if (!kItem) return '';
-            const kStr = kItem.k != null ? kItem.k.toFixed(1) : '-';
-            const dStr = kItem.d != null ? kItem.d.toFixed(1) : '-';
-            return `<div style="font-weight:700;margin-bottom:3px;">${kItem.date} KD指標</div>` +
-              `<div><span style="color:#0ea5e9;font-weight:700;">◆ K(9):</span> ${kStr}</div>` +
-              `<div><span style="color:#f97316;font-weight:700;">◆ D(9):</span> ${dStr}</div>`;
+            const kVal = kVals[idx];
+            const dVal = dVals[idx];
+            const kStr = kVal != null ? kVal.toFixed(1) : '-';
+            const dStr = dVal != null ? dVal.toFixed(1) : '-';
+            return `<div style="font-weight:700;margin-bottom:3px;">${kItem.date} ${kdLabelPrefix}KD指標</div>` +
+              `<div><span style="color:#0ea5e9;font-weight:700;">◆ ${kSeriesName}:</span> ${kStr}</div>` +
+              `<div><span style="color:#f97316;font-weight:700;">◆ ${dSeriesName}:</span> ${dStr}</div>`;
           },
         },
         legend: {
           data: [
-            'K(9)',
-            'D(9)',
+            kSeriesName,
+            dSeriesName,
             { name: '>80 超買', icon: 'rect', itemStyle: { color: 'rgba(239, 68, 68, 0.7)' } },
             { name: '<20 超賣', icon: 'rect', itemStyle: { color: 'rgba(16, 185, 129, 0.7)' } },
           ],
@@ -1216,7 +1226,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
             z: 1,
           },
           {
-            name: 'K(9)',
+            name: kSeriesName,
             type: 'line',
             data: kVals,
             smooth: true,
@@ -1233,7 +1243,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
             z: 2,
           },
           {
-            name: 'D(9)',
+            name: dSeriesName,
             type: 'line',
             data: dVals,
             smooth: true,
@@ -1254,9 +1264,10 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
       const rsi6Over80 = rsi6Vals.map((v) => (v != null ? (v > 80 ? v : 80) : null));
       const rsi6Under20 = rsi6Vals.map((v) => (v != null ? (v < 20 ? v : 20) : null));
 
-      // 取得主圖目前的 dataZoom 狀態
-      const curStart = zoomRangeRef.current?.start ?? 0;
-      const curEnd = zoomRangeRef.current?.end ?? 100;
+      // 取得主圖目前的 dataZoom 狀態（若尚未縮放過則與主圖預設近 60 根範圍同步）
+      const defaultZoom = calcZoomFromVisibleBars(Math.min(60, kline.length), kline.length, BUFFER_DAYS);
+      const curStart = zoomRangeRef.current?.start ?? defaultZoom.start;
+      const curEnd = zoomRangeRef.current?.end ?? defaultZoom.end;
 
       subOption = {
         animation: false,
@@ -1389,8 +1400,9 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
       const expandedDates = kline.map((k) => k.date).concat(new Array(BUFFER_DAYS).fill(''));
       const { difVals, demVals, oscVals } = getCalculatedMACD(kline);
 
-      const curStart = zoomRangeRef.current?.start ?? 0;
-      const curEnd = zoomRangeRef.current?.end ?? 100;
+      const defaultZoom = calcZoomFromVisibleBars(Math.min(60, kline.length), kline.length, BUFFER_DAYS);
+      const curStart = zoomRangeRef.current?.start ?? defaultZoom.start;
+      const curEnd = zoomRangeRef.current?.end ?? defaultZoom.end;
 
       subOption = {
         animation: false,
@@ -1495,8 +1507,9 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
       const expandedDates = kline.map((k) => k.date).concat(new Array(BUFFER_DAYS).fill(''));
       const { pdiVals, ndiVals, adxVals } = getCalculatedDMI(kline);
 
-      const curStart = zoomRangeRef.current?.start ?? 0;
-      const curEnd = zoomRangeRef.current?.end ?? 100;
+      const defaultZoom = calcZoomFromVisibleBars(Math.min(60, kline.length), kline.length, BUFFER_DAYS);
+      const curStart = zoomRangeRef.current?.start ?? defaultZoom.start;
+      const curEnd = zoomRangeRef.current?.end ?? defaultZoom.end;
 
       subOption = {
         animation: false,
@@ -1641,7 +1654,7 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
       window.removeEventListener('resize', handleResize);
       resizeObserver.disconnect();
     };
-  }, [data, activeTab, theme, isOpen, marginSubMode]);
+  }, [data, activeTab, theme, isOpen, marginSubMode, kdPeriod]);
 
   // ESC 鍵支援關閉走勢圖/分頁
   useEffect(() => {
@@ -1866,6 +1879,26 @@ export const StockChartDrawer: React.FC<StockChartDrawerProps> = ({
                 >
                   🧭 DMI
                 </button>
+                {activeTab === 'kd' && (
+                  <div className="margin-submode-toggles" style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      className={`margin-submode-btn ${kdPeriod === 'daily' ? 'active' : ''}`}
+                      onClick={() => setKdPeriod('daily')}
+                      title="切換為 9 日 KD 隨機指標"
+                    >
+                      日KD
+                    </button>
+                    <button
+                      type="button"
+                      className={`margin-submode-btn ${kdPeriod === 'weekly' ? 'active' : ''}`}
+                      onClick={() => setKdPeriod('weekly')}
+                      title="切換為 9 週 KD 隨機指標"
+                    >
+                      週KD
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* 2.5 資券主力關鍵指標摘要欄 */}

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as echarts from 'echarts';
 import type { StockChartData, KlineBar } from '../types';
 import { fetchStockChart } from '../services/api';
+import { getCalculatedKD, type KdPeriod } from '../utils/kdIndicator';
 
 interface PriceBadgeItem {
   key: string;
@@ -190,52 +191,6 @@ function updateRightPriceBadges(
   }
 
   container.innerHTML = html;
-}
-
-/**
- * 確保 KD(9, 3, 3) 數據齊全
- * 若後端已提供則優先採用；若無（例如大盤指數或後端舊快取），即時由開高低收進行標準平滑計算
- */
-function getCalculatedKD(kline: KlineBar[]) {
-  const count = kline.length;
-  const kVals: (number | null)[] = new Array(count).fill(null);
-  const dVals: (number | null)[] = new Array(count).fill(null);
-
-  const validBackendK = kline.filter((b) => b.k != null && !isNaN(b.k));
-  if (validBackendK.length > count * 0.7) {
-    for (let i = 0; i < count; i++) {
-      kVals[i] = kline[i].k ?? null;
-      dVals[i] = kline[i].d ?? null;
-    }
-    return { kVals, dVals };
-  }
-
-  let k = 50.0;
-  let d = 50.0;
-  for (let i = 0; i < count; i++) {
-    const start = Math.max(0, i - 8);
-    let subHigh = kline[start].high;
-    let subLow = kline[start].low;
-    for (let j = start + 1; j <= i; j++) {
-      if (kline[j].high > subHigh) subHigh = kline[j].high;
-      if (kline[j].low < subLow) subLow = kline[j].low;
-    }
-    const close = kline[i].close;
-    let rsv = 50.0;
-    if (subHigh > subLow) {
-      rsv = ((close - subLow) / (subHigh - subLow)) * 100.0;
-      rsv = Math.max(0, Math.min(100, rsv));
-    }
-    k = (2 / 3) * k + (1 / 3) * rsv;
-    d = (2 / 3) * d + (1 / 3) * k;
-
-    if (i >= 8) {
-      kVals[i] = Math.round(k * 10) / 10;
-      dVals[i] = Math.round(d * 10) / 10;
-    }
-  }
-
-  return { kVals, dVals };
 }
 
 /**
@@ -448,6 +403,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
   const [showBoll, setShowBoll] = useState(false);
   const [activeRange, setActiveRange] = useState<'1Y' | '2Y' | '6M' | '3M'>('3M');
   const [subIndicator, setSubIndicator] = useState<'vol' | 'kd' | 'macd' | 'rsi' | 'dmi'>('vol');
+  const [kdPeriod, setKdPeriod] = useState<KdPeriod>('daily');
 
   const mainChartRef = useRef<HTMLDivElement | null>(null);
   const mainInstanceRef = useRef<echarts.ECharts | null>(null);
@@ -721,7 +677,10 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
     }
 
     // 取得/計算副圖 KD、RSI、MACD 與 DMI 指標數值 (確保大盤指數與任何缺漏 K 棒均有完整數值)
-    const { kVals, dVals } = getCalculatedKD(kline);
+    const { kVals, dVals } = getCalculatedKD(kline, kdPeriod);
+    const kdLabelPrefix = kdPeriod === 'weekly' ? '週' : '日';
+    const kSeriesName = `${kdLabelPrefix}K(9)`;
+    const dSeriesName = `${kdLabelPrefix}D(9)`;
     const { rsi6Vals, rsi12Vals } = getCalculatedRSI(kline);
     const { difVals, demVals, oscVals } = getCalculatedMACD(kline);
     const { pdiVals, ndiVals, adxVals } = getCalculatedDMI(kline);
@@ -778,7 +737,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           z: 1,
         },
         {
-          name: 'K(9)',
+          name: kSeriesName,
           type: 'line',
           xAxisIndex: 1,
           yAxisIndex: 1,
@@ -797,7 +756,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           z: 2,
         },
         {
-          name: 'D(9)',
+          name: dSeriesName,
           type: 'line',
           xAxisIndex: 1,
           yAxisIndex: 1,
@@ -994,11 +953,11 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           if (subIndicator === 'vol' && hasVolumeData && (k.volume ?? 0) > 0) {
             html += `<div style="color:${textColor};font-weight:600;margin-top:2px;">${isTwMarket ? '成交額' : '成交量'}: ${k.volume?.toLocaleString()} ${volumeUnitLabel}</div>`;
           } else if (subIndicator === 'kd') {
-            const kVal = kVals[idx] ?? k.k;
-            const dVal = dVals[idx] ?? k.d;
+            const kVal = kVals[idx];
+            const dVal = dVals[idx];
             const kStr = kVal != null ? kVal.toFixed(1) : '-';
             const dStr = dVal != null ? dVal.toFixed(1) : '-';
-            html += `<div style="margin-top:3px;font-weight:600;"><span style="color:#0ea5e9;">◆ K(9): ${kStr}</span> ｜ <span style="color:#f97316;">◆ D(9): ${dStr}</span></div>`;
+            html += `<div style="margin-top:3px;font-weight:600;"><span style="color:#0ea5e9;">◆ ${kSeriesName}: ${kStr}</span> ｜ <span style="color:#f97316;">◆ ${dSeriesName}: ${dStr}</span></div>`;
           } else if (subIndicator === 'macd') {
             const dif = difVals[idx];
             const dem = demVals[idx];
@@ -1243,7 +1202,7 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
         chart.dispose();
       }
     };
-  }, [data, isOpen, showMA, showBoll, subIndicator, theme]);
+  }, [data, isOpen, showMA, showBoll, subIndicator, kdPeriod, theme]);
 
   // ESC 鍵關閉支援
   useEffect(() => {
@@ -1394,6 +1353,26 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
               >
                 KD 指標
               </button>
+              {subIndicator === 'kd' && (
+                <div className="margin-submode-toggles" style={{ marginLeft: '2px' }}>
+                  <button
+                    type="button"
+                    className={`margin-submode-btn ${kdPeriod === 'daily' ? 'active' : ''}`}
+                    onClick={() => setKdPeriod('daily')}
+                    title="切換為 9 日 KD 隨機指標"
+                  >
+                    日KD
+                  </button>
+                  <button
+                    type="button"
+                    className={`margin-submode-btn ${kdPeriod === 'weekly' ? 'active' : ''}`}
+                    onClick={() => setKdPeriod('weekly')}
+                    title="切換為 9 週 KD 隨機指標"
+                  >
+                    週KD
+                  </button>
+                </div>
+              )}
               <button
                 type="button"
                 className={`chart-indicator-toggle ${subIndicator === 'macd' ? 'active' : ''}`}
@@ -1453,8 +1432,8 @@ export const GlobalIndexChartModal: React.FC<GlobalIndexChartModalProps> = ({
           </span>
           {subIndicator === 'kd' && (
             <span className="legend-item legend-sub-kd" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '10px', borderLeft: '1px solid rgba(148, 163, 184, 0.3)', paddingLeft: '10px' }}>
-              <span style={{ color: '#0ea5e9', fontWeight: 700 }}>◆ K(9)</span>
-              <span style={{ color: '#f97316', fontWeight: 700, marginLeft: '6px' }}>◆ D(9)</span>
+              <span style={{ color: '#0ea5e9', fontWeight: 700 }}>◆ {kdPeriod === 'weekly' ? '週K(9)' : '日K(9)'}</span>
+              <span style={{ color: '#f97316', fontWeight: 700, marginLeft: '6px' }}>◆ {kdPeriod === 'weekly' ? '週D(9)' : '日D(9)'}</span>
               <span style={{ color: '#ef4444', fontSize: '11px', marginLeft: '6px' }}>■ &gt;80超買</span>
               <span style={{ color: '#10b981', fontSize: '11px', marginLeft: '3px' }}>■ &lt;20超賣</span>
             </span>
